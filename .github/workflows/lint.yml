@@ -1,0 +1,30 @@
+# .github/workflows/lint.yml
+
+name: C/C++ Lint & Formatting Check
+
+on:
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  clang-format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run clang-format style check
+        uses: jidicula/clang-format-action@v2.1.1
+        with:
+          clang-format-version: '16'
+          check-path: '.'
+          fallback-style: 'Google'
+
+      - name: Send Slack Alert on Failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action
+          text: "🚨 C/C++ 코드 컨벤션(Google Style) 위반이 발생했습니다. 코드를 자동 정렬(Shift+Alt+F) 후 다시 푸시해 주세요!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
