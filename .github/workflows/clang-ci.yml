@@ -1,0 +1,87 @@
+name: C/C++ CI Pipeline
+
+on:
+  pull_request:
+    branches: [ "main", "develop" ]
+    paths:
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/*.hpp'
+      - 'Makefile'
+      - 'CMakeLists.txt'
+
+jobs:
+  format-check:
+    name: 🎨 Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run clang-format check
+        uses: jidicula/clang-format-action@v2.1.1
+        with:
+          clang-format-version: '16'
+          check-path: '.'
+          exclude-regex: '^(.github|build|third_party)/.*'
+          fallback-style: 'Google'
+
+      - name: Send Slack Alert (Format)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "🚨 [Format 에러] 코드 띄어쓰기/포맷이 Google 컨벤션에 어긋납니다. (Shift+Alt+F 사용 요망)"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  build-check:
+    name: 🔨 Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with Make
+        run: make -j$(nproc)
+
+      - name: Send Slack Alert (Build)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "🔥 [Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  tidy-check:
+    name: ☢️ Static Analysis (Tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Clang-Tidy
+        id: linter
+        uses: cpp-linter/cpp-linter-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          style: ''
+          tidy-checks: ''
+          ignore: '.github|build|third_party'
+          files-changed-only: true
+
+      - name: Fail workflow if tidy failed
+        if: steps.linter.outputs.checks-failed > 0
+        run: exit 1
+
+      - name: Send Slack Alert (Tidy)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "☢️ [Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C++ 원칙 위반이 발견되었습니다."
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
