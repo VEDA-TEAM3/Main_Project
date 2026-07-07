@@ -9,7 +9,6 @@ on:
       - '**/*.h'
       - '**/*.hpp'
       - 'Makefile'
-      - 'CMakeLists.txt'
 
 jobs:
   format-check:
@@ -32,13 +31,14 @@ jobs:
         with:
           status: failure
           fields: repo,message,commit,author
-          text: "🚨 [Format 에러] 코드 띄어쓰기/포맷이 Google 컨벤션에 어긋납니다. (Shift+Alt+F 사용 요망)"
+          text: "[Format 에러] 코드 띄어쓰기/포맷이 프로젝트 컨벤션에 어긋납니다. (Shift+Alt+F 사용 요망)"
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   build-check:
     name: 🔨 Build Check
     runs-on: ubuntu-latest
+    needs: format-check
     steps:
       - uses: actions/checkout@v4
 
@@ -51,15 +51,24 @@ jobs:
         with:
           status: failure
           fields: repo,message,commit,author
-          text: "🔥 [Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
+          text: "[Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   tidy-check:
     name: ☢️ Static Analysis (Tidy)
     runs-on: ubuntu-latest
+    needs: build-check
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Bear
+        run: sudo apt-get update && sudo apt-get install -y bear
+
+      - name: Generate Compilation Database
+        run: |
+          make clean
+          bear -- make -j$(nproc)
 
       - name: Run Clang-Tidy
         id: linter
@@ -69,6 +78,7 @@ jobs:
         with:
           style: ''
           tidy-checks: ''
+          database: '.'
           ignore: '.github|build|third_party'
           files-changed-only: true
 
@@ -82,6 +92,6 @@ jobs:
         with:
           status: failure
           fields: repo,message,commit,author
-          text: "☢️ [Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C++ 원칙 위반이 발견되었습니다."
+          text: "[Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C/C++ 원칙 위반이 발견되었습니다."
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
