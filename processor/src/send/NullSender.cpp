@@ -20,7 +20,7 @@ public:
     ~NullSender() override = default;
 
     bool send(const std::string& packet) override {
-        (void) packet;
+        (void)packet;
         return true;
     }
 };
