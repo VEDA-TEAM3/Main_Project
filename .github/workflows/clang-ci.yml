@@ -8,7 +8,7 @@ on:
       - '**/*.cpp'
       - '**/*.h'
       - '**/*.hpp'
-      - '**/CMakeLists.txt' # CMake 변경사항도 감지하도록 추가
+      - '**/CMakeLists.txt'
 
 jobs:
   # 1. Format Check (가장 먼저 실행)
@@ -40,12 +40,19 @@ jobs:
   tidy-check:
     name: ☢️ Static Analysis (Tidy)
     runs-on: ubuntu-latest
-    needs: format-check # format-check 이후에 실행
+    needs: format-check
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          # OpenCV, OpenSSL, 그리고 JSON 병합용 jq 설치
+          sudo apt-get install -y libopencv-dev libssl-dev jq
+
       - name: Configure CMake projects (For compile_commands.json)
         run: |
+          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 Configure 수행
           find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
             dir=$(dirname "$file")
             echo "Configuring CMake in $dir"
@@ -57,7 +64,6 @@ jobs:
           # 각 서브폴더에 생성된 compile_commands.json을 하나로 합쳐서 루트에 배치
           FILES=$(find . -type f -path "*/build/compile_commands.json")
           if [ -n "$FILES" ]; then
-            # jq를 이용해 여러 JSON 배열을 하나로 병합
             jq -s 'add' $FILES > compile_commands.json
           else
             echo "[]" > compile_commands.json
@@ -69,9 +75,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          style: '' # 이미 format-check에서 하므로 비워둠
+          style: ''
           tidy-checks: ''
-          database: '.' # 병합된 compile_commands.json이 루트에 있음
+          database: '.'
           ignore: '.github|build|third_party'
           files-changed-only: true
 
@@ -93,9 +99,15 @@ jobs:
   build-check:
     name: 🔨 Build Check
     runs-on: ubuntu-latest
-    needs: tidy-check # tidy-check 통과 후에만 실행되도록 순서 변경
+    needs: tidy-check
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          # 빌드 시에도 OpenCV와 OpenSSL 헤더/라이브러리가 필요하므로 동일하게 설치
+          sudo apt-get install -y libopencv-dev libssl-dev
 
       - name: Build all CMake projects
         run: |
@@ -105,7 +117,6 @@ jobs:
             echo "========================================="
             echo "Building project in: $dir"
             echo "========================================="
-            # 빌드 디렉토리 지정하여 컴파일
             cmake -S "$dir" -B "$dir/build"
             cmake --build "$dir/build" -j$(nproc)
           done
