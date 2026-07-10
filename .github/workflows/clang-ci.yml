@@ -44,7 +44,6 @@ jobs:
 
       - name: Configure CMake
         run: cmake -B build -S .
-
       - name: Build with CMake
         run: cmake --build build -j$(nproc)
 
