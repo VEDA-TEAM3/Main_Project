@@ -19,7 +19,10 @@ public:
     NullSender() = default;
     ~NullSender() override = default;
 
-    bool send(const std::string& packet) override { return true; }
+    bool send(const std::string& packet) override {
+        (void) packet;
+        return true;
+    }
 };
 
 }  // namespace
