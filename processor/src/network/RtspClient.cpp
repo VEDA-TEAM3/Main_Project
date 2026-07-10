@@ -77,7 +77,7 @@ public:
         tv.tv_usec = 0;
         setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
-        struct sockaddr_in server_addr {};
+        struct sockaddr_in server_addr{};
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(cfg_.port);
         inet_pton(AF_INET, cfg_.ip.c_str(), &server_addr.sin_addr);
@@ -236,7 +236,8 @@ private:
      */
     std::string md5_hex(const std::string& input) {
         unsigned char hash[MD5_DIGEST_LENGTH];
-        MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash); // NOLINT
+        // NOLINTNEXTLINE
+        MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
         char output[33];
         for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
             snprintf(output + (i * 2), 3, "%02x", hash[i]);
