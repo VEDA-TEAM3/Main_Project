@@ -8,7 +8,7 @@ on:
       - '**/*.cpp'
       - '**/*.h'
       - '**/*.hpp'
-      - 'Makefile'
+      - 'CMakeLists.txt' # Makefile에서 CMakeLists.txt로 변경
 
 jobs:
   format-check:
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run clang-format check
-        uses: jidicula/clang-format-action@v2.1.1
+        uses: jidicula/clang-format-action@v4 # 에러가 났던 버전을 v4로 수정
         with:
           clang-format-version: '16'
           check-path: '.'
@@ -42,8 +42,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build with Make
-        run: make -j$(nproc)
+      # CMake를 사용한 빌드 설정
+      - name: Configure CMake
+        run: cmake -B build -S .
+
+      # CMake를 사용한 빌드 실행
+      - name: Build with CMake
+        run: cmake --build build -j$(nproc)
 
       - name: Send Slack Alert (Build)
         if: failure()
@@ -62,13 +67,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Bear
-        run: sudo apt-get update && sudo apt-get install -y bear
-
+      # CMake는 bear 없이 자체적으로 compile_commands.json을 생성할 수 있습니다.
       - name: Generate Compilation Database
-        run: |
-          make clean
-          bear -- make -j$(nproc)
+        run: cmake -B build -S . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
       - name: Run Clang-Tidy
         id: linter
         uses: cpp-linter/cpp-linter-action@v2
@@ -77,7 +79,7 @@ jobs:
         with:
           style: ''
           tidy-checks: ''
-          database: '.'
+          database: 'build' # CMake가 build 폴더 안에 json 파일을 생성하므로 경로 지정
           ignore: '.github|build|third_party'
           files-changed-only: true
 
