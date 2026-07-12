@@ -48,7 +48,7 @@ jobs:
         run: |
           sudo apt-get update
           # OpenCV, OpenSSL, 그리고 JSON 병합용 jq 설치
-          sudo apt-get install -y libopencv-dev libssl-dev jq
+          sudo apt-get install -y libopencv-dev libssl-dev jq nlohmann-json3-dev
 
       - name: Configure CMake projects (For compile_commands.json)
         run: |
@@ -107,7 +107,7 @@ jobs:
         run: |
           sudo apt-get update
           # 빌드 시에도 OpenCV와 OpenSSL 헤더/라이브러리가 필요하므로 동일하게 설치
-          sudo apt-get install -y libopencv-dev libssl-dev
+          sudo apt-get install -y libopencv-dev libssl-dev nlohmann-json3-dev
 
       - name: Build all CMake projects
         run: |
