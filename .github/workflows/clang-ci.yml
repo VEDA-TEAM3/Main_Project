@@ -8,9 +8,10 @@ on:
       - '**/*.cpp'
       - '**/*.h'
       - '**/*.hpp'
-      - 'Makefile'
+      - '**/CMakeLists.txt'
 
 jobs:
+  # 1. Format Check (가장 먼저 실행)
   format-check:
     name: 🎨 Format Check
     runs-on: ubuntu-latest
@@ -18,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run clang-format check
-        uses: jidicula/clang-format-action@v2.1.1
+        uses: jidicula/clang-format-action@v4.11.0
         with:
           clang-format-version: '16'
           check-path: '.'
@@ -35,49 +36,48 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  build-check:
-    name: 🔨 Build Check
+  # 2. Static Analysis (Tidy) - Format 통과 후, Build 전에 실행
+  tidy-check:
+    name: ☢️ Static Analysis (Tidy)
     runs-on: ubuntu-latest
     needs: format-check
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build with Make
-        run: make -j$(nproc)
-
-      - name: Send Slack Alert (Build)
-        if: failure()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: failure
-          fields: repo,message,commit,author
-          text: "[Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-  tidy-check:
-    name: ☢️ Static Analysis (Tidy)
-    runs-on: ubuntu-latest
-    needs: build-check
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Bear
-        run: sudo apt-get update && sudo apt-get install -y bear
-
-      - name: Generate Compilation Database
+      - name: Install System Dependencies
         run: |
-          make clean
-          bear -- make -j$(nproc)
+          sudo apt-get update
+          # OpenCV, OpenSSL, 그리고 JSON 병합용 jq 설치
+          sudo apt-get install -y libopencv-dev libssl-dev jq nlohmann-json3-dev
+
+      - name: Configure CMake projects (For compile_commands.json)
+        run: |
+          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 Configure 수행
+          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+            dir=$(dirname "$file")
+            echo "Configuring CMake in $dir"
+            cmake -S "$dir" -B "$dir/build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          done
+
+      - name: Merge compile_commands.json
+        run: |
+          # 각 서브폴더에 생성된 compile_commands.json을 하나로 합쳐서 루트에 배치
+          FILES=$(find . -type f -path "*/build/compile_commands.json")
+          if [ -n "$FILES" ]; then
+            jq -s 'add' $FILES > compile_commands.json
+          else
+            echo "[]" > compile_commands.json
+          fi
+
       - name: Run Clang-Tidy
         id: linter
         uses: cpp-linter/cpp-linter-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          style: ''
+          style: '' # 이미 format-check에서 하므로 비워둠
           tidy-checks: ''
-          database: '.'
+          database: '.' # 병합된 compile_commands.json이 루트에 있음
           ignore: '.github|build|third_party'
           files-changed-only: true
 
@@ -92,5 +92,41 @@ jobs:
           status: failure
           fields: repo,message,commit,author
           text: "[Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C/C++ 원칙 위반이 발견되었습니다."
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # 3. Build Check - Tidy까지 완벽할 때만 실제 빌드 시도
+  build-check:
+    name: 🔨 Build Check
+    runs-on: ubuntu-latest
+    needs: tidy-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          # 빌드 시에도 OpenCV와 OpenSSL 헤더/라이브러리가 필요하므로 동일하게 설치
+          sudo apt-get install -y libopencv-dev libssl-dev nlohmann-json3-dev
+
+      - name: Build all CMake projects
+        run: |
+          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 빌드 수행
+          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+            dir=$(dirname "$file")
+            echo "========================================="
+            echo "Building project in: $dir"
+            echo "========================================="
+            cmake -S "$dir" -B "$dir/build"
+            cmake --build "$dir/build" -j$(nproc)
+          done
+
+      - name: Send Slack Alert (Build)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
