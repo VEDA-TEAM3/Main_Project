@@ -155,7 +155,7 @@ void RtspClient::run() {
 
 std::string RtspClient::md5Hex(const std::string& input) {
     unsigned char hash[MD5_DIGEST_LENGTH];
-    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
+    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash); // NOLINT
     char output[33];
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
         snprintf(output + i * 2, 3, "%02x", hash[i]);
