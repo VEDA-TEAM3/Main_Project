@@ -17,7 +17,11 @@ add_executable(compute-server
     src/transform/NullTransform.cpp
 )
 
-target_include_directories(compute-server PRIVATE include src)
+target_include_directories(compute-server PRIVATE 
+    include 
+    src 
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
 target_link_libraries(compute-server PRIVATE
     shared
     OpenSSL::Crypto
