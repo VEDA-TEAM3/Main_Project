@@ -30,12 +30,10 @@ bool RtspClient::connect() {
         return false;
     }
 
-    struct timeval tv {
-        5, 0
-    };
+    struct timeval tv{5, 0};
     setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    struct sockaddr_in serverAddr {};
+    struct sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(static_cast<uint16_t>(cfg_.rtspPort));
     inet_pton(AF_INET, cfg_.rtspIp.c_str(), &serverAddr.sin_addr);
@@ -155,7 +153,8 @@ void RtspClient::run() {
 
 std::string RtspClient::md5Hex(const std::string& input) {
     unsigned char hash[MD5_DIGEST_LENGTH];
-    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash); // NOLINT
+    // NOLINTNEXTLINE
+    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
     char output[33];
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
         snprintf(output + i * 2, 3, "%02x", hash[i]);
