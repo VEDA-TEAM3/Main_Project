@@ -23,7 +23,6 @@ target_include_directories(compute-server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 target_link_libraries(compute-server PRIVATE
-    shared
     OpenSSL::Crypto
     Threads::Threads
 )
