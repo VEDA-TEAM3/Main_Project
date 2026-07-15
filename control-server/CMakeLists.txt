@@ -24,9 +24,9 @@ add_executable(control-server
 target_include_directories(control-server PRIVATE 
     include
     src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
 target_link_libraries(control-server PRIVATE
     Threads::Threads
-    shared
 )
