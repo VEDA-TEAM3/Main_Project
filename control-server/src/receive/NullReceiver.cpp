@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-NullReceiver::~NullReceiver() { stop(); }
+NullReceiver::~NullReceiver() { NullReceiver::stop(); }
 
 void NullReceiver::setCallback(FrameCallback callback) { callback_ = std::move(callback); }
 
