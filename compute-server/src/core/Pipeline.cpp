@@ -8,7 +8,8 @@
 Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IImageCoordinateMapper> imageMapper,
                    std::shared_ptr<IObjectSanitizer> sanitizer, std::shared_ptr<IObjectRouter> router,
                    std::shared_ptr<IGroundPointExtractor> ground, std::shared_ptr<ICoordinateTransform> transform,
-                   std::shared_ptr<ISink<veda::TopViewFrame>> riskSink, std::shared_ptr<ISink<veda::BlurFrame>> blurSink)
+                   std::shared_ptr<ISink<veda::TopViewFrame>> riskSink,
+                   std::shared_ptr<ISink<veda::BlurFrame>> blurSink)
     : parser_(std::move(parser)),
       imageMapper_(std::move(imageMapper)),
       sanitizer_(std::move(sanitizer)),

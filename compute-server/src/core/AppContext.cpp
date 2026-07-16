@@ -16,7 +16,7 @@ AppContext::AppContext(const AppConfig& config) {
     // --- Pipeline 구성 요소 --------------------------------------------
     auto parser = std::make_shared<OnvifParser>();
     auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
-                                                                       config.imageMapOffsetX, config.imageMapOffsetY);
+                                                                     config.imageMapOffsetX, config.imageMapOffsetY);
     auto sanitizer = std::make_shared<ContainmentSanitizer>(config.sanitizerIouThresh, config.sanitizerContainThresh);
     auto router = std::make_shared<ParentBasedRouter>();
     auto ground = std::make_shared<BottomCenterExtractor>();
@@ -28,5 +28,6 @@ AppContext::AppContext(const AppConfig& config) {
     auto riskSink = std::make_shared<ConsoleTopViewSink>();
     auto blurSink = std::make_shared<ConsoleBlurSink>();
 
-    pipeline_ = std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink, blurSink);
+    pipeline_ =
+        std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink, blurSink);
 }

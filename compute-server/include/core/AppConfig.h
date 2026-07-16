@@ -40,9 +40,7 @@ struct AppConfig {
 
     // 출력 프레임 정규화 좌표 -> 월드 좌표(m) 호모그래피. row-major 3x3.
     bool homographyEnabled = false;
-    std::array<double, 9> homography{{1.0, 0.0, 0.0,
-                                      0.0, 1.0, 0.0,
-                                      0.0, 0.0, 1.0}};
+    std::array<double, 9> homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
 
     // TODO: homography 3x3 행렬 (캘리브레이션 데이터 확보 후 추가)
     // TODO: sinks.risk / sinks.blur MQTT 브로커 주소 (통신 연동 시 추가)
