@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(ComputeServer)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -11,10 +14,11 @@ add_executable(compute-server
     src/source/RtspOnvifSource.cpp
     src/network/RtspClient.cpp
     src/parser/OnvifParser.cpp
+    src/mapper/AffineImageCoordinateMapper.cpp
     src/sanitize/ContainmentSanitizer.cpp
     src/route/ParentBasedRouter.cpp
     src/ground/BottomCenterExtractor.cpp
-    src/transform/NullTransform.cpp
+    src/transform/HomographyTransform.cpp
 )
 
 target_include_directories(compute-server PRIVATE 

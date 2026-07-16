@@ -1,3 +1,4 @@
+
 #include "sanitize/ContainmentSanitizer.h"
 
 #include <algorithm>
@@ -91,7 +92,7 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             }
 
             // 규칙 B
-            if (veda::isRiskClass(y.cls) && area(x.box) < area(y.box) && ioMin(x.box, y.box) > containThresh_) {
+            if (x.cls == y.cls && area(x.box) < area(y.box) && ioMin(x.box, y.box) > containThresh_) {
                 drop[i] = true;
                 break;
             }
