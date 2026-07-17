@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -29,6 +30,17 @@ struct AppConfig {
     // ContainmentSanitizer 임계값
     double sanitizerIouThresh = 0.5;
     double sanitizerContainThresh = 0.9;
+
+    // ONVIF 정규화 metadata -> 출력 RTSP 프레임 정규화 좌표.
+    // output = input * scale + offset. 실측 검증 전에는 기본 항등값을 사용한다.
+    double imageMapScaleX = 1.0;
+    double imageMapScaleY = 1.0;
+    double imageMapOffsetX = 0.0;
+    double imageMapOffsetY = 0.0;
+
+    // 출력 프레임 정규화 좌표 -> 월드 좌표(m) 호모그래피. row-major 3x3.
+    bool homographyEnabled = false;
+    std::array<double, 9> homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
 
     // TODO: homography 3x3 행렬 (캘리브레이션 데이터 확보 후 추가)
     // TODO: sinks.risk / sinks.blur MQTT 브로커 주소 (통신 연동 시 추가)
@@ -94,6 +106,19 @@ inline AppConfig loadAppConfig(const std::string& path) {
                 cfg.sanitizerIouThresh = std::stod(value);
             else if (key == "SANITIZER_CONTAIN_THRESH")
                 cfg.sanitizerContainThresh = std::stod(value);
+            else if (key == "IMAGE_MAP_SCALE_X")
+                cfg.imageMapScaleX = std::stod(value);
+            else if (key == "IMAGE_MAP_SCALE_Y")
+                cfg.imageMapScaleY = std::stod(value);
+            else if (key == "IMAGE_MAP_OFFSET_X")
+                cfg.imageMapOffsetX = std::stod(value);
+            else if (key == "IMAGE_MAP_OFFSET_Y")
+                cfg.imageMapOffsetY = std::stod(value);
+            else if (key == "HOMOGRAPHY_ENABLED")
+                cfg.homographyEnabled = value == "1" || value == "true" || value == "TRUE";
+            else if (key.rfind("HOMOGRAPHY_H", 0) == 0 && key.size() == 14 && key[12] >= '1' && key[12] <= '3' &&
+                     key[13] >= '1' && key[13] <= '3')
+                cfg.homography[(key[12] - '1') * 3 + (key[13] - '1')] = std::stod(value);
         } catch (const std::exception& e) {
             std::cerr << "[-] Failed to parse config value for key '" << key << "': " << e.what() << "\n";
         }

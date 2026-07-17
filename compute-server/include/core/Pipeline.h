@@ -25,6 +25,7 @@
 #include "domain/RawPacket.h"
 #include "interfaces/ICoordinateTransform.h"
 #include "interfaces/IGroundPointExtractor.h"
+#include "interfaces/IImageCoordinateMapper.h"
 #include "interfaces/IMetadataParser.h"
 #include "interfaces/IObjectRouter.h"
 #include "interfaces/IObjectSanitizer.h"
@@ -47,10 +48,10 @@ public:
      * @param riskSink 위험 객체 전송 싱크
      * @param blurSink Blur 객체 전송 싱크
      */
-    Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IObjectSanitizer> sanitizer,
-             std::shared_ptr<IObjectRouter> router, std::shared_ptr<IGroundPointExtractor> ground,
-             std::shared_ptr<ICoordinateTransform> transform, std::shared_ptr<ISink<veda::TopViewFrame>> riskSink,
-             std::shared_ptr<ISink<veda::BlurFrame>> blurSink);
+    Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IImageCoordinateMapper> imageMapper,
+             std::shared_ptr<IObjectSanitizer> sanitizer, std::shared_ptr<IObjectRouter> router,
+             std::shared_ptr<IGroundPointExtractor> ground, std::shared_ptr<ICoordinateTransform> transform,
+             std::shared_ptr<ISink<veda::TopViewFrame>> riskSink, std::shared_ptr<ISink<veda::BlurFrame>> blurSink);
 
     /**
      * @brief IMetadataSource::next() 가 채운 RawPacket 하나를 처리하여 파이프라인에 흘려보냄.
@@ -68,6 +69,7 @@ public:
 
 private:
     std::shared_ptr<IMetadataParser> parser_;              ///< 메타데이터 파서 인스턴스
+    std::shared_ptr<IImageCoordinateMapper> imageMapper_;  ///< metadata -> output-frame 좌표 매퍼
     std::shared_ptr<IObjectSanitizer> sanitizer_;          ///< 오탐지 객체 제거기 인스턴스
     std::shared_ptr<IObjectRouter> router_;                ///< 객체 분류 라우터 인스턴스
     std::shared_ptr<IGroundPointExtractor> ground_;        ///< 지면점 추출기 인스턴스

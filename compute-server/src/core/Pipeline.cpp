@@ -5,11 +5,13 @@
 #include "domain/ChannelFrame.h"
 #include "domain/DetectedObject.h"
 
-Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IObjectSanitizer> sanitizer,
-                   std::shared_ptr<IObjectRouter> router, std::shared_ptr<IGroundPointExtractor> ground,
-                   std::shared_ptr<ICoordinateTransform> transform, std::shared_ptr<ISink<veda::TopViewFrame>> riskSink,
+Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IImageCoordinateMapper> imageMapper,
+                   std::shared_ptr<IObjectSanitizer> sanitizer, std::shared_ptr<IObjectRouter> router,
+                   std::shared_ptr<IGroundPointExtractor> ground, std::shared_ptr<ICoordinateTransform> transform,
+                   std::shared_ptr<ISink<veda::TopViewFrame>> riskSink,
                    std::shared_ptr<ISink<veda::BlurFrame>> blurSink)
     : parser_(std::move(parser)),
+      imageMapper_(std::move(imageMapper)),
       sanitizer_(std::move(sanitizer)),
       router_(std::move(router)),
       ground_(std::move(ground)),
@@ -46,6 +48,7 @@ veda::TopViewObject toTopViewObject(const domain::DetectedObject& o, IGroundPoin
 
 void Pipeline::onPacket(const domain::RawPacket& raw) {
     domain::ChannelFrame frame = parser_->parse(raw);
+    frame = imageMapper_->map(std::move(frame));
     frame = sanitizer_->sanitize(std::move(frame));
     const RouteResult routed = router_->route(frame);
 
