@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    AffineImageCoordinateMapper.h
+ * @brief   
+ */
+
 #include "interfaces/IImageCoordinateMapper.h"
 
 class AffineImageCoordinateMapper final : public IImageCoordinateMapper {

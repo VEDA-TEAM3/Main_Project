@@ -1,16 +1,16 @@
 #pragma once
 
 /**
- * @file IObjectRouter.h
- * @brief 프레임 내 객체를 용도에 맞게 분류하는 라우터 인터페이스
+ * @file    IObjectRouter.h
+ * @brief   프레임 내 객체를 용도에 맞게 분류하는 라우터 인터페이스
  *
  * @details
  * - parentId 있음                     -> blur (Head, LicensePlate)
  * - parentId 없음 + Human|Vehicle     -> risk
  * - 그 외                             -> drop
  *
- * @note [아키텍처 의도]
- * - 정책이 바뀐다면 구현체만 갈아끼움.
+ * @note [ 아키텍처 의도 ]
+ * - 정책이 바뀐다면 구현체만 바꿈
  */
 
 #include <vector>
@@ -34,10 +34,10 @@ public:
     virtual ~IObjectRouter() = default;
 
     /**
-     * @brief 프레임 내 객체들을 정의된 정책에 따라 분류.
+     * @brief   프레임 내 객체들을 정의된 정책에 따라 분류.
      *
-     * @param frame 분류 대상 객체들을 포함하는 원본 채널 프레임
-     * @return RouteResult 분류가 완료된 객체 목록 (blur, risk)
+     * @param   frame 분류 대상 객체들을 포함하는 원본 채널 프레임
+     * @return  RouteResult 분류가 완료된 객체 목록 (blur, risk)
      */
     virtual RouteResult route(const domain::ChannelFrame& frame) = 0;
 };
