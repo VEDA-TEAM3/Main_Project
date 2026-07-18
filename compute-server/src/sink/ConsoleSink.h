@@ -16,9 +16,8 @@ public:
     void send(const veda::TopViewFrame& f) override {
         std::cout << "[RISK] ch=" << f.ch << " ts=" << f.ts << " objects=" << f.objects.size() << "\n";
         for (const auto& o : f.objects) {
-            std::cout << "    id=" << o.id << " cls=" << veda::toString(o.cls) << " world=("
-                      << o.pos.x << "," << o.pos.y << ")"
-                      << " edge=" << o.edge << "\n";
+            std::cout << "    id=" << o.id << " cls=" << veda::toString(o.cls) << " world=(" << o.pos.x << ","
+                      << o.pos.y << ")" << " edge=" << o.edge << "\n";
         }
     }
 };

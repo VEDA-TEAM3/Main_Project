@@ -2,7 +2,7 @@
 
 /**
  * @file    AffineImageCoordinateMapper.h
- * @brief   
+ * @brief   scale, offset
  */
 
 #include "interfaces/IImageCoordinateMapper.h"
