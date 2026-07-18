@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file Contract.h
- * @brief compute-server · control-server · client 공유 wire contract.
+ * @file    Contract.h
+ * @brief   공유 wire contract
  *
  * @details
  * 필드를 추가/변경하면 kSchemaVersion 을 올리고 세 프로젝트를 함께 빌드
@@ -20,8 +20,8 @@
 namespace veda {
 
 /**
- * @brief   Schema Version.
- * @details 수신 측은 v 가 다르면 경고 로그를 남기고 메시지를 버림.
+ * @brief   Schema Version
+ * @details 수신 측은 v 가 다르면 경고 로그를 남기고 메시지를 버림
  */
 inline constexpr int kSchemaVersion = 1;
 
@@ -35,19 +35,19 @@ inline constexpr int kSchemaVersion = 1;
  * @details
  * 출처는 언제나 카메라의 ONVIF <tt:Frame UtcTime="...">.
  * compute-server의 IParser의 구현체가 파싱 시점에 단 한 번 int64 로 변환하고,
- * 그 값이 파이프라인 전 구간에서 사용.
+ * 그 값이 파이프라인 전 구간에서 사용
  */
 using TimestampMs = std::int64_t;
 
 /// @brief CCTV Channel (0..3)
 using ChannelId = int;
 
-/// @brief ONVIF ObjectId
-/// @details 채널 사이에서는 유일하지 않음.
+/// @brief      ONVIF ObjectId
+/// @details    채널 사이에서는 유일하지 않음
 using ObjectId = std::int64_t;
 
-/// @brief control-server의 CrossChannelFuser 가 부여하는 전역 ID.
-/// @details 여러 채널에 잡힌 같은 실체가 하나의 GlobalId 를 갖음.
+/// @brief      control-server의 CrossChannelFuser가 부여하는 전역 ID
+/// @details    여러 채널에 잡힌 같은 실체가 하나의 GlobalId 를 갖음
 using GlobalId = std::int64_t;
 
 /** @} */
@@ -58,7 +58,7 @@ using GlobalId = std::int64_t;
  */
 
 /**
- * @brief 월드 좌표 (Top-View). 모든 채널이 같은 프레임을 씀.
+ * @brief 월드 좌표 (모든 채널이 같은 프레임을 씀)
  *
  * @details
  * - 단위 : meter
@@ -73,7 +73,7 @@ struct WorldPoint {
 };
 
 /**
- * @brief 원본 영상 프레임 기준의 정규화 사각형.
+ * @brief 원본 영상 프레임 기준의 정규화 사각형
  *
  * @details
  * - 범위 : [0, 1]
@@ -81,7 +81,7 @@ struct WorldPoint {
  *
  * @note
  * ONVIF 원본은 [-1,1], 원점 중앙, +y 가 위쪽
- * IParser의 구현체가 스트림의 <tt:Transformation> 을 읽어 이 형식으로 변환.
+ * IParser의 구현체가 스트림의 <tt:Transformation> 을 읽어 이 형식으로 변환
  */
 struct NormRect {
     double l = 0.0;  ///< Left
@@ -102,20 +102,20 @@ struct NormRect {
  */
 enum class ObjectClass {
     Unknown = 0,
-    Human,         ///< 위험 경로. 지면 접촉점 -> 월드 좌표
-    Vehicle,       ///< 위험 경로.
-    Head,          ///< 블러 경로. 항상 Human 의 자식 (Parent 속성)
-    LicensePlate,  ///< 블러 경로. 항상 Vehicle 의 자식 (Parent 속성)
+    Human,         ///< 위험 경로 (지면 접촉점 -> 월드 좌표)
+    Vehicle,       ///< 위험 경로
+    Head,          ///< 블러 경로 (항상 Human의 자식)
+    LicensePlate,  ///< 블러 경로 (항상 Vehicle의 자식)
 };
 
 /**
- * @brief 위험 분류인지 확인
+ * @brief   위험 분류인지 확인
  * @details 라우팅 규칙: Parent 없음 + Human|Vehicle -> RISK
  */
 inline constexpr bool isRiskClass(ObjectClass c) { return c == ObjectClass::Human || c == ObjectClass::Vehicle; }
 
 /**
- * @brief 블러 분류인지 확인
+ * @brief   블러 분류인지 확인
  * @details 라우팅 규칙: Parent 있음 -> BLUR (Head, LicensePlate)
  */
 inline constexpr bool isBlurClass(ObjectClass c) { return c == ObjectClass::Head || c == ObjectClass::LicensePlate; }
@@ -194,28 +194,18 @@ inline RiskLevel riskLevelFromString(std::string_view s) {
 
 /** @} */
 
-// ===========================================================================
-// 메시지 스키마 (Message Schemas)
-// ===========================================================================
-
 /**
- * @struct TopViewObject
  * @brief Top-View 변환이 완료된 단일 객체 데이터
- *
- * @note
- * - conf: 필터링 사용 금지 (실측에서 사람 0.46 < 팬텀 0.56 사례 있음)
  */
 struct TopViewObject {
     ObjectId id = 0;                         ///< 채널 내 추적 ID
     ObjectClass cls = ObjectClass::Unknown;  ///< Human | Vehicle
     WorldPoint pos;                          ///< 지면 접촉점을 호모그래피로 사상한 결과
-    double conf = 0.0;                       ///< ONVIF Likelihood. 0..1
-    bool edge = false;                       ///< bbox가 화면 경계에 닿았음.
+    bool edge = false;                       ///< bbox가 화면 경계에 닿았음
 };
 
 /**
- * @struct TopViewFrame
- * @brief 메시지 1 : TopViewFrame (compute-server -> control-server)
+ * @brief   메시지 1 : TopViewFrame (compute-server -> control-server)
  *
  * @details
  * - 통신: MQTT / TLS, topic::topView(ch), QoS 0
@@ -224,14 +214,13 @@ struct TopViewObject {
  */
 struct TopViewFrame {
     int v = kSchemaVersion;              ///< 스키마 버전
-    TimestampMs ts = 0;                  ///< 카메라 시각
+    TimestampMs ts = 0;                  ///< CCTV 시각
     ChannelId ch = 0;                    ///< 채널 ID
     std::vector<TopViewObject> objects;  ///< 인식된 객체 목록
 };
 
 /**
- * @struct BlurTarget
- * @brief Blur 처리 대상 객체
+ * @brief   Blur 처리 대상 객체
  *
  * @note
  * - ObjectClass: [Head | LicensePlate] blur 유무를 추가할 수 있으므로 포함
@@ -243,23 +232,21 @@ struct BlurTarget {
 };
 
 /**
- * @struct BlurFrame
- * @brief 메시지 2 : BlurFrame (compute-server -> client)
+ * @brief   메시지 2 : BlurFrame (compute-server -> client)
  * @details
  * - 통신: RTSP/RTP (GStreamer), payload = JSON
- * - 픽셀 없이 좌표만 전송. 렌더링은 앱이 수행.
- * - 동기화: 영상(CCTV->앱 RTP 타임스탬프 + RTCP SR) 메타데이터(이 메시지의 ts). ts 로 매칭.
- * - 메타데이터의 RTP 타임스탬프를 동기화에 사용하지 말 것.
+ * - 픽셀 없이 좌표만 전송
+ * - 동기화: ts로 매칭
+ * - Metadata의 RTP 타임스탬프를 동기화에 사용하지 말 것
  */
 struct BlurFrame {
     int v = kSchemaVersion;         ///< 스키마 버전
-    TimestampMs ts = 0;             ///< 카메라 캡처 시각
+    TimestampMs ts = 0;             ///< CCTV 캡처 시각
     ChannelId ch = 0;               ///< 채널 ID
     std::vector<BlurTarget> blurs;  ///< 블러 대상 목록
 };
 
 /**
- * @struct RiskObject
  * @brief 4채널 융합이 완료된 단일 위험 객체
  */
 struct RiskObject {
@@ -267,33 +254,33 @@ struct RiskObject {
     ObjectClass cls = ObjectClass::Unknown;
     WorldPoint pos;                     ///< 월드 좌표
     RiskLevel level = RiskLevel::None;  ///< 이 객체 기준 최고 위험 레벨
-    GlobalId nearest = 0;               ///< 최근접 객체의 gid. 없으면 0
-    double dist = -1.0;                 ///< 최근접 거리(m). 없으면 음수
+    GlobalId nearest = 0;               ///< 최근접 객체의 gid (없으면 0)
+    double dist = -1.0;                 ///< 최근접 거리(m) (없으면 음수)
 };
 
 /**
- * @struct RiskFrame
- * @brief 메시지 3 : RiskFrame (control-server -> client)
+ * @struct  RiskFrame
+ * @brief   메시지 3 : RiskFrame (control-server -> client)
  * @details
  * - 통신: MQTT / TLS, topic::kRisk, QoS 1
- * - 4채널을 융합한 결과. 앱이 Top-View 디지털 트윈을 그리는 데 사용.
- * - 위험 객체만이 아니라 프레임의 모든 객체를 보냄.
+ * - 4채널을 융합한 결과 (앱이 Top-View 디지털 트윈을 그리는 데 사용)
+ * - 위험 객체만이 아니라 프레임의 모든 객체를 보냄
  */
 struct RiskFrame {
     int v = kSchemaVersion;             ///< 스키마 버전
-    TimestampMs ts = 0;                 ///< 카메라 시각
+    TimestampMs ts = 0;                 ///< CCTV 시각
     RiskLevel level = RiskLevel::None;  ///< 프레임 전체의 최고 위험 레벨
     std::vector<RiskObject> objects;    ///< 융합된 객체 목록
 };
 
 /**
- * @namespace topic
- * @brief MQTT topic 정의
+ * @namespace   topic
+ * @brief       MQTT topic 정의
  */
 namespace topic {
 
 /**
- * @brief [compute-server -> control-server] Top-View 전송 토픽 (QoS 0)
+ * @brief   [compute-server -> control-server] Top-View 전송 토픽 (QoS 0)
  * @details 연속 스트림이라 유실 복구 불필요 (QoS 1은 중복만 만듦)
  */
 inline std::string topView(ChannelId ch) { return "veda/ch/" + std::to_string(ch) + "/topview"; }
@@ -306,7 +293,7 @@ inline constexpr auto kRisk = "veda/risk";
 
 /**
  * @brief 채널별 LWT(Last Will and Testament) 토픽 (QoS 1 + retained)
- * @details payload 는 한 바이트: "1" = alive, "0" = dead.
+ * @details payload는 한 바이트: "1" = alive, "0" = dead
  */
 inline std::string alive(ChannelId ch) { return "veda/ch/" + std::to_string(ch) + "/alive"; }
 
@@ -316,8 +303,8 @@ inline constexpr auto kAliveAll = "veda/ch/+/alive";
 }  // namespace topic
 
 /**
- * @namespace qos
- * @brief MQTT QoS 설정값
+ * @namespace   qos
+ * @brief       MQTT QoS 설정값
  */
 namespace qos {
 inline constexpr int kTopView = 0;  ///< TopView 스트림용 QoS
@@ -325,15 +312,11 @@ inline constexpr int kRisk = 1;     ///< Risk 이벤트용 QoS
 inline constexpr int kAlive = 1;    ///< LWT 용 QoS
 }  // namespace qos
 
-// ---------------------------------------------------------------------------
-// JSON 직렬화 (nlohmann)
-// ---------------------------------------------------------------------------
-
 /** @cond INTERNAL_JSON_HELPERS */
 namespace detail {
 /**
- * @brief 필드가 없으면 fallback(기본값)을 반환하는 안전한 파서
- * @details from_json은 절대 던지지 않음. 스키마가 어긋나도 수신 스레드 생존을 보장함.
+ * @brief   필드가 없으면 fallback(기본값)을 반환하는 안전한 파서
+ * @details from_json은 절대 던지지 않음
  */
 template <typename T>
 T get_or(const nlohmann::json& j, const char* key, T fallback) {
@@ -369,14 +352,12 @@ inline void from_json(const nlohmann::json& j, NormRect& r) {
 }
 
 inline void to_json(nlohmann::json& j, const TopViewObject& o) {
-    j = nlohmann::json{
-        {"id", o.id}, {"cls", std::string(toString(o.cls))}, {"pos", o.pos}, {"conf", o.conf}, {"edge", o.edge}};
+    j = nlohmann::json{{"id", o.id}, {"cls", std::string(toString(o.cls))}, {"pos", o.pos}, {"edge", o.edge}};
 }
 inline void from_json(const nlohmann::json& j, TopViewObject& o) {
     o.id = detail::get_or<ObjectId>(j, "id", 0);
     o.cls = objectClassFromString(detail::get_or<std::string>(j, "cls", ""));
     o.pos = detail::get_or<WorldPoint>(j, "pos", WorldPoint{});
-    o.conf = detail::get_or<double>(j, "conf", 0.0);
     o.edge = detail::get_or<bool>(j, "edge", false);
 }
 
@@ -435,15 +416,11 @@ inline void from_json(const nlohmann::json& j, RiskFrame& f) {
 
 /// @}
 
-// ---------------------------------------------------------------------------
-// 편의 함수
-// ---------------------------------------------------------------------------
-
 /**
- * @brief 구조체를 JSON 문자열로 직렬화
- * @tparam T 직렬화할 메시지 구조체 타입
- * @param msg 구조체 인스턴스
- * @return std::string 인코딩된 JSON 문자열
+ * @brief   구조체를 JSON 문자열로 직렬화
+ * @tparam  T 직렬화할 메시지 구조체 타입
+ * @param   msg 구조체 인스턴스
+ * @return  std::string 인코딩된 JSON 문자열
  */
 template <typename T>
 std::string encode(const T& msg) {
@@ -451,12 +428,11 @@ std::string encode(const T& msg) {
 }
 
 /**
- * @brief JSON 문자열을 구조체로 역직렬화
- * @details 파싱 실패 시 예외를 던지지 않고 기본 생성된 객체(v == 0)를 돌려줌.
- *          호출자는 리턴받은 객체의 v == kSchemaVersion 인지 반드시 확인해야 함.
- * @tparam T 역직렬화할 메시지 구조체 타입
- * @param payload 수신한 JSON 페이로드
- * @return T 디코딩된 메시지 객체
+ * @brief       JSON 문자열을 구조체로 역직렬화
+ * @details     파싱 실패 시 예외를 던지지 않고 기본 생성된 객체(v == 0)를 돌려줌
+ * @tparam      T 역직렬화할 메시지 구조체 타입
+ * @param       payload 수신한 JSON 페이로드
+ * @return      T 디코딩된 메시지 객체
  */
 template <typename T>
 T decode(std::string_view payload) {
