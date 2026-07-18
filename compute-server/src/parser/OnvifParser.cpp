@@ -8,14 +8,11 @@
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// 숫자 파싱 -- std::from_chars 래퍼
-// ---------------------------------------------------------------------------
 /**
- * @brief 안전한 숫자 파싱을 위한 std::from_chars 래퍼 함수
- * @tparam T 파싱할 숫자의 타입
- * @param sv 숫자로 변환할 문자열 뷰
- * @return std::optional<T> 성공 시 파싱된 값, 실패 시 nullopt
+ * @brief   안전한 숫자 파싱을 위한 std::from_chars 래퍼 함수
+ * @tparam  T 파싱할 숫자의 타입
+ * @param   sv 숫자로 변환할 문자열 뷰
+ * @return  std::optional<T> 성공 시 파싱된 값, 실패 시 nullopt
  */
 template <typename T>
 std::optional<T> parseNumber(std::string_view sv) {
@@ -26,14 +23,11 @@ std::optional<T> parseNumber(std::string_view sv) {
     return value;
 }
 
-// ---------------------------------------------------------------------------
-// 속성값 추출
-// ---------------------------------------------------------------------------
 /**
- * @brief key="value" 패턴에서 value 를 추출
- * @param s 검색을 수행할 대상 문자열 (내부에서 시작 위치를 결정)
- * @param key 찾고자 하는 속성의 키 문자열
- * @return std::optional<std::string_view> 추출된 따옴표 안의 문자열, 실패 시 nullopt
+ * @brief   key="value" 패턴에서 value 를 추출
+ * @param   s 검색을 수행할 대상 문자열 (내부에서 시작 위치를 결정)
+ * @param   key 찾고자 하는 속성의 키 문자열
+ * @return  std::optional<std::string_view> 추출된 따옴표 안의 문자열, 실패 시 nullopt
  */
 std::optional<std::string_view> extractQuoted(std::string_view s, std::string_view key) {
     const std::string pattern = std::string(key) + "=\"";
@@ -49,14 +43,11 @@ std::optional<std::string_view> extractQuoted(std::string_view s, std::string_vi
     return s.substr(valueStart, valueEnd - valueStart);
 }
 
-// ---------------------------------------------------------------------------
-// UTC 시간 변환
-// ---------------------------------------------------------------------------
 /**
- * @brief UtcTime="YYYY-MM-DDTHH:MM:SS.sssZ" 형식의 문자열을 epoch ms 로 변환
- * @details 고정 포맷이라 위치 기반으로 자름.
- * @param utc 변환할 UTC 기준 시각 문자열
- * @return std::optional<veda::TimestampMs> epoch 기준 밀리초 단위 시간, 실패 시 nullopt
+ * @brief       UtcTime="YYYY-MM-DDTHH:MM:SS.sssZ" 형식의 문자열을 epoch ms 로 변환
+ * @details     고정 포맷이라 위치 기반으로 자름
+ * @param       utc 변환할 UTC 기준 시각 문자열
+ * @return      std::optional<veda::TimestampMs> epoch 기준 밀리초 단위 시간, 실패 시 nullopt
  */
 std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
     if (utc.size() < 23)
@@ -88,11 +79,7 @@ std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
     return static_cast<veda::TimestampMs>(epochSec) * 1000 + *ms;
 }
 
-// ---------------------------------------------------------------------------
-// Transformation 정보 변환
-// ---------------------------------------------------------------------------
 /**
- * @struct Transformation
  * @brief ONVIF XML 내 <tt:Transformation> 데이터를 담는 구조체
  */
 struct Transformation {
@@ -101,10 +88,10 @@ struct Transformation {
 };
 
 /**
- * @brief 프레임 문자열에서 Transformation 파라미터(Translate, Scale)를 추출
- * @details 각 태그는 오검색 방지를 위해 다음 태그 시작 전까지의 범위에서만 속성을 찾음.
- * @param frame 파싱할 프레임 문자열 데이터
- * @return std::optional<Transformation> 추출 성공 시 좌표 변환 정보, 실패 시 nullopt
+ * @brief       프레임 문자열에서 Transformation 파라미터(Translate, Scale)를 추출
+ * @details     각 태그는 오검색 방지를 위해 다음 태그 시작 전까지의 범위에서만 속성을 찾음
+ * @param       frame 파싱할 프레임 문자열 데이터
+ * @return      std::optional<Transformation> 추출 성공 시 좌표 변환 정보, 실패 시 nullopt
  */
 std::optional<Transformation> parseTransformation(std::string_view frame) {
     const size_t transPos = frame.find("<tt:Transformation");
@@ -142,20 +129,20 @@ std::optional<Transformation> parseTransformation(std::string_view frame) {
 }
 
 /**
- * @brief ONVIF 정규화 좌표를 domain::NormBox X 좌표계로 변환
- * @param px ONVIF 정규화 좌표 X ([-1,1], 원점 중앙)
- * @param t 프레임별 Transformation 정보
- * @return double 좌상단 원점 기준 정규화 좌표 [0,1]
+ * @brief       ONVIF 정규화 좌표를 domain::NormBox X 좌표계로 변환
+ * @param       px ONVIF 정규화 좌표 X ([-1,1], 원점 중앙)
+ * @param       t 프레임별 Transformation 정보
+ * @return      좌상단 원점 기준 정규화 좌표 [0,1]
  */
 double normX(double px, const Transformation& t) { return (t.scaleX * px + t.translateX + 1.0) * 0.5; }
 
 /**
- * @brief ONVIF 정규화 좌표를 domain::NormBox Y 좌표계로 변환
- * @note y축이 반전되어 보이는 건 카메라 설치 방향과 무관한 ONVIF 표준 좌표계.
- *       Scale_y 가 음수인 게 정상이며, 손으로 부호를 뒤집지 않고 스트림 값을 그대로 적용.
- * @param py ONVIF 정규화 좌표 Y ([-1,1], y 위쪽)
- * @param t 프레임별 Transformation 정보
- * @return double 좌상단 원점 기준 정규화 좌표 [0,1]
+ * @brief   ONVIF 정규화 좌표를 domain::NormBox Y 좌표계로 변환
+ * @note    y축이 반전되어 보이는 건 CCTV 설치 방향과 무관한 ONVIF 표준 좌표계
+ *          Scale_y 가 음수인 게 정상이며, 손으로 부호를 뒤집지 않고 스트림 값을 그대로 적용
+ * @param   py ONVIF 정규화 좌표 Y ([-1,1], y 위쪽)
+ * @param   t 프레임별 Transformation 정보
+ * @return  좌상단 원점 기준 정규화 좌표 [0,1]
  */
 double normY(double py, const Transformation& t) { return (1.0 - (t.scaleY * py + t.translateY)) * 0.5; }
 
@@ -165,16 +152,16 @@ constexpr double kEdgeEpsilon = 0.002;
 }  // namespace
 
 /**
- * @brief 메타데이터 RawPacket을 파싱하여 시스템 처리 단위인 ChannelFrame 으로 변환
+ * @brief   메타데이터 RawPacket을 파싱하여 시스템 처리 단위인 ChannelFrame 으로 변환
  *
  * @details
  * - 페이로드당 <tt:Frame> 이 하나라고 가정하며, 여러 개가 온다면 첫 번째만 처리함
- * - Transformation 파라미터 없이는 좌표를 신뢰할 수 없으므로 파싱을 중단하고 빈 프레임을 반환.
- * - ID 없는 객체, 위치(BBox)를 알 수 없는 객체, 분류(Type)가 없는 객체는 라우팅이 불가능하므로 스킵.
- * - 신뢰할 수 없는 데이터는 완전히 건너뛴 뒤 실제 Type 속성을 찾음.
+ * - Transformation 파라미터 없이는 좌표를 신뢰할 수 없으므로 파싱을 중단하고 빈 프레임을 반환
+ * - ID 없는 객체, 위치(BBox)를 알 수 없는 객체, 분류(Type)가 없는 객체는 라우팅이 불가능하므로 스킵
+ * - 신뢰할 수 없는 데이터는 완전히 건너뛴 뒤 실제 Type 속성을 찾음
  *
- * @param raw 파싱할 원본 메타데이터 바이트 배열이 담긴 패킷
- * @return domain::ChannelFrame 파싱된 결과 객체. 오류/누락 발생 시 예외 없이 빈 객체를 반환.
+ * @param   raw 파싱할 원본 메타데이터 바이트 배열이 담긴 패킷
+ * @return  domain::ChannelFrame 파싱된 결과 객체 (오류/누락 발생 시 예외 없이 빈 객체를 반환)
  */
 domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
     domain::ChannelFrame result;
@@ -267,15 +254,9 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
             searchFrom = candEnd + 20;  // strlen("</tt:ClassCandidate>")
         }
 
-        const size_t typePos = obj.find("<tt:Type Likelihood=\"", searchFrom);
+        const size_t typePos = obj.find("<tt:Type", searchFrom);
         if (typePos == std::string_view::npos)
             continue;
-
-        auto likelihoodAttr = extractQuoted(obj.substr(typePos), "Likelihood");
-        if (likelihoodAttr) {
-            if (auto lh = parseNumber<double>(*likelihoodAttr))
-                det.likelihood = *lh;
-        }
 
         const size_t typeTextStart = obj.find('>', typePos);
         if (typeTextStart == std::string_view::npos)

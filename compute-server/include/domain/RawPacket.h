@@ -1,9 +1,8 @@
 #pragma once
 
 /**
- * @file RawPacket.h
- * @brief Metadata raw byte
- * - IMetadataSource 의 출력, IMetadataParser 의 입력
+ * @file    RawPacket.h
+ * @brief   CCTV로부터 수신한 원본 Metadata 원본 패킷
  */
 
 #include <chrono>
@@ -15,24 +14,21 @@
 namespace domain {
 
 /**
- * @struct RawPacket
- * @brief 카메라로부터 수신한 원본 메타데이터 패킷 구조체
- *
- * @note
- * - ONVIF 형식 거의 고정
+ * @brief CCTV로부터 수신한 원본 Metadata 원본 패킷
  */
 struct RawPacket {
-    veda::ChannelId channelId = 0;  ///< 카메라 채널 ID
+    veda::ChannelId channelId = 0;  ///< CCTV 채널 ID
 
-    /// @brief ONVIF MetadataStream XML 원본 바이트 데이터
+    /// @brief 원본 바이트 데이터
     std::vector<std::uint8_t> bytes;
 
     /**
-     * @brief Pi 측(수신부) 도착 시각
-     * @details Δ = recvTime - (파싱된 Frame UtcTime) 측정용.
+     * @brief Pi 측 도착 시각
+     * @details Δ = recvTime - (패킷 내 Timestamp) 측정
      *
      * @note
-     * - LOG 용도
+     * -- Debug / Log 용도
+     * -- 추후에 IClock으로 추출 가능성
      */
     std::chrono::system_clock::time_point recvTime;
 };

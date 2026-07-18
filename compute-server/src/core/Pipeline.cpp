@@ -19,7 +19,6 @@ Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IIma
       riskSink_(std::move(riskSink)),
       blurSink_(std::move(blurSink)) {}
 
-/* 추후 Builder 패턴 도입할 수도..? */
 namespace {
 
 veda::BlurTarget toBlurTarget(const domain::DetectedObject& o) {
@@ -31,15 +30,15 @@ veda::BlurTarget toBlurTarget(const domain::DetectedObject& o) {
 }
 
 veda::TopViewObject toTopViewObject(const domain::DetectedObject& o, IGroundPointExtractor& ground,
-                                    ICoordinateTransform& transform) {
+                                    ICoordinateTransform& transform, bool& valid) {
     const domain::ImagePoint imgPoint = ground.extract(o.box);
-    const veda::WorldPoint worldPoint = transform.toWorld(imgPoint);
+    const auto worldPoint = transform.toWorld(imgPoint);
+    valid = worldPoint.has_value();
 
     veda::TopViewObject out;
     out.id = o.id;
     out.cls = o.cls;
-    out.pos = worldPoint;
-    out.conf = o.likelihood;
+    out.pos = worldPoint.value_or(veda::WorldPoint{});
     out.edge = o.touchesBorder;
     return out;
 }
@@ -66,7 +65,13 @@ void Pipeline::onPacket(const domain::RawPacket& raw) {
     riskFrame.ch = frame.channelId;
     riskFrame.objects.reserve(routed.risk.size());
     for (const auto& o : routed.risk) {
-        riskFrame.objects.push_back(toTopViewObject(o, *ground_, *transform_));
+        bool valid = true;
+        auto tvo = toTopViewObject(o, *ground_, *transform_, valid);
+        if (valid) {
+            riskFrame.objects.push_back(std::move(tvo));
+        } else {
+            // TODO: 좌표 산출 불가 시 행동
+        }
     }
     riskSink_->send(riskFrame);
 }

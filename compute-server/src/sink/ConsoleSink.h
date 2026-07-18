@@ -2,7 +2,7 @@
 
 /**
  * @file    ConsoleSink.h
- * @brief   Console에 사람이 읽을 수 있는 형태로 출력
+ * @brief   Console에 출력 (Debug)
  */
 
 #include <iostream>
@@ -16,9 +16,8 @@ public:
     void send(const veda::TopViewFrame& f) override {
         std::cout << "[RISK] ch=" << f.ch << " ts=" << f.ts << " objects=" << f.objects.size() << "\n";
         for (const auto& o : f.objects) {
-            std::cout << "    id=" << o.id << " cls=" << veda::toString(o.cls) << " conf=" << o.conf << " world=("
-                      << o.pos.x << "," << o.pos.y << ")"
-                      << " edge=" << o.edge << "\n";
+            std::cout << "    id=" << o.id << " cls=" << veda::toString(o.cls) << " world=(" << o.pos.x << ","
+                      << o.pos.y << ") edge=" << o.edge << "\n";
         }
     }
 };

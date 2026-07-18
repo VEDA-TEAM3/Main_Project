@@ -10,21 +10,16 @@
 #include "transform/HomographyTransform.h"
 
 AppContext::AppContext(const AppConfig& config) {
-    // --- Source -------------------------------------------------------
     source_ = std::make_shared<RtspOnvifSource>(config);
 
-    // --- Pipeline 구성 요소 --------------------------------------------
     auto parser = std::make_shared<OnvifParser>();
     auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
                                                                      config.imageMapOffsetX, config.imageMapOffsetY);
     auto sanitizer = std::make_shared<ContainmentSanitizer>(config.sanitizerIouThresh, config.sanitizerContainThresh);
     auto router = std::make_shared<ParentBasedRouter>();
     auto ground = std::make_shared<BottomCenterExtractor>();
+    auto transform = std::make_shared<HomographyTransform>(config.homography);
 
-    std::shared_ptr<ICoordinateTransform> transform;
-    transform = std::make_shared<HomographyTransform>(config.homography);
-
-    // --- Sink -----------------------------------------------------------
     auto riskSink = std::make_shared<ConsoleTopViewSink>();
     auto blurSink = std::make_shared<ConsoleBlurSink>();
 
