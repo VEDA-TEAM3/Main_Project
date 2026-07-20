@@ -3,7 +3,6 @@ language: "ko-KR"
 
 early_access: false
 reviews:
-  auto_review: true
   high_level_summary: false 
   
   profile: "assertive"
