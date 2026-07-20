@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file WorldPoint.h
- * @brief 관제 서버 내부용 물리 좌표
+ * @file    WorldPoint.h
+ * @brief   관제 서버 내부용 물리 좌표
  */
 
 namespace domain {

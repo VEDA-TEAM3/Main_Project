@@ -1,5 +1,7 @@
 #include "aggregate/TimeWindowAggregator.h"
 
+#include <iostream>
+
 TimeWindowAggregator::TimeWindowAggregator(std::shared_ptr<IClock> clock, uint64_t windowSizeMs)
     : clock_(std::move(clock)), windowSizeMs_(windowSizeMs), windowStartTime_(0) {}
 
@@ -13,17 +15,22 @@ void TimeWindowAggregator::push(const veda::TopViewFrame& frame) {
 
     auto now = clock_->now();
 
-    if (buffer_.empty()) {
+    if (latestByChannel_.empty()) {
         windowStartTime_ = now;
     }
 
     if (now - windowStartTime_ >= windowSizeMs_) {
-        if (callback_ && !buffer_.empty()) {
-            callback_(buffer_);
+        if (callback_ && !latestByChannel_.empty()) {
+            std::vector<veda::TopViewFrame> frames;
+            frames.reserve(latestByChannel_.size());
+            for (const auto& [ch, f] : latestByChannel_) {
+                frames.push_back(f);
+            }
+            callback_(std::move(frames));
         }
-        buffer_.clear();
+        latestByChannel_.clear();
         windowStartTime_ = now;
     }
 
-    buffer_.push_back(frame);
+    latestByChannel_[frame.ch] = frame;
 }

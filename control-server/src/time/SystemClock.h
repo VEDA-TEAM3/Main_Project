@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file SystemClock.h
- * @brief IClock 인터페이스의 실제 시스템 시간 구현체
+ * @file    SystemClock.h
+ * @brief   IClock 인터페이스의 실제 시스템 시간 구현체
  * @details 실제 운영 환경에서 NTP로 동기화된 시스템 표준 시간을 반환
  */
 

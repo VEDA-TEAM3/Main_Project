@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file EuclideanMetric.h
- * @brief 유클리드 거리 계산 구현체
+ * @file    EuclideanMetric.h
+ * @brief   유클리드 거리 계산 구현체
  */
 
 #include "interfaces/IDistanceMetric.h"

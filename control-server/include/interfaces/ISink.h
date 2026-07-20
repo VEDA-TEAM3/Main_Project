@@ -1,8 +1,9 @@
 #pragma once
 
 /**
- * @file ISink.h
- * @brief 최종 관제 데이터 전송 인터페이스
+ * @file    ISink.h
+ * @brief   최종 관제 데이터 전송 인터페이스
+ *
  * @details
  * 객체 융합 및 위험도 판정까지 모두 완료된 최종 도면 데이터를
  * 시각화를 담당하는 외부 시스템으로 전송

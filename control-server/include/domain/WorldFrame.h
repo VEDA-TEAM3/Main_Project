@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file WorldFrame.h
- * @brief 특정 Timestamp에 4채널이 융합된 교차로 전체의 프레임 상태
+ * @file    WorldFrame.h
+ * @brief   특정 Timestamp에 채널이 융합된 교차로 전체의 프레임 상태
  */
 
 #include <vector>

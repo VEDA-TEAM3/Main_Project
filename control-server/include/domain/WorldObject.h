@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file    WorldObject.h
+ * @brief   월드 좌표 내의 객체
+ */
+
 #include <vector>
 
 #include "Contract.h"
@@ -12,20 +17,22 @@ struct WorldObject {
     veda::ObjectClass cls = veda::ObjectClass::Unknown;
     WorldPoint pos;
 
-    // --- IRiskPolicy 가 채우는 필드 (dedup·zone 배정 이후 실행) ---
+    /**
+     * @brief 위험 레벨
+     *
+     * @note
+     * - 주의: cls에 따라 의미가 달라짐
+     * -- Vehicle:  차량은 평가의 대상
+     * -- Human:    스스로 평가되지 않으며, 차량의 nearestObj로 지목된 경우 채워짐
+     */
     veda::RiskLevel riskLevel = veda::RiskLevel::None;
 
-    /* 있어야 할 필요가 있는지 고민해봐야 함 */
     veda::GlobalId nearestObj = 0;
     double nearestDist = -1.0;
-    /* end */
 
-    // --- IZoneMapper 가 채우는 필드 (dedup 이후, RiskPolicy 이전 실행) ---
-    veda::ChannelId zoneId = -1;  ///< 액추에이터 귀속 채널. -1 = 미배정(zone 밖 등 예외)
+    veda::ChannelId zoneId = -1;
 
-    // --- ICrossChannelFuser 가 채우는 필드 (dedup 결과 기록용) ---
-    std::vector<veda::ChannelId> sourceChannels;  ///< 이 객체를 감지한 원본 채널(들).
-                                                  ///< dedup 병합되면 2개 이상. 로그/디버깅 전용, 제어 로직에 사용 금지.
+    std::vector<veda::ChannelId> sourceChannels;  ///< dedup 병합되면 2개 이상
 };
 
 }  // namespace domain

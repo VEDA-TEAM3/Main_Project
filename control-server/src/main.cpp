@@ -11,5 +11,10 @@ int main() {
 
     controller->start();
 
+    std::cout << "종료하려면 Enter 키를 누르세요.\n";
+    std::cin.get();
+
+    controller->stop();
+
     return 0;
 }
