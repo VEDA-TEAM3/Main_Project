@@ -1,9 +1,8 @@
-// ConsoleDispatcher.h
 #pragma once
 
 /**
- * @file ConsoleDispatcher.h
- * @brief STM32로 통지될 위험 이벤트를 콘솔 출력으로 시뮬레이션하는 구현체
+ * @file    ConsoleDispatcher.h
+ * @brief   STM32로 통지될 위험 이벤트를 콘솔 출력으로 시뮬레이션하는 구현체
  * @details 관제 서버는 HW 상태를 직접 결정하지 않음
  */
 

@@ -1,8 +1,8 @@
 #pragma once
 
 /**
- * @file AppContext.h
- * @brief 애플리케이션의 모든 의존성을 조립하고 관리하는 DI 컨테이너
+ * @file     AppContext.h
+ * @brief   애플리케이션의 모든 의존성을 조립하고 관리하는 DI 컨테이너
  */
 
 #include <memory>

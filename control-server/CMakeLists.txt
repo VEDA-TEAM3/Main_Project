@@ -4,6 +4,7 @@ project(ControlServer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(control-server
@@ -18,7 +19,8 @@ add_executable(control-server
     src/risk/ThresholdRiskPolicy.cpp
     src/dispatch/ConsoleDispatcher.cpp
     src/sink/ConsoleSink.cpp
-    src/zone/NullZoneMapper.cpp
+    src/zone/AngleZoneMapper.cpp
+    src/transform/NullTransform.cpp
 )
 
 target_include_directories(control-server PRIVATE 
@@ -28,5 +30,6 @@ target_include_directories(control-server PRIVATE
 )
 
 target_link_libraries(control-server PRIVATE
+    OpenSSL::Crypto
     Threads::Threads
 )

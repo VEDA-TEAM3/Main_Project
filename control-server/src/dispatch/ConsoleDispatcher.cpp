@@ -1,4 +1,3 @@
-// ConsoleDispatcher.cpp
 #include "dispatch/ConsoleDispatcher.h"
 
 #include <iostream>
