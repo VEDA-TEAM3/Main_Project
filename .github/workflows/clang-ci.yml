@@ -7,16 +7,15 @@ on:
       - '**/*.c'
       - '**/*.cpp'
       - '**/*.h'
+      - '**/*.hpp'
       - '**/CMakeLists.txt'
 
 jobs:
-  clang-format:
-    name: clang-format
+  format-check:
+    name: 🎨 Format Check
     runs-on: self-hosted
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install clang-format
         run: |
@@ -42,150 +41,105 @@ jobs:
 
           clang-format-18 --dry-run --Werror $FILES
 
-  clang-tidy:
-    name: clang-tidy
-    runs-on: self-hosted
-    env:
-      CC: gcc-10
-      CXX: g++-10
-      OPENCV_VERSION: 4.10.0
+      - name: Send Slack Alert (Format)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Format 에러] 코드 띄어쓰기/포맷이 프로젝트 컨벤션에 어긋납니다. (Shift+Alt+F 사용 요망)"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
+  tidy-check:
+    name: ☢️ Static Analysis (Tidy)
+    runs-on: self-hosted
+    needs: format-check
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure runner cache paths
-        run: echo "OPENCV_INSTALL_DIR=${RUNNER_TOOL_CACHE}/opencv/4.10.0-gcc10" >> "$GITHUB_ENV"
-
-      - name: Install build tools
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            ca-certificates \
-            clang-tidy \
-            curl \
-            g++-10 \
-            gcc-10 \
-            git \
-            gzip \
-            libcurl4-openssl-dev \
-            libmicrohttpd-dev \
-            libmosquitto-dev \
-            libsqlite3-dev \
-            libssl-dev \
-            ninja-build \
-            nlohmann-json3-dev \
-            pkg-config \
-            tar
+          sudo apt-get install -y ca-certificates clang-tidy g++-10 gcc-10 \
+          libssl-dev jq nlohmann-json3-dev libmosquitto-dev
 
-      - name: Configure CMake
+      - name: Configure CMake projects (For compile_commands.json)
         run: |
-          test -x /snap/bin/cmake
-          echo "/snap/bin" >> "$GITHUB_PATH"
-          /snap/bin/cmake --version
-          "$CC" --version
-          "$CXX" --version
+          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+            dir=$(dirname "$file")
+            echo "Configuring CMake in $dir"
+            cmake -S "$dir" -B "$dir/build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          done
 
-      - name: Prepare runner OpenCV cache
+      - name: Merge compile_commands.json
         run: |
-          config_dir="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
-          if [[ -f "${config_dir}/OpenCVConfig.cmake" && \
-                -f "${config_dir}/OpenCVConfig-version.cmake" ]]; then
-            echo "Using runner-cached OpenCV ${OPENCV_VERSION} from ${OPENCV_INSTALL_DIR}"
+          FILES=$(find . -type f -path "*/build/compile_commands.json")
+          if [ -n "$FILES" ]; then
+            jq -s 'add' $FILES > compile_commands.json
           else
-            bash .github/scripts/install-opencv.sh "${OPENCV_VERSION}" "${OPENCV_INSTALL_DIR}"
+            echo "[]" > compile_commands.json
           fi
 
-      - name: Verify OpenCV installation
-        run: |
-          config_dir="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
-          test -f "${config_dir}/OpenCVConfig.cmake"
-          test -f "${config_dir}/OpenCVConfig-version.cmake"
+      - name: Run Clang-Tidy
+        id: linter
+        uses: cpp-linter/cpp-linter-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          style: ''
+          tidy-checks: ''
+          database: '.'
+          ignore: '.github|build|third_party'
+          files-changed-only: true
 
-      - name: Configure
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DOpenCV_DIR:PATH="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
+      - name: Fail workflow if tidy failed
+        if: steps.linter.outputs.checks-failed > 0
+        run: exit 1
 
-      - name: Run clang-tidy
-        run: |
-          find . \
-            -type f \( \
-              -name "*.c" -o \
-              -name "*.cpp" -o \
-            \) \
-            -not -path "./build/*" \
-            -not -path "./.git/*" \
-            -not -path "./.opencv/*" \
-            -not -path "./control-center/*" \
-            -not -path "./device-rpi/kernel/*" \
-            -not -path "./stm32/*" \
-            -not -path "./tmp/*" \
-            -print0 | xargs -0 clang-tidy --quiet -p build
+      - name: Send Slack Alert (Tidy)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C/C++ 원칙 위반이 발견되었습니다."
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  build:
-    runs-on: self-hosted
+  build-check:
+    name: 🔨 Build Check
+    runs-on: self-hosted  
     env:
       CC: gcc-10
       CXX: g++-10
-      OPENCV_VERSION: 4.10.0
-
+    needs: tidy-check
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure runner cache paths
-        run: echo "OPENCV_INSTALL_DIR=${RUNNER_TOOL_CACHE}/opencv/4.10.0-gcc10" >> "$GITHUB_ENV"
-
-      - name: Install build tools
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            ca-certificates \
-            curl \
-            g++-10 \
-            gcc-10 \
-            git \
-            gzip \
-            libcurl4-openssl-dev \
-            libmicrohttpd-dev \
-            libmosquitto-dev \
-            libsqlite3-dev \
-            libssl-dev \
-            ninja-build \
-            nlohmann-json3-dev \
-            pkg-config \
-            tar
+          sudo apt-get install -y ca-certificates g++-10 gcc-10 \
+          libopencv-dev libssl-dev nlohmann-json3-dev libmosquitto-dev
 
-      - name: Configure CMake
+      - name: Build all CMake projects
         run: |
-          test -x /snap/bin/cmake
-          echo "/snap/bin" >> "$GITHUB_PATH"
-          /snap/bin/cmake --version
-          "$CC" --version
-          "$CXX" --version
+          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+            dir=$(dirname "$file")
+            echo "========================================="
+            echo "Building project in: $dir"
+            echo "========================================="
+            cmake -S "$dir" -B "$dir/build"
+            cmake --build "$dir/build" -j$(nproc)
+          done
 
-      - name: Prepare runner OpenCV cache
-        run: |
-          config_dir="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
-          if [[ -f "${config_dir}/OpenCVConfig.cmake" && \
-                -f "${config_dir}/OpenCVConfig-version.cmake" ]]; then
-            echo "Using runner-cached OpenCV ${OPENCV_VERSION} from ${OPENCV_INSTALL_DIR}"
-          else
-            bash .github/scripts/install-opencv.sh "${OPENCV_VERSION}" "${OPENCV_INSTALL_DIR}"
-          fi
-
-      - name: Verify OpenCV installation
-        run: |
-          config_dir="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
-          test -f "${config_dir}/OpenCVConfig.cmake"
-          test -f "${config_dir}/OpenCVConfig-version.cmake"
-
-      - name: Configure
-        run: |
-          cmake -S . -B build \
-            -DOpenCV_DIR:PATH="${OPENCV_INSTALL_DIR}/lib/cmake/opencv4"
-
-      - name: Build
-        run: cmake --build build --parallel 2
+      - name: Send Slack Alert (Build)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
