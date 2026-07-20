@@ -1,11 +1,13 @@
-# .coderabbit.yaml
 language: "ko-KR"
 
 early_access: false
 reviews:
-  high_level_summary: false 
-  
   profile: "assertive"
+  
+  auto_review:
+    enabled: true
+    
+  high_level_summary: false 
   poem: false
   review_status: true
 
