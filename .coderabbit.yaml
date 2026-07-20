@@ -6,12 +6,10 @@ reviews:
   
   auto_review:
     enabled: true
-  high_level_summary:
-    enabled: false 
-  poem:
-    enabled: false
-  review_status:
-    enabled: true
+    
+  high_level_summary: false 
+  poem: false
+  review_status: true
 
   custom_instructions: |
     당신은 대용량 영상 스트림을 처리하는 고성능 C/C++ 시스템의 수석 아키텍트입니다.
