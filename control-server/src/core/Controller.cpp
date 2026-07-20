@@ -14,7 +14,8 @@ Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_p
       sink_(std::move(sink)) {
     receiver_->setCallback([this](const veda::TopViewFrame& frame) { aggregator_->push(frame); });
 
-    aggregator_->setCallback([this](std::vector<veda::TopViewFrame> frames) { this->processPipeline(std::move(frames)); });
+    aggregator_->setCallback(
+        [this](std::vector<veda::TopViewFrame> frames) { this->processPipeline(std::move(frames)); });
 }
 
 void Controller::start() { receiver_->start(); }

@@ -12,7 +12,8 @@ AffineLocalToWorldTransform::AffineLocalToWorldTransform(std::vector<CameraCalib
 
 const CameraCalibration* AffineLocalToWorldTransform::find(veda::ChannelId ch) const {
     for (const auto& c : calibrations_) {
-        if (c.channelId == ch) return &c;
+        if (c.channelId == ch)
+            return &c;
     }
     return nullptr;
 }
