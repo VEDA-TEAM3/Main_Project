@@ -7,7 +7,6 @@ on:
       - '**/*.c'
       - '**/*.cpp'
       - '**/*.h'
-      - '**/*.hpp'
       - '**/CMakeLists.txt'
 
 jobs:
@@ -28,7 +27,7 @@ jobs:
             -type f \( \
               -name "*.c" -o \
               -name "*.cpp" -o \
-              -name "*.h" -o \
+              -name "*.h" \
             \) \
             -not -path "./build/*" \
             -not -path "./device-rpi/kernel/*" \
