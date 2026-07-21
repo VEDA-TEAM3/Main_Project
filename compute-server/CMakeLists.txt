@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
 add_executable(compute-server
     src/main.cpp
@@ -19,6 +21,7 @@ add_executable(compute-server
     src/route/ParentBasedRouter.cpp
     src/ground/BottomCenterExtractor.cpp
     src/transform/HomographyTransform.cpp
+    src/sink/MqttSink.cpp
 )
 
 target_include_directories(compute-server PRIVATE 
@@ -29,4 +32,5 @@ target_include_directories(compute-server PRIVATE
 target_link_libraries(compute-server PRIVATE
     OpenSSL::Crypto
     Threads::Threads
+    PkgConfig::MOSQUITTO
 )

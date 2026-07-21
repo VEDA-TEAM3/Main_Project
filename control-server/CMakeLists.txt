@@ -6,19 +6,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
 add_executable(control-server
     src/main.cpp
     src/core/AppContext.cpp
     src/core/Controller.cpp
-    src/receive/NullReceiver.cpp
+    src/receive/MqttChannelReceiver.cpp
     src/aggregate/TimeWindowAggregator.cpp
     src/time/SystemClock.cpp
     src/fuse/ConcatFuser.cpp
     src/metric/EuclideanMetric.cpp
     src/risk/ThresholdRiskPolicy.cpp
     src/dispatch/ConsoleDispatcher.cpp
-    src/sink/ConsoleSink.cpp
+    src/sink/MqttTransport.cpp
     src/zone/AngleZoneMapper.cpp
     src/transform/NullTransform.cpp
 )
@@ -32,4 +34,5 @@ target_include_directories(control-server PRIVATE
 target_link_libraries(control-server PRIVATE
     OpenSSL::Crypto
     Threads::Threads
+    PkgConfig::MOSQUITTO
 )
