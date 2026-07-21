@@ -2,9 +2,15 @@
 
 #include <algorithm>
 #include <numeric>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "log/Logger.h"
+
 namespace {
+
+constexpr const char* kIface = "Fuser";
 
 struct Candidate {
     veda::ChannelId ch = -1;
@@ -61,7 +67,13 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<veda::TopViewFrame>& fram
                          [](const veda::TopViewFrame& a, const veda::TopViewFrame& b) { return a.ts < b.ts; });
     worldFrame.timestamp = minTimestampIt->ts;
 
+    std::size_t totalObjects = 0;
+    for (const auto& frame : frames) {
+        totalObjects += frame.objects.size();
+    }
+
     std::vector<Candidate> candidates;
+    candidates.reserve(totalObjects);
     for (const auto& frame : frames) {
         for (const auto& obj : frame.objects) {
             Candidate c;
@@ -108,6 +120,7 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<veda::TopViewFrame>& fram
         clusters[ds.find(i)].push_back(i);
     }
 
+    worldFrame.objects.reserve(clusters.size());
     for (const auto& members : clusters) {
         if (members.empty())
             continue;
@@ -115,6 +128,7 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<veda::TopViewFrame>& fram
         domain::WorldObject wObj;
         wObj.gid = nextGlobalId_.fetch_add(1, std::memory_order_relaxed);
         wObj.cls = candidates[members.front()].cls;
+        wObj.sourceChannels.reserve(members.size());
 
         double sumX = 0.0, sumY = 0.0;
         for (size_t idx : members) {
@@ -130,7 +144,14 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<veda::TopViewFrame>& fram
         wObj.nearestDist = -1.0;
         wObj.zoneId = -1;
 
-        worldFrame.objects.push_back(wObj);
+        worldFrame.objects.push_back(std::move(wObj));
+    }
+
+    const std::size_t mergedCount = candidates.size() - worldFrame.objects.size();
+    if (mergedCount > 0) {
+        logSuccess(kIface, "채널 간 중복 " + std::to_string(mergedCount) + "개 병합 (" +
+                                std::to_string(candidates.size()) + "개 후보 → " +
+                                std::to_string(worldFrame.objects.size()) + "개 객체)");
     }
 
     return worldFrame;

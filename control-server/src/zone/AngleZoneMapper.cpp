@@ -1,10 +1,13 @@
 #include "zone/AngleZoneMapper.h"
 
 #include <cmath>
-#include <iostream>
+#include <string>
+
+#include "log/Logger.h"
 
 namespace {
 
+constexpr const char* kIface = "ZoneMapper";
 constexpr double kPi = 3.14159265358979323846;
 
 double normalizeDeg(double deg) {
@@ -39,8 +42,8 @@ void AngleZoneMapper::assign(domain::WorldFrame& frame) {
         }
 
         if (obj.zoneId == -1) {
-            std::cerr << "[AngleZoneMapper] 경고: gid=" << obj.gid << " angle=" << angleDeg
-                      << "deg 에 해당하는 zoneBoundary 없음 — 미배정으로 남김\n";
+            logError(kIface, "gid=" + std::to_string(obj.gid) + " angle=" + std::to_string(angleDeg) +
+                                  "deg 에 해당하는 zoneBoundary 없음 — 미배정으로 남김");
         }
     }
 }

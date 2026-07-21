@@ -12,7 +12,7 @@ add_executable(control-server
     src/core/AppContext.cpp
     src/core/Controller.cpp
     src/receive/NullReceiver.cpp
-    src/aggregate/TimeWindowAggregator.cpp
+    src/aggregate/TimeWindowAggregatorV2.cpp
     src/time/SystemClock.cpp
     src/fuse/ConcatFuser.cpp
     src/metric/EuclideanMetric.cpp
@@ -28,6 +28,8 @@ target_include_directories(control-server PRIVATE
     src
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
+
+target_compile_options(compute-server PRIVATE -O2)
 
 target_link_libraries(control-server PRIVATE
     OpenSSL::Crypto

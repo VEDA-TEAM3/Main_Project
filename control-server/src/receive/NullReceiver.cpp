@@ -1,6 +1,13 @@
 #include "receive/NullReceiver.h"
 
 #include <chrono>
+#include <string>
+
+#include "log/Logger.h"
+
+namespace {
+constexpr const char* kIface = "Receiver";
+}  // namespace
 
 NullReceiver::NullReceiver(int channelCount, uint64_t baseIntervalMs, uint64_t jitterStepMs)
     : channelCount_(channelCount), baseIntervalMs_(baseIntervalMs), jitterStepMs_(jitterStepMs) {}
@@ -26,6 +33,8 @@ void NullReceiver::start() {
             aliveCallback_(ch, true);
         }
     }
+
+    logSuccess(kIface, "시뮬레이션 채널 " + std::to_string(channelCount_) + "개 시작 (테스트용 NullReceiver)");
 }
 
 void NullReceiver::stop() {
@@ -38,6 +47,8 @@ void NullReceiver::stop() {
         }
     }
     workers_.clear();
+
+    logSuccess(kIface, "시뮬레이션 채널 정지");
 }
 
 void NullReceiver::channelLoop(veda::ChannelId ch) {
