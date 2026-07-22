@@ -6,11 +6,11 @@
 #include "route/ParentBasedRouter.h"
 #include "sanitize/ContainmentSanitizer.h"
 #include "sink/ConsoleSink.h"
-#include "source/RtspOnvifSource.h"
+#include "source/RtspOnvifSourceV2.h"
 #include "transform/HomographyTransform.h"
 
 AppContext::AppContext(const AppConfig& config) {
-    source_ = std::make_shared<RtspOnvifSource>(config);
+    source_ = std::make_shared<RtspOnvifSourceV2>(config);
 
     auto parser = std::make_shared<OnvifParser>();
     auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,

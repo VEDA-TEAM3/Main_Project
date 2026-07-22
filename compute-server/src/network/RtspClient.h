@@ -6,6 +6,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -71,7 +72,15 @@ private:
      */
     void keepAliveLoop();
 
+    /**
+     * @brief   일정 주기(kMetricsReportInterval)마다 누적된 성능 지표를 로그로 출력
+     * @details RtspClientV2와 동일한 항목(평균 프레임 조립 시간, 프레임당 recv() 호출 수,
+     *          처리율/처리량)을 측정해 V1/V2 성능을 직접 비교할 수 있게 함
+     */
+    void reportMetricsIfDue();
+
     static constexpr int kRtpHeaderSize = 12;
+    static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
 
     AppConfig cfg_;
     int sock_ = -1;
@@ -82,4 +91,16 @@ private:
     int nonceCount_ = 1;
     std::atomic<bool> keepRunning_{false};
     std::thread keepaliveThread_;
+
+    /// @brief 성능 지표 누적 상태 (readExact/run에서 갱신, reportMetricsIfDue에서 소비)
+    struct Metrics {
+        std::uint64_t payloadCount = 0;   ///< 조립 완료된 metadata payload 개수
+        std::uint64_t recvSyscalls = 0;   ///< 실제 recv() 호출 횟수
+        std::uint64_t totalBytes = 0;     ///< 조립된 payload 총 바이트 수
+        std::chrono::nanoseconds totalAssembleTime{0};  ///< payload 조립에 걸린 시간 합
+        std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
+    } metrics_;
+
+    /// @brief 현재 조립 중인 metadata frame의 시작 시각 (지표 측정용)
+    std::chrono::steady_clock::time_point frameAssembleStart_;
 };
