@@ -18,31 +18,17 @@ struct AppConfig;
  *
  * MqttChannelReceiver and MQTT sinks share this object. Application callbacks
  * are invoked on Mosquitto's network thread and therefore must be non-blocking.
+ *
+ * 접속 정보는 전부 AppConfig에서 직접 읽어옴 (mqttBrokerUrl을 host/port/TLS 여부로 파싱,
+ * clientId/keepAlive/재연결 대기시간도 AppConfig 값을 그대로 사용) -> 하드코딩도,
+ * 별도 Config 복제도 없음. 로그는 log/Logger.h의 logSuccess/logError만 사용
+ * (호출 스레드를 막지 않는 비동기 배치 기록 -> mosquitto 콜백 스레드에서 안전하게 호출 가능)
  */
 class MqttTransport final : public ISink {
 public:
-    struct Config {
-        std::string host = "172.20.27.174";
-        int port = 8883;
-        std::string clientId = "veda-control";
-        int keepAliveSeconds = 60;
-        int reconnectDelaySeconds = 1;
-        int reconnectDelayMaxSeconds = 10;
-
-        bool useTls = true;
-        std::string caFile = "/etc/veda/certs/ca.crt";
-        std::string clientCertificateFile;
-        std::string clientKeyFile;
-        bool tlsInsecure = false;
-
-        std::string username;
-        std::string password;
-    };
-
     using MessageHandler = std::function<void(std::string_view topic, std::string_view payload)>;
     using ConnectionHandler = std::function<void(bool connected, int resultCode)>;
 
-    explicit MqttTransport(Config config);
     explicit MqttTransport(const AppConfig& config);
     ~MqttTransport() noexcept;
 
@@ -63,7 +49,6 @@ public:
 
     bool isRunning() const noexcept { return running_.load(std::memory_order_acquire); }
     bool isConnected() const noexcept { return connected_.load(std::memory_order_acquire); }
-    const Config& config() const noexcept { return config_; }
 
 private:
     struct Subscription {
@@ -79,8 +64,23 @@ private:
     void destroyClient() noexcept;
     void notifyConnection(bool connected, int resultCode) noexcept;
 
-    Config config_;
-    std::string publishTopic_ = veda::topic::kRisk;
+    std::string host_ = "172.20.27.174";  ///< AppConfig::mqttBrokerUrl 에서 파싱
+    int port_ = 8883;                     ///< AppConfig::mqttBrokerUrl 에서 파싱
+    std::string clientId_;                ///< AppConfig::mqttClientId, 비어있으면 자동 생성
+    int keepAliveSeconds_ = 60;           ///< AppConfig::mqttKeepAliveSeconds
+    int reconnectDelaySeconds_ = 1;       ///< AppConfig::mqttReconnectDelaySeconds
+    int reconnectDelayMaxSeconds_ = 10;   ///< AppConfig::mqttReconnectDelayMaxSeconds
+
+    bool useTls_ = true;  ///< AppConfig::mqttBrokerUrl 스킴(tcp/mqtt vs ssl/mqtts)에서 파싱
+    std::string caFile_ = "/etc/veda/certs/ca.crt";  ///< AppConfig::mqttCaFile
+    std::string clientCertificateFile_;
+    std::string clientKeyFile_;
+    bool tlsInsecure_ = false;
+
+    std::string username_;
+    std::string password_;
+
+    std::string publishTopic_;  ///< AppConfig::mqttSendTopic (비어있으면 veda::topic::kRisk)
     mosquitto* client_ = nullptr;
 
     mutable std::mutex clientMutex_;

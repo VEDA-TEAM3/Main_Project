@@ -18,8 +18,8 @@
 #include <unordered_map>
 
 #include "Contract.h"
-#include "interfaces/IHwEventDispatcher.h"
 #include "driver_protocol.h"
+#include "interfaces/IHwEventDispatcher.h"
 
 class SerialHwEventDispatcher : public IHwEventDispatcher {
 public:

@@ -29,7 +29,8 @@ add_executable(compute-server
     src/route/ParentBasedRouter.cpp
     src/ground/BottomCenterExtractor.cpp
     src/transform/HomographyTransform.cpp
-    src/sink/MqttSink.cpp
+    src/sink/MqttBlurSink.cpp
+    src/sink/MqttTopViewSink.cpp
 )
 
 target_include_directories(

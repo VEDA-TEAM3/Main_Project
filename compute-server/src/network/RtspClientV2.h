@@ -105,6 +105,15 @@ private:
      */
     static constexpr std::size_t kMaxMetadataFrameBytes = 1024 * 1024;
 
+    /**
+     * @brief   connect()의 최대 대기 시간 (초)
+     * @details SO_RCVTIMEO는 recv()에만 적용되고 connect() 자체에는 영향이 없어서,
+     *          카메라가 응답 없거나 방화벽이 SYN을 조용히 버리면 커널 기본 타임아웃
+     *          (Linux 기본 tcp_syn_retries 기준 1~2분)까지 아무 로그 없이 블로킹됨
+     *          -> 논블로킹 connect + select()로 여기서 명시적으로 제한
+     */
+    static constexpr int kConnectTimeoutSec = 5;
+
     /// @brief 성능 지표를 로그로 남기는 주기
     static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
 

@@ -18,6 +18,9 @@
 struct AppConfig {
     veda::ChannelId channelId = 0;
 
+    /// @brief 전체 채널 수 (BlurFrame 유효성 검사 등 채널 범위 판단에 사용, [0, channelCount) 가정)
+    int channelCount = 4;
+
     // Network
     std::string rtspUrl;
     int rtspLatencyMs = 200;
@@ -41,7 +44,26 @@ struct AppConfig {
     // Homography
     std::array<double, 9> homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
 
-    // TODO: sinks.risk / sinks.blur MQTT 브로커 주소
+    // MQTT (공통 브로커 접속 정보) — MqttBlurSink/MqttTopViewSink가 각자의 mosquitto
+    // 클라이언트로 동일한 브로커에 연결하므로, 접속 정보(호스트/포트/CA/keepalive/재시도
+    // 간격)는 하나로 통일 (예전엔 Blur/TopView가 각각 중복 필드를 가져서 한쪽만 값을
+    // 고치고 나머지를 빠뜨리면 서로 다른 브로커/인증서로 갈라지는 사고가 있었음)
+    std::string mqttHost;
+    int mqttPort = 8883;
+    std::string mqttCaFile;
+    int mqttKeepAliveSeconds = 30;
+
+    /// @brief MqttBlurSink/MqttTopViewSink가 최초 연결에 실패했을 때 재시도하는 간격 (ms)
+    int mqttRetryIntervalMs = 2000;
+
+    // MQTT (Blur sink 전용) — clientId/큐 크기는 sink마다 독립적이어야 하므로 분리
+    // (clientId는 두 sink가 같은 브로커에 서로 다른 연결로 붙으므로 반드시 달라야 함)
+    std::string mqttBlurClientId;  ///< 비어있으면 MqttBlurSink가 자동 생성
+    int mqttBlurMaxQueueSize = 8;
+
+    // MQTT (TopView/risk sink 전용)
+    std::string mqttTopViewClientId;  ///< 비어있으면 MqttTopViewSink가 자동 생성
+    int mqttTopViewMaxQueueSize = 8;
 
     /**
      * @brief       외부 JSON 설정 파일에서 AppConfig를 로드하는 함수
@@ -67,6 +89,7 @@ struct AppConfig {
         }
 
         cfg.channelId = veda::detail::get_or<veda::ChannelId>(j, "channelId", cfg.channelId);
+        cfg.channelCount = veda::detail::get_or<int>(j, "channelCount", cfg.channelCount);
 
         cfg.rtspUrl = veda::detail::get_or<std::string>(j, "rtspUrl", cfg.rtspUrl);
         cfg.rtspLatencyMs = veda::detail::get_or<int>(j, "rtspLatencyMs", cfg.rtspLatencyMs);
@@ -95,6 +118,19 @@ struct AppConfig {
             std::cerr << "[Config] 경고: homography 배열 크기가 9가 아닙니다 (" << homographyIn.size()
                       << "개) — 기본값을 유지합니다.\n";
         }
+
+        cfg.mqttHost = veda::detail::get_or<std::string>(j, "mqttHost", cfg.mqttHost);
+        cfg.mqttPort = veda::detail::get_or<int>(j, "mqttPort", cfg.mqttPort);
+        cfg.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", cfg.mqttCaFile);
+        cfg.mqttKeepAliveSeconds = veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", cfg.mqttKeepAliveSeconds);
+        cfg.mqttRetryIntervalMs = veda::detail::get_or<int>(j, "mqttRetryIntervalMs", cfg.mqttRetryIntervalMs);
+
+        cfg.mqttBlurClientId = veda::detail::get_or<std::string>(j, "mqttBlurClientId", cfg.mqttBlurClientId);
+        cfg.mqttBlurMaxQueueSize = veda::detail::get_or<int>(j, "mqttBlurMaxQueueSize", cfg.mqttBlurMaxQueueSize);
+
+        cfg.mqttTopViewClientId = veda::detail::get_or<std::string>(j, "mqttTopViewClientId", cfg.mqttTopViewClientId);
+        cfg.mqttTopViewMaxQueueSize =
+            veda::detail::get_or<int>(j, "mqttTopViewMaxQueueSize", cfg.mqttTopViewMaxQueueSize);
 
         return cfg;
     }

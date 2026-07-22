@@ -5,7 +5,8 @@
 #include "parser/OnvifParser.h"
 #include "route/ParentBasedRouter.h"
 #include "sanitize/ContainmentSanitizer.h"
-#include "sink/ConsoleSink.h"
+#include "sink/MqttBlurSink.h"
+#include "sink/MqttTopViewSink.h"
 #include "source/RtspOnvifSourceV2.h"
 #include "transform/HomographyTransform.h"
 
@@ -20,8 +21,8 @@ AppContext::AppContext(const AppConfig& config) {
     auto ground = std::make_shared<BottomCenterExtractor>();
     auto transform = std::make_shared<HomographyTransform>(config.homography);
 
-    auto riskSink = std::make_shared<ConsoleTopViewSink>();
-    auto blurSink = std::make_shared<ConsoleBlurSink>();
+    auto riskSink = std::make_shared<MqttTopViewSink>(config);
+    auto blurSink = std::make_shared<MqttBlurSink>(config);
 
     pipeline_ =
         std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink, blurSink);

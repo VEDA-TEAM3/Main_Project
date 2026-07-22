@@ -14,6 +14,9 @@ namespace {
 
 constexpr const char* kIface = "Parser";
 
+/// @brief 인식 안 되는 <tt:Type> 문자열 진단 로그 rate-limit용 (파서는 채널당 단일 스레드에서만 호출됨)
+std::uint64_t g_unknownTypeCount = 0;
+
 /**
  * @brief   안전한 숫자 파싱을 위한 std::from_chars 래퍼 함수
  * @tparam  T 파싱할 숫자의 타입
@@ -293,6 +296,18 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
         const std::string_view typeText = obj.substr(typeTextStart + 1, typeTextEnd - typeTextStart - 1);
         det.cls = veda::objectClassFromString(typeText);
+
+        if (det.cls == veda::ObjectClass::Unknown) {
+            // objectClassFromString이 "Human"/"Vehicle"/"Head"/"LicensePlate" 외의 문자열은
+            // 전부 Unknown으로 처리하는데, 이게 파싱 실패가 아니라 "정상적으로 인식된 미지원 값"이라
+            // 별도로 로그를 안 남기면 blur가 조용히 걸러지는 원인을 추적할 수 없음
+            ++g_unknownTypeCount;
+            if (g_unknownTypeCount == 1 || g_unknownTypeCount % 100 == 0) {
+                logError(kIface, "ch=" + std::to_string(raw.channelId) + " id=" + std::to_string(det.id) +
+                                     " 인식 안 되는 Type=\"" + std::string(typeText) + "\" -> Unknown 처리 (누적 " +
+                                     std::to_string(g_unknownTypeCount) + "건)");
+            }
+        }
 
         result.objects.push_back(std::move(det));
     }
