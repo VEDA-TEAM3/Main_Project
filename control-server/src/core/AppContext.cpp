@@ -5,9 +5,9 @@
 #include "fuse/ConcatFuser.h"
 #include "log/Logger.h"
 #include "metric/EuclideanMetric.h"
-#include "receive/NullReceiver.h"
+#include "receive/MqttChannelReceiver.h"
 #include "risk/ThresholdRiskPolicy.h"
-#include "sink/ConsoleSink.h"
+#include "sink/MqttTransport.h"
 #include "time/SystemClock.h"
 #include "transform/NullTransform.h"
 #include "zone/AngleZoneMapper.h"
@@ -22,7 +22,7 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto clock = std::make_shared<SystemClock>();
     auto metric = std::make_shared<EuclideanMetric>();
 
-    auto receiver = std::make_shared<NullReceiver>();
+    auto receiver = std::make_shared<MqttChannelReceiver>();
     auto aggregator = std::make_shared<TimeWindowAggregatorV2>(clock, config_.windowSizeMs, config_.channelCount);
     auto transform = std::make_shared<NullTransform>();
     auto fuser = std::make_shared<ConcatFuser>(metric, config_.risk.dedupMergeDistance);
@@ -30,7 +30,7 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk.warningDistance,
                                                             config_.risk.dangerousDistance, config_.channelCount);
     auto dispatcher = std::make_shared<ConsoleDispatcher>();
-    auto sink = std::make_shared<ConsoleSink>();
+    auto sink = std::make_shared<MqttTransport>(config_);
 
     logSuccess(kIface,
                "파이프라인 조립 완료 (receiver=NullReceiver, transform=NullTransform, "

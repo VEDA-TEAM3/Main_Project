@@ -1,34 +1,78 @@
 #pragma once
 
 /**
- * @file    ConsoleSink.h
- * @brief   Console에 출력 (Debug)
+ * @file ConsoleSink.h
+ * @brief Console 출력 및 BlurFrame MQTT 전달
  */
 
 #include <iostream>
-#include <string_view>
 
 #include "Contract.h"
 #include "interfaces/ISink.h"
+#include "sink/MqttSink.h"
 
-class ConsoleTopViewSink : public ISink<veda::TopViewFrame> {
+class ConsoleTopViewSink
+    : public ISink<veda::TopViewFrame> {
 public:
-    void send(const veda::TopViewFrame& f) override {
-        std::cout << "[RISK] ch=" << f.ch << " ts=" << f.ts << " objects=" << f.objects.size() << "\n";
-        for (const auto& o : f.objects) {
-            std::cout << "    id=" << o.id << " cls=" << veda::toString(o.cls) << " world=(" << o.pos.x << ","
-                      << o.pos.y << ") edge=" << o.edge << "\n";
+    void send(
+        const veda::TopViewFrame& frame
+    ) override {
+        std::cout
+            << "[RISK] ch=" << frame.ch
+            << " ts=" << frame.ts
+            << " objects=" << frame.objects.size()
+            << "\n";
+
+        for (const auto& object : frame.objects) {
+            std::cout
+                << "    id=" << object.id
+                << " cls=" << veda::toString(object.cls)
+                << " world=("
+                << object.pos.x
+                << ","
+                << object.pos.y
+                << ") edge="
+                << object.edge
+                << "\n";
         }
+
+        /*
+         * TopViewFrame은 MQTT로 보내지 않는다.
+         */
     }
 };
 
-class ConsoleBlurSink : public ISink<veda::BlurFrame> {
+class ConsoleBlurSink
+    : public ISink<veda::BlurFrame> {
 public:
-    void send(const veda::BlurFrame& f) override {
-        std::cout << "[BLUR] ch=" << f.ch << " ts=" << f.ts << " blurs=" << f.blurs.size() << "\n";
-        for (const auto& b : f.blurs) {
-            std::cout << "    id=" << b.id << " cls=" << veda::toString(b.cls) << " box=[" << b.box.l << "," << b.box.t
-                      << "," << b.box.r << "," << b.box.b << "]\n";
+    void send(
+        const veda::BlurFrame& frame
+    ) override {
+        std::cout
+            << "[BLUR] ch=" << frame.ch
+            << " ts=" << frame.ts
+            << " blurs=" << frame.blurs.size()
+            << "\n";
+
+        for (const auto& blur : frame.blurs) {
+            std::cout
+                << "    id=" << blur.id
+                << " cls=" << veda::toString(blur.cls)
+                << " box=["
+                << blur.box.l
+                << ","
+                << blur.box.t
+                << ","
+                << blur.box.r
+                << ","
+                << blur.box.b
+                << "]\n";
         }
+
+        /*
+         * Pipeline이 ConsoleBlurSink로 전달한 동일한 프레임을
+         * MQTT publisher에게 넘긴다.
+         */
+        publishBlurToMqtt(frame);
     }
 };

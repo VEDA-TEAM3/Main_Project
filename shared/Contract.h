@@ -444,3 +444,19 @@ T decode(std::string_view payload) {
 }
 
 }  // namespace veda
+
+namespace veda::topic {
+
+inline std::string blur(ChannelId ch) {
+    return "veda/ch/" + std::to_string(ch) + "/blur";
+}
+
+inline constexpr auto kBlurAll = "veda/ch/+/blur";
+
+}  // namespace veda::topic
+
+namespace veda::qos {
+
+inline constexpr int kBlur = 0;
+
+}  // namespace veda::qos
