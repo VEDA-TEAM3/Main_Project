@@ -41,8 +41,7 @@ public:
      * @param channelCount      frame.ch / topic 채널 번호의 유효 범위 [0, channelCount) (AppConfig::channelCount)
      * @param retryIntervalMs   최초 연결 실패 시 재시도 간격 (AppConfig::mqttReceiverRetryIntervalMs)
      */
-    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
-                       std::uint64_t retryIntervalMs);
+    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs);
     ~MqttChannelReceiver() override;
 
     MqttChannelReceiver(const MqttChannelReceiver&) = delete;

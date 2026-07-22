@@ -62,7 +62,7 @@ private:
     static void onConnect(struct mosquitto* client, void* userData, int resultCode);
     static void onDisconnect(struct mosquitto* client, void* userData, int resultCode);
 
-    std::string host_;         ///< AppConfig::mqttHost (공통)
+    std::string host_;          ///< AppConfig::mqttHost (공통)
     int port_;                  ///< AppConfig::mqttPort (공통)
     std::string caFile_;        ///< AppConfig::mqttCaFile (공통)
     std::string clientId_;      ///< AppConfig::mqttTopViewClientId, 비어있으면 생성자가 자동 생성

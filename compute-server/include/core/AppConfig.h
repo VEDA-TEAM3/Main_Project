@@ -128,8 +128,7 @@ struct AppConfig {
         cfg.mqttBlurClientId = veda::detail::get_or<std::string>(j, "mqttBlurClientId", cfg.mqttBlurClientId);
         cfg.mqttBlurMaxQueueSize = veda::detail::get_or<int>(j, "mqttBlurMaxQueueSize", cfg.mqttBlurMaxQueueSize);
 
-        cfg.mqttTopViewClientId =
-            veda::detail::get_or<std::string>(j, "mqttTopViewClientId", cfg.mqttTopViewClientId);
+        cfg.mqttTopViewClientId = veda::detail::get_or<std::string>(j, "mqttTopViewClientId", cfg.mqttTopViewClientId);
         cfg.mqttTopViewMaxQueueSize =
             veda::detail::get_or<int>(j, "mqttTopViewMaxQueueSize", cfg.mqttTopViewMaxQueueSize);
 

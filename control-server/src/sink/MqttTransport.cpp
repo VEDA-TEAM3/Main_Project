@@ -202,11 +202,10 @@ bool MqttTransport::start() noexcept {
         return false;
     }
 
-    const int connectResult =
-        mosquitto_connect_async(client_, host_.c_str(), port_, keepAliveSeconds_);
+    const int connectResult = mosquitto_connect_async(client_, host_.c_str(), port_, keepAliveSeconds_);
     if (connectResult != MOSQ_ERR_SUCCESS) {
         logError(kIface, "connect 준비 실패: host=" + host_ + " port=" + std::to_string(port_) +
-                              " error=" + mosquitto_strerror(connectResult));
+                             " error=" + mosquitto_strerror(connectResult));
         running_.store(false, std::memory_order_release);
         destroyClient();
         return false;
@@ -221,7 +220,7 @@ bool MqttTransport::start() noexcept {
     }
 
     logSuccess(kIface, "연결 시도 중 (host=" + host_ + ", port=" + std::to_string(port_) +
-                            ", tls=" + (useTls_ ? "on" : "off") + ", clientId=" + clientId_ + ")");
+                           ", tls=" + (useTls_ ? "on" : "off") + ", clientId=" + clientId_ + ")");
     return true;
 }
 
@@ -288,8 +287,7 @@ void MqttTransport::send(const domain::WorldFrame& frame) {
 }
 
 bool MqttTransport::initializeClient() noexcept {
-    if (host_.empty() || port_ <= 0 || port_ > 65535 || keepAliveSeconds_ <= 0 ||
-        clientId_.empty()) {
+    if (host_.empty() || port_ <= 0 || port_ > 65535 || keepAliveSeconds_ <= 0 || clientId_.empty()) {
         logError(kIface, "잘못된 설정값");
         return false;
     }
@@ -331,8 +329,7 @@ bool MqttTransport::initializeClient() noexcept {
     }
 
     if (useTls_) {
-        const char* certificate =
-            clientCertificateFile_.empty() ? nullptr : clientCertificateFile_.c_str();
+        const char* certificate = clientCertificateFile_.empty() ? nullptr : clientCertificateFile_.c_str();
         const char* key = clientKeyFile_.empty() ? nullptr : clientKeyFile_.c_str();
         const int tlsResult = mosquitto_tls_set(client_, caFile_.c_str(), nullptr, certificate, key, nullptr);
         if (tlsResult != MOSQ_ERR_SUCCESS) {
@@ -393,8 +390,8 @@ void MqttTransport::onConnect(mosquitto* client, void* userData, int resultCode)
         for (const Subscription& subscription : subscriptions) {
             const int result = mosquitto_subscribe(client, nullptr, subscription.topic.c_str(), subscription.qos);
             if (result != MOSQ_ERR_SUCCESS) {
-                logError(kIface, "재연결 후 구독 실패: topic=" + subscription.topic +
-                                      " error=" + mosquitto_strerror(result));
+                logError(kIface,
+                         "재연결 후 구독 실패: topic=" + subscription.topic + " error=" + mosquitto_strerror(result));
             }
         }
         logSuccess(kIface, "연결 성공 (host=" + transport->host_ + ", port=" + std::to_string(transport->port_) + ")");
@@ -432,7 +429,8 @@ void MqttTransport::onMessage(mosquitto*, void* userData, const mosquitto_messag
     }
 
     const auto* payload = static_cast<const char*>(message->payload);
-    const std::string_view payloadView(payload != nullptr ? payload : "", static_cast<std::size_t>(message->payloadlen));
+    const std::string_view payloadView(payload != nullptr ? payload : "",
+                                       static_cast<std::size_t>(message->payloadlen));
     try {
         handler(message->topic, payloadView);
     } catch (...) {

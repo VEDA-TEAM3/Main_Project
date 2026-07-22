@@ -304,8 +304,8 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
             ++g_unknownTypeCount;
             if (g_unknownTypeCount == 1 || g_unknownTypeCount % 100 == 0) {
                 logError(kIface, "ch=" + std::to_string(raw.channelId) + " id=" + std::to_string(det.id) +
-                                      " 인식 안 되는 Type=\"" + std::string(typeText) + "\" -> Unknown 처리 (누적 " +
-                                      std::to_string(g_unknownTypeCount) + "건)");
+                                     " 인식 안 되는 Type=\"" + std::string(typeText) + "\" -> Unknown 처리 (누적 " +
+                                     std::to_string(g_unknownTypeCount) + "건)");
             }
         }
 

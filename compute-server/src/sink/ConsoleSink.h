@@ -18,8 +18,8 @@ public:
         std::cout << "[RISK] ch=" << frame.ch << " ts=" << frame.ts << " objects=" << frame.objects.size() << "\n";
 
         for (const auto& object : frame.objects) {
-            std::cout << "    id=" << object.id << " cls=" << veda::toString(object.cls) << " world=("
-                      << object.pos.x << "," << object.pos.y << ") edge=" << object.edge << "\n";
+            std::cout << "    id=" << object.id << " cls=" << veda::toString(object.cls) << " world=(" << object.pos.x
+                      << "," << object.pos.y << ") edge=" << object.edge << "\n";
         }
     }
 };

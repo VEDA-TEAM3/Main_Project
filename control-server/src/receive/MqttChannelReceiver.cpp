@@ -28,7 +28,7 @@ bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noex
 }  // namespace
 
 MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
-                                        std::uint64_t retryIntervalMs)
+                                         std::uint64_t retryIntervalMs)
     : transport_(std::move(transport)), channelCount_(channelCount), retryInterval_(retryIntervalMs) {}
 
 MqttChannelReceiver::~MqttChannelReceiver() { stop(); }
@@ -60,7 +60,7 @@ void MqttChannelReceiver::start() {
 
     if (!tryConnect()) {
         logError(kIface, "start 실패 (구독 또는 transport 시작 실패) — " + std::to_string(retryInterval_.count()) +
-                              "ms 간격으로 백그라운드 재시도함");
+                             "ms 간격으로 백그라운드 재시도함");
         retryThread_ = std::thread(&MqttChannelReceiver::retryLoop, this);
     }
 }
@@ -88,7 +88,7 @@ bool MqttChannelReceiver::tryConnect() noexcept {
     }
 
     logSuccess(kIface, "구독 시작 (topView=" + std::string(veda::topic::kTopViewAll) +
-                            ", alive=" + std::string(veda::topic::kAliveAll) + ")");
+                           ", alive=" + std::string(veda::topic::kAliveAll) + ")");
     return true;
 }
 
@@ -226,6 +226,6 @@ void MqttChannelReceiver::recordDrop(std::string_view topic, const char* reason)
     const std::uint64_t count = droppedCount_.fetch_add(1, std::memory_order_relaxed) + 1;
     if (count == 1 || count % 100 == 0) {
         logError(kIface, "드랍 누적 " + std::to_string(count) + "건, topic=" + std::string(topic) +
-                              ", 사유=" + std::string(reason != nullptr ? reason : "unknown"));
+                             ", 사유=" + std::string(reason != nullptr ? reason : "unknown"));
     }
 }

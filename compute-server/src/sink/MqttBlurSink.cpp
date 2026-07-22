@@ -36,7 +36,8 @@ MqttBlurSink::MqttBlurSink(const AppConfig& config)
     if (initialize()) {
         worker_ = std::thread(&MqttBlurSink::workerLoop, this);
     } else {
-        logError(kIface, "초기 연결 실패 — " + std::to_string(retryInterval_.count()) + "ms 간격으로 백그라운드 재시도함");
+        logError(kIface,
+                 "초기 연결 실패 — " + std::to_string(retryInterval_.count()) + "ms 간격으로 백그라운드 재시도함");
         retryThread_ = std::thread(&MqttBlurSink::retryLoop, this);
     }
 }
@@ -46,9 +47,8 @@ MqttBlurSink::~MqttBlurSink() { shutdown(); }
 void MqttBlurSink::retryLoop() noexcept {
     std::unique_lock<std::mutex> lock(retryMutex_);
     while (!shuttingDown_.load(std::memory_order_acquire)) {
-        const bool stopped = retryCv_.wait_for(lock, retryInterval_, [this] {
-            return shuttingDown_.load(std::memory_order_acquire);
-        });
+        const bool stopped =
+            retryCv_.wait_for(lock, retryInterval_, [this] { return shuttingDown_.load(std::memory_order_acquire); });
         if (stopped) {
             return;
         }
@@ -127,7 +127,7 @@ bool MqttBlurSink::initialize() noexcept {
 
     ready_.store(true, std::memory_order_release);
     logSuccess(kIface, "연결 시도 중 (host=" + host_ + ", port=" + std::to_string(port_) +
-                            ", tls=on, clientId=" + clientId_ + ")");
+                           ", tls=on, clientId=" + clientId_ + ")");
     return true;
 }
 
@@ -262,9 +262,8 @@ void MqttBlurSink::workerLoop() noexcept {
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
 
-            queueChanged_.wait(lock, [this] {
-                return stopping_ || (connected_.load(std::memory_order_acquire) && !queue_.empty());
-            });
+            queueChanged_.wait(
+                lock, [this] { return stopping_ || (connected_.load(std::memory_order_acquire) && !queue_.empty()); });
 
             if (stopping_)
                 return;
@@ -299,8 +298,8 @@ void MqttBlurSink::publishFrame(const veda::BlurFrame& frame) noexcept {
 
         // payload 전체는 CSV에 넣기엔 부담스러워서 크기/개수만 요약
         logSuccess(kIface, "발행 성공 #" + std::to_string(count) + " topic=" + topic +
-                                " ch=" + std::to_string(frame.ch) + " blurs=" + std::to_string(frame.blurs.size()) +
-                                " bytes=" + std::to_string(payload.size()));
+                               " ch=" + std::to_string(frame.ch) + " blurs=" + std::to_string(frame.blurs.size()) +
+                               " bytes=" + std::to_string(payload.size()));
     } catch (const std::exception& error) {
         recordDrop(error.what());
     } catch (...) {
@@ -312,8 +311,8 @@ void MqttBlurSink::recordDrop(const char* reason) noexcept {
     const std::uint64_t count = droppedCount_.fetch_add(1, std::memory_order_relaxed) + 1;
 
     if (count == 1 || count % 100 == 0) {
-        logError(kIface, "드랍 누적 " + std::to_string(count) + "건, 사유=" +
-                              std::string(reason != nullptr ? reason : "unknown"));
+        logError(kIface, "드랍 누적 " + std::to_string(count) +
+                             "건, 사유=" + std::string(reason != nullptr ? reason : "unknown"));
     }
 }
 
@@ -326,12 +325,10 @@ void MqttBlurSink::onConnect(struct mosquitto*, void* userData, int resultCode) 
     self->connected_.store(connected, std::memory_order_release);
 
     if (connected) {
-        logSuccess(kIface, "연결 성공 (host=" + self->host_ + ", port=" + std::to_string(self->port_) +
-                                ")");
+        logSuccess(kIface, "연결 성공 (host=" + self->host_ + ", port=" + std::to_string(self->port_) + ")");
         self->queueChanged_.notify_all();
     } else {
-        logError(kIface,
-                 "연결 실패: rc=" + std::to_string(resultCode) + " " + mosquitto_connack_string(resultCode));
+        logError(kIface, "연결 실패: rc=" + std::to_string(resultCode) + " " + mosquitto_connack_string(resultCode));
     }
 }
 
@@ -351,8 +348,6 @@ bool MqttBlurSink::isReady() const noexcept { return ready_.load(std::memory_ord
 
 bool MqttBlurSink::isConnected() const noexcept { return connected_.load(std::memory_order_acquire); }
 
-std::uint64_t MqttBlurSink::publishedCount() const noexcept {
-    return publishedCount_.load(std::memory_order_relaxed);
-}
+std::uint64_t MqttBlurSink::publishedCount() const noexcept { return publishedCount_.load(std::memory_order_relaxed); }
 
 std::uint64_t MqttBlurSink::droppedCount() const noexcept { return droppedCount_.load(std::memory_order_relaxed); }

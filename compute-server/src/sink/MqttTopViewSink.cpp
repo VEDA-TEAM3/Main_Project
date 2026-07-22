@@ -36,7 +36,8 @@ MqttTopViewSink::MqttTopViewSink(const AppConfig& config)
     if (initialize()) {
         worker_ = std::thread(&MqttTopViewSink::workerLoop, this);
     } else {
-        logError(kIface, "초기 연결 실패 — " + std::to_string(retryInterval_.count()) + "ms 간격으로 백그라운드 재시도함");
+        logError(kIface,
+                 "초기 연결 실패 — " + std::to_string(retryInterval_.count()) + "ms 간격으로 백그라운드 재시도함");
         retryThread_ = std::thread(&MqttTopViewSink::retryLoop, this);
     }
 }
@@ -46,9 +47,8 @@ MqttTopViewSink::~MqttTopViewSink() { shutdown(); }
 void MqttTopViewSink::retryLoop() noexcept {
     std::unique_lock<std::mutex> lock(retryMutex_);
     while (!shuttingDown_.load(std::memory_order_acquire)) {
-        const bool stopped = retryCv_.wait_for(lock, retryInterval_, [this] {
-            return shuttingDown_.load(std::memory_order_acquire);
-        });
+        const bool stopped =
+            retryCv_.wait_for(lock, retryInterval_, [this] { return shuttingDown_.load(std::memory_order_acquire); });
         if (stopped) {
             return;
         }
@@ -303,8 +303,7 @@ void MqttTopViewSink::onConnect(struct mosquitto*, void* userData, int resultCod
     self->connected_.store(connected, std::memory_order_release);
 
     if (connected) {
-        logSuccess(kIface,
-                   "연결 성공 (host=" + self->host_ + ", port=" + std::to_string(self->port_) + ")");
+        logSuccess(kIface, "연결 성공 (host=" + self->host_ + ", port=" + std::to_string(self->port_) + ")");
         self->queueChanged_.notify_all();
     } else {
         logError(kIface, "연결 실패: rc=" + std::to_string(resultCode) + " " + mosquitto_connack_string(resultCode));

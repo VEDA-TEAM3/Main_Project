@@ -447,9 +447,7 @@ T decode(std::string_view payload) {
 
 namespace veda::topic {
 
-inline std::string blur(ChannelId ch) {
-    return "veda/ch/" + std::to_string(ch) + "/blur";
-}
+inline std::string blur(ChannelId ch) { return "veda/ch/" + std::to_string(ch) + "/blur"; }
 
 inline constexpr auto kBlurAll = "veda/ch/+/blur";
 

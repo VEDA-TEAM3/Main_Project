@@ -171,8 +171,7 @@ struct AppConfig {
         config.mqttSendTopic = veda::detail::get_or<std::string>(j, "mqttSendTopic", config.mqttSendTopic);
         config.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", config.mqttCaFile);
         config.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", config.mqttClientId);
-        config.mqttKeepAliveSeconds =
-            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
+        config.mqttKeepAliveSeconds = veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
         config.mqttReconnectDelaySeconds =
             veda::detail::get_or<int>(j, "mqttReconnectDelaySeconds", config.mqttReconnectDelaySeconds);
         config.mqttReconnectDelayMaxSeconds =

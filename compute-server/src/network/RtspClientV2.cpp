@@ -67,11 +67,10 @@ bool RtspClientV2::connect() {
     const int origFlags = fcntl(sock_, F_GETFL, 0);
     fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK);
 
-    const int connectResult =
-        ::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr));
+    const int connectResult = ::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr));
     if (connectResult < 0 && errno != EINPROGRESS) {
-        logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
-                              std::strerror(errno));
+        logError(kIface,
+                 "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " + std::strerror(errno));
         fcntl(sock_, F_SETFL, origFlags);
         return false;
     }
@@ -87,7 +86,7 @@ bool RtspClientV2::connect() {
         const int selectResult = select(sock_ + 1, nullptr, &writeSet, nullptr, &connectTimeout);
         if (selectResult <= 0) {
             logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
-                                  std::to_string(kConnectTimeoutSec) + "초)");
+                                 std::to_string(kConnectTimeoutSec) + "초)");
             fcntl(sock_, F_SETFL, origFlags);
             return false;
         }
@@ -97,7 +96,7 @@ bool RtspClientV2::connect() {
         getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen);
         if (sockErr != 0) {
             logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
-                                  std::strerror(sockErr));
+                                 std::strerror(sockErr));
             fcntl(sock_, F_SETFL, origFlags);
             return false;
         }
@@ -260,7 +259,7 @@ void RtspClientV2::run() {
             // marker bit가 누락됐거나 스트림이 손상된 것으로 간주 -> 무한정 쌓이기 전에
             // 버퍼를 버리고 연결 자체를 재수립 (상위 Source의 재연결 백오프에 위임)
             logError(kIface, "metadata 프레임 크기가 상한(" + std::to_string(kMaxMetadataFrameBytes) +
-                                  "B)을 초과 (marker 누락 의심) - 연결 재수립");
+                                 "B)을 초과 (marker 누락 의심) - 연결 재수립");
             break;
         }
 
