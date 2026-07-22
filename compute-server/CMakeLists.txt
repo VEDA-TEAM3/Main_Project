@@ -1,17 +1,25 @@
 cmake_minimum_required(VERSION 3.16)
+
 project(ComputeServer LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
+
+pkg_check_modules(
+    MOSQUITTO
+    REQUIRED
+    IMPORTED_TARGET
+    libmosquitto
+)
 
 add_executable(compute-server
     src/main.cpp
-    src/core/AppContext.cpp 
+    src/core/AppContext.cpp
     src/core/Pipeline.cpp
     src/source/RtspOnvifSource.cpp
     src/network/RtspClient.cpp
@@ -24,13 +32,18 @@ add_executable(compute-server
     src/sink/MqttSink.cpp
 )
 
-target_include_directories(compute-server PRIVATE 
-    include 
-    src 
-    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+target_include_directories(
+    compute-server
+    PRIVATE
+        include
+        src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
-target_link_libraries(compute-server PRIVATE
-    OpenSSL::Crypto
-    Threads::Threads
-    PkgConfig::MOSQUITTO
+
+target_link_libraries(
+    compute-server
+    PRIVATE
+        OpenSSL::Crypto
+        Threads::Threads
+        PkgConfig::MOSQUITTO
 )

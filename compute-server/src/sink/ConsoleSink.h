@@ -1,16 +1,15 @@
 #pragma once
 
 /**
- * @file    ConsoleSink.h
- * @brief   Console 출력 및 MQTT 전달
+ * @file ConsoleSink.h
+ * @brief Console 출력 및 BlurFrame MQTT 전달
  */
 
 #include <iostream>
-#include <string_view>
 
 #include "Contract.h"
 #include "interfaces/ISink.h"
-#include "MqttSink.h"
+#include "sink/MqttSink.h"
 
 class ConsoleTopViewSink
     : public ISink<veda::TopViewFrame> {
@@ -18,9 +17,6 @@ public:
     void send(
         const veda::TopViewFrame& frame
     ) override {
-        /*
-         * 기존 Console 출력은 그대로 유지합니다.
-         */
         std::cout
             << "[RISK] ch=" << frame.ch
             << " ts=" << frame.ts
@@ -41,9 +37,8 @@ public:
         }
 
         /*
-         * Console이 받은 동일한 프레임을 MQTT에도 전달합니다.
+         * TopViewFrame은 MQTT로 보내지 않는다.
          */
-        publishTopViewToMqtt(frame);
     }
 };
 
@@ -73,5 +68,11 @@ public:
                 << blur.box.b
                 << "]\n";
         }
+
+        /*
+         * Pipeline이 ConsoleBlurSink로 전달한 동일한 프레임을
+         * MQTT publisher에게 넘긴다.
+         */
+        publishBlurToMqtt(frame);
     }
 };

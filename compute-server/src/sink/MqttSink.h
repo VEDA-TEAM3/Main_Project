@@ -15,57 +15,85 @@
 struct mosquitto;
 
 /**
- * @brief TopViewFrame을 계약 토픽으로 비동기 발행하고 채널 LWT를 관리한다.
+ * @brief BlurFrame 전용 MQTT 송신 Sink
+ *
+ * AppContext에서 직접 생성하지 않아도
+ * publishBlurToMqtt()를 통해 프로세스 단일 인스턴스를 사용한다.
  */
-class MqttTopViewSink final : public ISink<veda::TopViewFrame> {
+class MqttBlurSink final : public ISink<veda::BlurFrame> {
 public:
     struct Config {
-        std::string host = "100.73.128.114";
+        std::string host = "172.20.27.174";
         int port = 8883;
-        std::string caCertificatePath = "/etc/veda/certs/ca.crt";
+        std::string caFile = "/etc/veda/certs/ca.crt";
         std::string clientId;
-        int keepAliveSeconds = 60;
-        size_t maxQueueSize = 8;
+
+        int keepAliveSeconds = 30;
+        std::size_t maxQueueSize = 8;
     };
 
-    MqttTopViewSink(veda::ChannelId channelId, Config config);
-    ~MqttTopViewSink() noexcept override;
+    explicit MqttBlurSink(Config config);
+    ~MqttBlurSink() noexcept override;
 
-    MqttTopViewSink(const MqttTopViewSink&) = delete;
-    MqttTopViewSink& operator=(const MqttTopViewSink&) = delete;
+    MqttBlurSink(const MqttBlurSink&) = delete;
+    MqttBlurSink& operator=(const MqttBlurSink&) = delete;
 
-    void send(const veda::TopViewFrame& frame) override;
+    void send(const veda::BlurFrame& frame) noexcept override;
 
-    bool isReady() const noexcept { return ready_.load(std::memory_order_acquire); }
-    bool isConnected() const noexcept { return connected_.load(std::memory_order_acquire); }
+    bool isReady() const noexcept;
+    bool isConnected() const noexcept;
+
+    std::uint64_t publishedCount() const noexcept;
+    std::uint64_t droppedCount() const noexcept;
 
 private:
     bool initialize() noexcept;
     void shutdown() noexcept;
+
     void workerLoop() noexcept;
-    void publishFrame(const veda::TopViewFrame& frame) noexcept;
-    void publishAlive(bool alive) noexcept;
+    void publishFrame(const veda::BlurFrame& frame) noexcept;
     void recordDrop(const char* reason) noexcept;
 
-    static void onConnect(struct mosquitto* client, void* userData, int resultCode);
-    static void onDisconnect(struct mosquitto* client, void* userData, int resultCode);
+    static bool isValidFrame(
+        const veda::BlurFrame& frame
+    ) noexcept;
 
-    veda::ChannelId channelId_ = 0;
+    static void onConnect(
+        struct mosquitto* client,
+        void* userData,
+        int resultCode
+    );
+
+    static void onDisconnect(
+        struct mosquitto* client,
+        void* userData,
+        int resultCode
+    );
+
     Config config_;
     struct mosquitto* client_ = nullptr;
 
     std::mutex queueMutex_;
     std::condition_variable queueChanged_;
-    std::deque<veda::TopViewFrame> queue_;
+    std::deque<veda::BlurFrame> queue_;
     std::thread worker_;
+
     bool stopping_ = false;
+    bool libraryInitialized_ = false;
 
     std::atomic_bool ready_{false};
     std::atomic_bool connected_{false};
     std::atomic_bool shuttingDown_{false};
+
+    std::atomic_uint64_t publishedCount_{0};
     std::atomic_uint64_t droppedCount_{0};
 };
 
-void publishTopViewToMqtt(
-    const veda::TopViewFrame& frame
+/**
+ * @brief ConsoleBlurSink에서 사용하는 전역 진입점
+ *
+ * 최초 호출 시 MQTT 연결을 만들고 이후 호출에서는 재사용한다.
+ */
+void publishBlurToMqtt(
+    const veda::BlurFrame& frame
 ) noexcept;
