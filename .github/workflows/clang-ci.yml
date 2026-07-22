@@ -7,24 +7,38 @@ on:
       - '**/*.c'
       - '**/*.cpp'
       - '**/*.h'
-      - '**/*.hpp'
       - '**/CMakeLists.txt'
 
 jobs:
-  # 1. Format Check (가장 먼저 실행)
   format-check:
     name: 🎨 Format Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run clang-format check
-        uses: jidicula/clang-format-action@v4.11.0
-        with:
-          clang-format-version: '16'
-          check-path: '.'
-          exclude-regex: '^(.github|build|third_party)/.*'
-          fallback-style: 'Google'
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          FILES=$(find . \
+            -type f \( \
+              -name "*.c" -o \
+              -name "*.cpp" -o \
+              -name "*.h" \
+            \) \
+            -not -path "./build/*" \
+            -not -path "./device-rpi/kernel/*" \
+            -not -path "./.git/*")
+
+          if [ -z "$FILES" ]; then
+            echo "No C/C++ files found."
+            exit 0
+          fi
+
+          clang-format-18 --dry-run --Werror $FILES
 
       - name: Send Slack Alert (Format)
         if: failure()
@@ -36,10 +50,9 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  # 2. Static Analysis (Tidy) - Format 통과 후, Build 전에 실행
   tidy-check:
     name: ☢️ Static Analysis (Tidy)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: format-check
     steps:
       - uses: actions/checkout@v4
@@ -47,12 +60,11 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # OpenCV, OpenSSL, 그리고 JSON 병합용 jq 설치
-          sudo apt-get install -y libopencv-dev libssl-dev jq nlohmann-json3-dev
+          sudo apt-get install -y ca-certificates clang-tidy g++-10 gcc-10 \
+          libssl-dev jq nlohmann-json3-dev libmosquitto-dev
 
       - name: Configure CMake projects (For compile_commands.json)
         run: |
-          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 Configure 수행
           find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
             dir=$(dirname "$file")
             echo "Configuring CMake in $dir"
@@ -61,7 +73,6 @@ jobs:
 
       - name: Merge compile_commands.json
         run: |
-          # 각 서브폴더에 생성된 compile_commands.json을 하나로 합쳐서 루트에 배치
           FILES=$(find . -type f -path "*/build/compile_commands.json")
           if [ -n "$FILES" ]; then
             jq -s 'add' $FILES > compile_commands.json
@@ -75,9 +86,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          style: '' # 이미 format-check에서 하므로 비워둠
+          style: ''
           tidy-checks: ''
-          database: '.' # 병합된 compile_commands.json이 루트에 있음
+          database: '.'
           ignore: '.github|build|third_party'
           files-changed-only: true
 
@@ -95,10 +106,12 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  # 3. Build Check - Tidy까지 완벽할 때만 실제 빌드 시도
   build-check:
     name: 🔨 Build Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted  
+    env:
+      CC: gcc-10
+      CXX: g++-10
     needs: tidy-check
     steps:
       - uses: actions/checkout@v4
@@ -106,12 +119,11 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 빌드 시에도 OpenCV와 OpenSSL 헤더/라이브러리가 필요하므로 동일하게 설치
-          sudo apt-get install -y libopencv-dev libssl-dev nlohmann-json3-dev
+          sudo apt-get install -y ca-certificates g++-10 gcc-10 \
+          libopencv-dev libssl-dev nlohmann-json3-dev libmosquitto-dev
 
       - name: Build all CMake projects
         run: |
-          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 빌드 수행
           find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
             dir=$(dirname "$file")
             echo "========================================="
