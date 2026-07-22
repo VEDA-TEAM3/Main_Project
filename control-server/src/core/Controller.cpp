@@ -26,6 +26,8 @@ Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_p
         [this](std::vector<veda::TopViewFrame> frames) { this->processPipeline(std::move(frames)); });
 }
 
+Controller::~Controller() { stop(); }
+
 void Controller::start() { receiver_->start(); }
 
 void Controller::stop() { receiver_->stop(); }

@@ -36,7 +36,13 @@ public:
                std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
                std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink);
 
-    ~Controller() = default;
+    /**
+     * @brief   receiver를 먼저 stop()시켜 워커 스레드를 join한 뒤 소멸
+     * @details 멤버는 선언 역순으로 소멸되어 aggregator_ 등이 receiver_보다 먼저 파괴되므로,
+     *          receiver_의 워커가 살아있는 채로 콜백을 통해 이미 파괴된 멤버에 접근하는 것을
+     *          방지하기 위해 명시적으로 정의함 (stop()은 멱등이라 이미 호출됐어도 안전)
+     */
+    ~Controller();
 
     /**
      * @brief 관제 서버 Pipeline 시작
