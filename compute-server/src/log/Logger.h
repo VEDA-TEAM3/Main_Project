@@ -21,7 +21,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <ctime>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -57,11 +59,27 @@ public:
     }
 
     void enqueue(LogEntry entry) {
+        bool dropped = false;
+        std::uint64_t droppedSnapshot = 0;
         {
             std::lock_guard<std::mutex> lk(mtx_);
+            if (pending_.size() >= kMaxPendingEntries) {
+                // drop-oldest: 디스크가 막혀 큐가 가득 차면, 오래된 로그보다 최신 로그가
+                // 디버깅에 더 유용하다고 보고 가장 오래된 항목을 버림
+                pending_.pop_front();
+                ++droppedCount_;
+                dropped = true;
+                droppedSnapshot = droppedCount_;
+            }
             pending_.push_back(std::move(entry));
         }
         cv_.notify_one();
+
+        if (dropped && (droppedSnapshot == 1 || droppedSnapshot % 1000 == 0)) {
+            // logError()를 통해 이 큐에 다시 넣으면 재귀가 되므로 stderr에 직접 출력
+            std::cerr << "[CsvLogSink] 경고: 로그 큐가 가득 차(" << kMaxPendingEntries
+                      << "개) 오래된 로그를 버립니다 (누적 드랍 " << droppedSnapshot << "건)\n";
+        }
     }
 
     CsvLogSink(const CsvLogSink&) = delete;
@@ -76,6 +94,9 @@ public:
 
 private:
     static constexpr std::chrono::milliseconds kFlushInterval{500};
+
+    /// @brief 큐에 쌓일 수 있는 로그 최대 개수 (초과 시 drop-oldest, OOM 방지)
+    static constexpr std::size_t kMaxPendingEntries = 10000;
 
     CsvLogSink() { worker_ = std::thread(&CsvLogSink::workerLoop, this); }
 
@@ -111,7 +132,7 @@ private:
     }
 
     /// @brief 필요 시 날짜별 파일로 (재)전환 후 batch를 한 번에 씀
-    void writeBatch(const std::vector<LogEntry>& batch) {
+    void writeBatch(const std::deque<LogEntry>& batch) {
         if (batch.empty())
             return;
 
@@ -141,7 +162,7 @@ private:
 
     void workerLoop() {
         while (!stopping_) {
-            std::vector<LogEntry> batch;
+            std::deque<LogEntry> batch;
             {
                 std::unique_lock<std::mutex> lk(mtx_);
                 cv_.wait_for(lk, kFlushInterval, [this] { return stopping_.load() || !pending_.empty(); });
@@ -151,7 +172,7 @@ private:
         }
 
         // 종료 신호 이후 마지막으로 들어온 항목까지 한 번 더 flush
-        std::vector<LogEntry> remaining;
+        std::deque<LogEntry> remaining;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             remaining.swap(pending_);
@@ -161,7 +182,8 @@ private:
 
     std::mutex mtx_;
     std::condition_variable cv_;
-    std::vector<LogEntry> pending_;
+    std::deque<LogEntry> pending_;
+    std::uint64_t droppedCount_ = 0;  ///< mtx_로 보호됨, drop-oldest 누적 카운트
     std::atomic<bool> stopping_{false};
     std::string openDate_;
     std::ofstream ofs_;

@@ -96,6 +96,15 @@ private:
     /// @brief RTP 인터리브 프레임의 2바이트 length 필드가 표현 가능한 최댓값
     static constexpr std::size_t kMaxRtpPayloadSize = 65535;
 
+    /**
+     * @brief   metadataBuffer(marker bit로 재조합되는 하나의 ONVIF metadata frame) 최대 크기
+     * @details 실측 ONVIF metadata frame은 보통 수 KB 수준이라 1MiB는 충분히 여유 있는 상한.
+     *          손상된 스트림이나 marker bit 누락으로 이 크기를 넘으면 marker를 영영 못 볼 수
+     *          있으므로, run()이 버퍼를 비우고 루프를 종료해 상위(Source)가 재연결하게 함
+     *          (OOM 방지)
+     */
+    static constexpr std::size_t kMaxMetadataFrameBytes = 1024 * 1024;
+
     /// @brief 성능 지표를 로그로 남기는 주기
     static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
 

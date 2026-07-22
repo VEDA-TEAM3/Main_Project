@@ -213,6 +213,14 @@ void RtspClientV2::run() {
         metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
                               static_cast<size_t>(payloadLen - kRtpHeaderSize));
 
+        if (metadataBuffer.size() > kMaxMetadataFrameBytes) {
+            // marker bit가 누락됐거나 스트림이 손상된 것으로 간주 -> 무한정 쌓이기 전에
+            // 버퍼를 버리고 연결 자체를 재수립 (상위 Source의 재연결 백오프에 위임)
+            logError(kIface, "metadata 프레임 크기가 상한(" + std::to_string(kMaxMetadataFrameBytes) +
+                                  "B)을 초과 (marker 누락 의심) - 연결 재수립");
+            break;
+        }
+
         if (marker) {
             const auto elapsed = std::chrono::steady_clock::now() - frameAssembleStart_;
             metrics_.totalAssembleTime += elapsed;
