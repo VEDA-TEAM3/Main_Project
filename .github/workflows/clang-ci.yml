@@ -50,12 +50,15 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  tidy-check:
+tidy-check:
     name: ☢️ Static Analysis (Tidy)
     runs-on: self-hosted
     needs: format-check
     steps:
+      # 변경된 파일을 찾기(git diff) 위해 전체 히스토리를 가져옵니다 (fetch-depth: 0)
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install System Dependencies
         run: |
@@ -80,21 +83,46 @@ jobs:
             echo "[]" > compile_commands.json
           fi
 
-      - name: Run Clang-Tidy
-        id: linter
-        uses: cpp-linter/cpp-linter-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          style: ''
-          tidy-checks: ''
-          database: '.'
-          ignore: '.github|build|third_party'
-          files-changed-only: true
+      # cpp-linter-action 제거 후 Native 스크립트로 교체
+      - name: Run Clang-Tidy (Native)
+        run: |
+          # 1. PR인지 확인하고 변경된 대상 파일만 추출 (files-changed-only 로직)
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BASE_SHA=${{ github.event.pull_request.base.sha }}
+            # PR 대상 브랜치와 현재 커밋 비교하여 추가/수정된 C/C++ 파일만 필터링
+            TARGET_FILES=$(git diff --name-only --diff-filter=ACMRT $BASE_SHA ${{ github.sha }} | grep -E '\.(cpp|hpp|c|h)$' | grep -vE '(build/|third_party/|\.github/)' || true)
+          else
+            # PR이 아니면 전체 소스 중 C/C++ 파일 찾기
+            TARGET_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \) -not -path "*/build/*" -not -path "*/third_party/*" -not -path "*/\.github/*")
+          fi
 
-      - name: Fail workflow if tidy failed
-        if: steps.linter.outputs.checks-failed > 0
-        run: exit 1
+          # 2. 검사할 파일이 없으면 정상 종료
+          if [ -z "$TARGET_FILES" ]; then
+            echo "✅ 검사할 C/C++ 파일이 없습니다. (변경사항 없음)"
+            exit 0
+          fi
+
+          echo "🔍 다음 파일들을 검사합니다:"
+          echo "$TARGET_FILES"
+
+          # 3. Clang-Tidy 실행 및 에러 카운트
+          ERROR_COUNT=0
+          for file in $TARGET_FILES; do
+            echo "---------------------------------------------------"
+            echo "Checking: $file"
+            # 실패하면 카운트 증가 (경고를 에러로 취급하려면 끝에 --warnings-as-errors='*' 추가)
+            if ! clang-tidy -p . "$file"; then
+              ERROR_COUNT=$((ERROR_COUNT + 1))
+            fi
+          done
+
+          # 4. 에러가 1개라도 발생했다면 워크플로우 실패 처리
+          if [ $ERROR_COUNT -gt 0 ]; then
+            echo "❌ $ERROR_COUNT 개의 파일에서 Clang-Tidy 원칙 위반이 발견되었습니다."
+            exit 1
+          else
+            echo "✅ 모든 파일이 Clang-Tidy 검사를 통과했습니다."
+          fi
 
       - name: Send Slack Alert (Tidy)
         if: failure()
