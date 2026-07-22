@@ -67,7 +67,7 @@ void RtspOnvifSourceV2::workerLoop() {
             break;
 
         logError(kIface, "ch=" + std::to_string(config_.channelId) + " 연결 끊김 - " + std::to_string(backoffSec) +
-                              "초 후 재시도");
+                             "초 후 재시도");
 
         std::unique_lock<std::mutex> lk(mtx_);
         cv_.wait_for(lk, std::chrono::seconds(backoffSec), [this] { return stopping_.load(); });
@@ -115,15 +115,15 @@ std::string RtspOnvifSourceV2::buildMetricsReportIfDue() {
         return {};
 
     const double avgLatencyUs = duration_cast<duration<double, std::micro>>(metrics_.totalQueueLatency).count() /
-                                 static_cast<double>(metrics_.consumedCount);
+                                static_cast<double>(metrics_.consumedCount);
     const double fps = static_cast<double>(metrics_.consumedCount) * 1000.0 / static_cast<double>(elapsed.count());
     const double throughputKBs =
         (static_cast<double>(metrics_.totalBytes) / 1024.0) * 1000.0 / static_cast<double>(elapsed.count());
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2) << "최근 " << elapsed.count() << "ms 지표 - 프레임 "
-        << metrics_.consumedCount << "개, 평균 큐 지연시간 " << avgLatencyUs << "us, 처리율 " << fps
-        << "fps, 드랍 " << metrics_.droppedCount << "개, 처리량 " << throughputKBs << "KB/s";
+        << metrics_.consumedCount << "개, 평균 큐 지연시간 " << avgLatencyUs << "us, 처리율 " << fps << "fps, 드랍 "
+        << metrics_.droppedCount << "개, 처리량 " << throughputKBs << "KB/s";
 
     metrics_.producedCount = 0;
     metrics_.consumedCount = 0;

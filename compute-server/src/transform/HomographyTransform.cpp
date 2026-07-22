@@ -20,8 +20,8 @@ HomographyTransform::HomographyTransform(std::array<double, 9> matrix) : matrix_
 std::optional<veda::WorldPoint> HomographyTransform::toWorld(const domain::ImagePoint& p) {
     const double denominator = matrix_[6] * p.u + matrix_[7] * p.v + matrix_[8];
     if (std::abs(denominator) < 1e-12) {
-        logError(kIface, "u=" + std::to_string(p.u) + ", v=" + std::to_string(p.v) +
-                              " 호모그래피 분모가 0에 근접 - 변환 불가");
+        logError(kIface,
+                 "u=" + std::to_string(p.u) + ", v=" + std::to_string(p.v) + " 호모그래피 분모가 0에 근접 - 변환 불가");
         return std::nullopt;
     }
 

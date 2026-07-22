@@ -150,8 +150,8 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<veda::TopViewFrame>& fram
     const std::size_t mergedCount = candidates.size() - worldFrame.objects.size();
     if (mergedCount > 0) {
         logSuccess(kIface, "채널 간 중복 " + std::to_string(mergedCount) + "개 병합 (" +
-                                std::to_string(candidates.size()) + "개 후보 → " +
-                                std::to_string(worldFrame.objects.size()) + "개 객체)");
+                               std::to_string(candidates.size()) + "개 후보 → " +
+                               std::to_string(worldFrame.objects.size()) + "개 객체)");
     }
 
     return worldFrame;

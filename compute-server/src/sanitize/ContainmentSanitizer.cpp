@@ -97,8 +97,8 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             if (veda::isBlurClass(y.cls) && iou(x.box, y.box) > iouThresh_) {
                 drop[i] = true;
                 logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
-                                        " 제거 (규칙 A: " + std::string(veda::toString(y.cls)) + " id=" +
-                                        std::to_string(y.id) + "와 IoU>" + std::to_string(iouThresh_) + ")");
+                                       " 제거 (규칙 A: " + std::string(veda::toString(y.cls)) +
+                                       " id=" + std::to_string(y.id) + "와 IoU>" + std::to_string(iouThresh_) + ")");
                 break;
             }
 
@@ -106,7 +106,7 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             if (x.cls == y.cls && area(x.box) < area(y.box) && ioMin(x.box, y.box) > containThresh_) {
                 drop[i] = true;
                 logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
-                                        " 제거 (규칙 B: id=" + std::to_string(y.id) + " 안에 포함)");
+                                       " 제거 (규칙 B: id=" + std::to_string(y.id) + " 안에 포함)");
                 break;
             }
         }

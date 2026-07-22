@@ -32,8 +32,9 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto dispatcher = std::make_shared<ConsoleDispatcher>();
     auto sink = std::make_shared<ConsoleSink>();
 
-    logSuccess(kIface, "파이프라인 조립 완료 (receiver=NullReceiver, transform=NullTransform, "
-                        "zoneMapper=AngleZoneMapper, sink=ConsoleSink)");
+    logSuccess(kIface,
+               "파이프라인 조립 완료 (receiver=NullReceiver, transform=NullTransform, "
+               "zoneMapper=AngleZoneMapper, sink=ConsoleSink)");
 
     return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
                                         sink);

@@ -21,8 +21,8 @@ RouteResult ParentBasedRouter::route(const domain::ChannelFrame& frame) {
         } else if (veda::isRiskClass(o.cls)) {
             result.risk.push_back(o);
         } else {
-            logError(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(o.id) + " cls=" +
-                                  std::string(veda::toString(o.cls)) + " 분류 불가 - drop");
+            logError(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(o.id) +
+                                 " cls=" + std::string(veda::toString(o.cls)) + " 분류 불가 - drop");
         }
     }
     return result;

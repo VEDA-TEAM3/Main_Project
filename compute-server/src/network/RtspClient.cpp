@@ -222,7 +222,7 @@ void RtspClient::reportMetricsIfDue() {
         return;
 
     const double avgAssembleUs = duration_cast<duration<double, std::micro>>(metrics_.totalAssembleTime).count() /
-                                  static_cast<double>(metrics_.payloadCount);
+                                 static_cast<double>(metrics_.payloadCount);
     const double fps = static_cast<double>(metrics_.payloadCount) * 1000.0 / static_cast<double>(elapsed.count());
     const double recvCallsPerFrame =
         static_cast<double>(metrics_.recvSyscalls) / static_cast<double>(metrics_.payloadCount);

@@ -52,5 +52,5 @@ void ConsoleSink::send(const domain::WorldFrame& frame) {
             ++warningCount;
     }
     logSuccess(kIface, std::to_string(frame.objects.size()) + "개 객체 전송 (Danger " + std::to_string(dangerCount) +
-                            "개, Warning " + std::to_string(warningCount) + "개)");
+                           "개, Warning " + std::to_string(warningCount) + "개)");
 }

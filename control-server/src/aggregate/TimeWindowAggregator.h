@@ -55,8 +55,8 @@ private:
 
     /// @brief 성능 지표 누적 상태 (metricsMutex_로 보호됨, push()가 갱신)
     struct Metrics {
-        std::uint64_t pushCount = 0;    ///< push() 호출 횟수
-        std::uint64_t windowCount = 0;  ///< 윈도우 마감(콜백 호출) 횟수
+        std::uint64_t pushCount = 0;                    ///< push() 호출 횟수
+        std::uint64_t windowCount = 0;                  ///< 윈도우 마감(콜백 호출) 횟수
         std::chrono::nanoseconds totalLockHoldTime{0};  ///< push() 1회당 mutex_ 보유 시간 합
         std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
     } metrics_;
