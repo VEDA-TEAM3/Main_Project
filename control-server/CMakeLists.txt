@@ -29,7 +29,7 @@ target_include_directories(control-server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
-target_compile_options(compute-server PRIVATE -O2)
+target_compile_options(control-server PRIVATE -O2)
 
 target_link_libraries(control-server PRIVATE
     OpenSSL::Crypto

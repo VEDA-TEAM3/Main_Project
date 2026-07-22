@@ -70,8 +70,8 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
 
         if (vehicle.riskLevel != veda::RiskLevel::None) {
             logSuccess(kIface, "gid=" + std::to_string(vehicle.gid) + " " +
-                                    std::string(veda::toString(vehicle.riskLevel)) + " 판정 (최근접 gid=" +
-                                    std::to_string(nearestGid) + ", 거리=" + std::to_string(minDist) + "m)");
+                                   std::string(veda::toString(vehicle.riskLevel)) + " 판정 (최근접 gid=" +
+                                   std::to_string(nearestGid) + ", 거리=" + std::to_string(minDist) + "m)");
         }
 
         // 최근접 대상이 이 위험 상황에 관여된 당사자이므로, 그 객체의 riskLevel 도
@@ -92,7 +92,7 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
         // HW는 이미 이 차량 자체의 판정을 통해 해당 zone 에 반영되었기 때문에 중복 집계 불필요.
         if (vehicle.zoneId < 0 || vehicle.zoneId >= channelCount_) {
             logError(kIface, "gid=" + std::to_string(vehicle.gid) + " zoneId 미배정 또는 범위 밖(" +
-                                  std::to_string(vehicle.zoneId) + "), zone 집계에서 제외");
+                                 std::to_string(vehicle.zoneId) + "), zone 집계에서 제외");
             continue;
         }
 

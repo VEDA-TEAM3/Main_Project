@@ -43,7 +43,7 @@ void AngleZoneMapper::assign(domain::WorldFrame& frame) {
 
         if (obj.zoneId == -1) {
             logError(kIface, "gid=" + std::to_string(obj.gid) + " angle=" + std::to_string(angleDeg) +
-                                  "deg 에 해당하는 zoneBoundary 없음 — 미배정으로 남김");
+                                 "deg 에 해당하는 zoneBoundary 없음 — 미배정으로 남김");
         }
     }
 }

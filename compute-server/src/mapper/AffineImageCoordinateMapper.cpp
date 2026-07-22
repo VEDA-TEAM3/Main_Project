@@ -70,7 +70,7 @@ domain::ChannelFrame AffineImageCoordinateMapper::map(domain::ChannelFrame frame
 
     if (inputCount > 0 && writeIdx == 0) {
         logError(kIface, "ch=" + std::to_string(frame.channelId) + " 입력 객체 " + std::to_string(inputCount) +
-                              "개가 전부 필터링됨 (scale/offset 설정 확인 필요)");
+                             "개가 전부 필터링됨 (scale/offset 설정 확인 필요)");
     }
     return frame;
 }

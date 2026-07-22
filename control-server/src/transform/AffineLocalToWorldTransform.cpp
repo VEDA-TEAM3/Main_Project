@@ -15,7 +15,8 @@ AffineLocalToWorldTransform::AffineLocalToWorldTransform(std::vector<CameraCalib
 
 const CameraCalibration* AffineLocalToWorldTransform::find(veda::ChannelId ch) const {
     for (const auto& c : calibrations_) {
-        if (c.channelId == ch) return &c;
+        if (c.channelId == ch)
+            return &c;
     }
     return nullptr;
 }
@@ -24,7 +25,8 @@ void AffineLocalToWorldTransform::transform(std::vector<veda::TopViewFrame>& fra
     for (auto& frame : frames) {
         const CameraCalibration* cal = find(frame.ch);
         if (!cal) {
-            logError(kIface, "채널 " + std::to_string(frame.ch) + " 캘리브레이션 없음 — 좌표 변환 생략, 로컬 좌표 그대로 통과");
+            logError(kIface,
+                     "채널 " + std::to_string(frame.ch) + " 캘리브레이션 없음 — 좌표 변환 생략, 로컬 좌표 그대로 통과");
             continue;
         }
 

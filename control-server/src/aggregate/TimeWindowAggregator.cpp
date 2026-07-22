@@ -42,11 +42,12 @@ void TimeWindowAggregator::push(const veda::TopViewFrame& frame) {
                     }
                     const std::size_t channelCount = frames.size();
                     callback_(std::move(frames));  // 원본 그대로: 콜백(=다운스트림 파이프라인 전체)이 락 안에서 실행됨
-                    logSuccess(kIface, "윈도우 마감, " + std::to_string(channelCount) + "채널 집계 완료 → 다음 단계 전달");
+                    logSuccess(kIface,
+                               "윈도우 마감, " + std::to_string(channelCount) + "채널 집계 완료 → 다음 단계 전달");
                     windowClosed = true;
                 } else {
                     logError(kIface, "윈도우 마감했지만 콜백 미등록 - " + std::to_string(latestByChannel_.size()) +
-                                          "채널 데이터 유실");
+                                         "채널 데이터 유실");
                 }
             }
             latestByChannel_.clear();
@@ -78,7 +79,7 @@ std::string TimeWindowAggregator::buildMetricsReportIfDue() {
         return {};
 
     const double avgLockHoldUs = duration_cast<duration<double, std::micro>>(metrics_.totalLockHoldTime).count() /
-                                  static_cast<double>(metrics_.pushCount);
+                                 static_cast<double>(metrics_.pushCount);
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2) << "최근 " << elapsed.count() << "ms 지표 - push() " << metrics_.pushCount

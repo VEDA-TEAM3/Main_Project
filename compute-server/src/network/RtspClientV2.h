@@ -121,9 +121,9 @@ private:
 
     /// @brief 성능 지표 누적 상태
     struct Metrics {
-        std::uint64_t payloadCount = 0;    ///< 조립 완료된 metadata payload 개수
-        std::uint64_t recvSyscalls = 0;    ///< 실제 recv() 호출 횟수
-        std::uint64_t totalBytes = 0;      ///< 조립된 payload 총 바이트 수
+        std::uint64_t payloadCount = 0;                 ///< 조립 완료된 metadata payload 개수
+        std::uint64_t recvSyscalls = 0;                 ///< 실제 recv() 호출 횟수
+        std::uint64_t totalBytes = 0;                   ///< 조립된 payload 총 바이트 수
         std::chrono::nanoseconds totalAssembleTime{0};  ///< payload 조립에 걸린 시간 합
         std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
     } metrics_;

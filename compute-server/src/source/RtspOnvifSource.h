@@ -76,8 +76,8 @@ private:
     struct Metrics {
         std::uint64_t producedCount = 0;  ///< 콜백에서 생산된 프레임 수
         std::uint64_t consumedCount = 0;  ///< next()로 소비된 프레임 수
-        std::uint64_t droppedCount = 0;   ///< 큐가 가득 차서 버려진 프레임 수 (V1은 무제한 큐라 항상 0)
-        std::uint64_t totalBytes = 0;     ///< 소비된 payload 총 바이트 수
+        std::uint64_t droppedCount = 0;  ///< 큐가 가득 차서 버려진 프레임 수 (V1은 무제한 큐라 항상 0)
+        std::uint64_t totalBytes = 0;                   ///< 소비된 payload 총 바이트 수
         std::chrono::nanoseconds totalQueueLatency{0};  ///< 네트워크 도착(recvTime) ~ next() 인출 시간 합
         std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
     } metrics_;

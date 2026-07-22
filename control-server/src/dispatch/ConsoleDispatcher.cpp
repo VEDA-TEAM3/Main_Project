@@ -17,8 +17,8 @@ void ConsoleDispatcher::dispatch(const domain::RiskEvaluation& eval) {
         }
 
         logSuccess(kIface, "UART 이벤트 통지 → 채널 " + std::to_string(zone.zoneId) + ": " +
-                                std::string(veda::toString(zone.level)) + " (거리: " + std::to_string(zone.minDist) +
-                                "m, 기준 시간: " + std::to_string(eval.timestamp) + ")");
+                               std::string(veda::toString(zone.level)) + " (거리: " + std::to_string(zone.minDist) +
+                               "m, 기준 시간: " + std::to_string(eval.timestamp) + ")");
 
         lastSentLevel_[zone.zoneId] = zone.level;
     }

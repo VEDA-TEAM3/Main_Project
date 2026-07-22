@@ -22,8 +22,8 @@ void TimeWindowAggregatorV2::setCallback(AggregationCallback callback) {
 
 void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
     if (frame.ch < 0 || frame.ch >= channelCount_) {
-        logError(kIface, "channelId " + std::to_string(frame.ch) + " 이 channelCount(" +
-                              std::to_string(channelCount_) + ") 범위 밖 - 프레임 드롭");
+        logError(kIface, "channelId " + std::to_string(frame.ch) + " 이 channelCount(" + std::to_string(channelCount_) +
+                             ") 범위 밖 - 프레임 드롭");
         return;
     }
 
@@ -108,7 +108,7 @@ std::string TimeWindowAggregatorV2::buildMetricsReportIfDue() {
         return {};
 
     const double avgLockHoldUs = duration_cast<duration<double, std::micro>>(metrics_.totalLockHoldTime).count() /
-                                  static_cast<double>(metrics_.pushCount);
+                                 static_cast<double>(metrics_.pushCount);
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2) << "최근 " << elapsed.count() << "ms 지표 - push() " << metrics_.pushCount
