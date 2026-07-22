@@ -6,6 +6,7 @@
  */
 
 #include <iostream>
+#include <memory>
 
 #include "Contract.h"
 #include "interfaces/ISink.h"
@@ -45,6 +46,9 @@ public:
 class ConsoleBlurSink
     : public ISink<veda::BlurFrame> {
 public:
+    explicit ConsoleBlurSink(std::shared_ptr<MqttBlurSink> mqttSink)
+        : mqttSink_(std::move(mqttSink)) {}
+
     void send(
         const veda::BlurFrame& frame
     ) override {
@@ -73,6 +77,11 @@ public:
          * Pipeline이 ConsoleBlurSink로 전달한 동일한 프레임을
          * MQTT publisher에게 넘긴다.
          */
-        publishBlurToMqtt(frame);
+        if (mqttSink_) {
+            mqttSink_->send(frame);
+        }
     }
+
+private:
+    std::shared_ptr<MqttBlurSink> mqttSink_;
 };

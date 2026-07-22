@@ -49,3 +49,5 @@ target_link_libraries(
         Threads::Threads
         PkgConfig::MOSQUITTO
 )
+
+configure_file(config.json config.json COPYONLY)

@@ -23,8 +23,8 @@ struct mosquitto;
 class MqttBlurSink final : public ISink<veda::BlurFrame> {
 public:
     struct Config {
-        std::string host = "172.20.27.174";
-        int port = 8883;
+        std::string host;
+        int port = 0;
         std::string caFile = "/etc/veda/certs/ca.crt";
         std::string clientId;
 
@@ -88,12 +88,3 @@ private:
     std::atomic_uint64_t publishedCount_{0};
     std::atomic_uint64_t droppedCount_{0};
 };
-
-/**
- * @brief ConsoleBlurSink에서 사용하는 전역 진입점
- *
- * 최초 호출 시 MQTT 연결을 만들고 이후 호출에서는 재사용한다.
- */
-void publishBlurToMqtt(
-    const veda::BlurFrame& frame
-) noexcept;

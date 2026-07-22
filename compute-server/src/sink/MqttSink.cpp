@@ -6,7 +6,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <string>
@@ -15,48 +14,6 @@
 namespace {
 
 constexpr int kChannelCount = 4;
-constexpr int kDefaultMqttPort = 8883;
-
-std::string readEnvironment(
-    const char* name,
-    const char* fallback
-) {
-    const char* value = std::getenv(name);
-
-    if (value == nullptr || *value == '\0') {
-        return fallback;
-    }
-
-    return value;
-}
-
-int readMqttPort() noexcept {
-    const char* value = std::getenv("VEDA_MQTT_PORT");
-
-    if (value == nullptr || *value == '\0') {
-        return kDefaultMqttPort;
-    }
-
-    try {
-        const int port = std::stoi(value);
-
-        if (port > 0 && port <= 65535) {
-            return port;
-        }
-    } catch (...) {
-    }
-
-    std::fprintf(
-        stderr,
-        "[MqttBlurSink] invalid VEDA_MQTT_PORT=%s; "
-        "using default port=%d\n",
-        value,
-        kDefaultMqttPort
-    );
-
-    return kDefaultMqttPort;
-}
-
 std::string createClientId() {
     const auto ticks =
         std::chrono::steady_clock::now()
@@ -66,41 +23,6 @@ std::string createClientId() {
     return
         "veda-compute-blur-" +
         std::to_string(ticks);
-}
-
-MqttBlurSink::Config createDefaultConfig() {
-    MqttBlurSink::Config config;
-
-    config.host = readEnvironment(
-        "VEDA_MQTT_HOST",
-        "172.20.27.174"
-    );
-
-    config.port = readMqttPort();
-
-    config.caFile = readEnvironment(
-        "VEDA_MQTT_CA_FILE",
-        "/etc/veda/certs/ca.crt"
-    );
-
-    config.clientId = readEnvironment(
-        "VEDA_MQTT_CLIENT_ID",
-        ""
-    );
-
-    if (config.clientId.empty()) {
-        config.clientId = createClientId();
-    }
-
-    return config;
-}
-
-/**
- * 프로세스 전체에서 MQTT 연결 하나만 사용한다.
- */
-MqttBlurSink& sharedBlurSink() {
-    static MqttBlurSink sink(createDefaultConfig());
-    return sink;
 }
 
 }  // namespace
@@ -607,24 +529,4 @@ std::uint64_t MqttBlurSink::droppedCount() const noexcept {
     return droppedCount_.load(
         std::memory_order_relaxed
     );
-}
-
-void publishBlurToMqtt(
-    const veda::BlurFrame& frame
-) noexcept {
-    try {
-        sharedBlurSink().send(frame);
-    } catch (const std::exception& error) {
-        std::fprintf(
-            stderr,
-            "[MqttBlurSink] publish entry failed: %s\n",
-            error.what()
-        );
-    } catch (...) {
-        std::fprintf(
-            stderr,
-            "[MqttBlurSink] publish entry failed: "
-            "unknown exception\n"
-        );
-    }
 }

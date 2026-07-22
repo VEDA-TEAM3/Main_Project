@@ -22,8 +22,8 @@ struct AppConfig;
 class MqttTransport final : public ISink {
 public:
     struct Config {
-        std::string host = "172.20.27.174";
-        int port = 8883;
+        std::string host;
+        int port = 0;
         std::string clientId = "veda-control";
         int keepAliveSeconds = 60;
         int reconnectDelaySeconds = 1;

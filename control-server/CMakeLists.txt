@@ -38,3 +38,5 @@ target_link_libraries(control-server PRIVATE
     Threads::Threads
     PkgConfig::MOSQUITTO
 )
+
+configure_file(config.json config.json COPYONLY)

@@ -124,9 +124,14 @@ struct AppConfig {
     SimulationConfig simulation;
 
     // [네트워크 설정]
-    std::string mqttBrokerUrl = "tcp://localhost:1883";
-    std::string mqttReceiveTopic = "veda/+/frame";
-    std::string mqttSendTopic = "veda/server/merged";
+    std::string mqttHost;
+    int mqttPort = 0;
+    bool mqttUseTls = true;
+    std::string mqttCaFile = "/etc/veda/certs/ca.crt";
+    std::string mqttClientId = "veda-control";
+    int mqttKeepAliveSeconds = 60;
+    std::string mqttReceiveTopic = veda::topic::kTopViewAll;
+    std::string mqttSendTopic = veda::topic::kRisk;
 
     /**
      * @brief   외부 JSON 설정 파일에서 설정값을 읽어옵니다.
@@ -160,7 +165,13 @@ struct AppConfig {
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
         config.hwHealthCheck = veda::detail::get_or<HwHealthCheckConfig>(j, "hwHealthCheck", config.hwHealthCheck);
         config.simulation = veda::detail::get_or<SimulationConfig>(j, "simulation", config.simulation);
-        config.mqttBrokerUrl = veda::detail::get_or<std::string>(j, "mqttBrokerUrl", config.mqttBrokerUrl);
+        config.mqttHost = veda::detail::get_or<std::string>(j, "mqttHost", config.mqttHost);
+        config.mqttPort = veda::detail::get_or<int>(j, "mqttPort", config.mqttPort);
+        config.mqttUseTls = veda::detail::get_or<bool>(j, "mqttUseTls", config.mqttUseTls);
+        config.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", config.mqttCaFile);
+        config.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", config.mqttClientId);
+        config.mqttKeepAliveSeconds =
+            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
         config.mqttReceiveTopic = veda::detail::get_or<std::string>(j, "mqttReceiveTopic", config.mqttReceiveTopic);
         config.mqttSendTopic = veda::detail::get_or<std::string>(j, "mqttSendTopic", config.mqttSendTopic);
 

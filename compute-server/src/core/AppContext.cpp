@@ -20,8 +20,17 @@ AppContext::AppContext(const AppConfig& config) {
     auto ground = std::make_shared<BottomCenterExtractor>();
     auto transform = std::make_shared<HomographyTransform>(config.homography);
 
+    MqttBlurSink::Config mqttConfig;
+    mqttConfig.host = config.mqttHost;
+    mqttConfig.port = config.mqttPort;
+    mqttConfig.caFile = config.mqttCaFile;
+    mqttConfig.clientId = config.mqttClientId;
+    mqttConfig.keepAliveSeconds = config.mqttKeepAliveSeconds;
+    mqttConfig.maxQueueSize = config.mqttMaxQueueSize;
+
+    auto mqttSink = std::make_shared<MqttBlurSink>(std::move(mqttConfig));
     auto riskSink = std::make_shared<ConsoleTopViewSink>();
-    auto blurSink = std::make_shared<ConsoleBlurSink>();
+    auto blurSink = std::make_shared<ConsoleBlurSink>(mqttSink);
 
     pipeline_ =
         std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink, blurSink);

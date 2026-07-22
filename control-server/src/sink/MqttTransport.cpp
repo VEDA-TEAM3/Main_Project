@@ -3,7 +3,6 @@
 #include <mosquitto.h>
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <exception>
@@ -53,42 +52,12 @@ int riskRank(veda::RiskLevel level) noexcept {
 
 MqttTransport::Config transportConfigFrom(const AppConfig& appConfig) {
     MqttTransport::Config config;
-    config.clientId = "veda-control-publisher";
-
-    std::string address = appConfig.mqttBrokerUrl;
-    constexpr std::string_view tcpPrefix = "tcp://";
-    constexpr std::string_view mqttPrefix = "mqtt://";
-    constexpr std::string_view sslPrefix = "ssl://";
-    constexpr std::string_view mqttsPrefix = "mqtts://";
-
-    if (address.starts_with(tcpPrefix)) {
-        address.erase(0, tcpPrefix.size());
-        config.useTls = false;
-    } else if (address.starts_with(mqttPrefix)) {
-        address.erase(0, mqttPrefix.size());
-        config.useTls = false;
-    } else if (address.starts_with(sslPrefix)) {
-        address.erase(0, sslPrefix.size());
-        config.useTls = true;
-    } else if (address.starts_with(mqttsPrefix)) {
-        address.erase(0, mqttsPrefix.size());
-        config.useTls = true;
-    }
-
-    const std::size_t separator = address.rfind(':');
-    if (separator != std::string::npos && separator + 1 < address.size()) {
-        int port = 0;
-        const char* begin = address.data() + separator + 1;
-        const char* end = address.data() + address.size();
-        const auto [parsedEnd, error] = std::from_chars(begin, end, port);
-        if (error == std::errc{} && parsedEnd == end && port > 0 && port <= 65535) {
-            config.port = port;
-            address.resize(separator);
-        }
-    }
-    if (!address.empty()) {
-        config.host = std::move(address);
-    }
+    config.host = appConfig.mqttHost;
+    config.port = appConfig.mqttPort;
+    config.useTls = appConfig.mqttUseTls;
+    config.caFile = appConfig.mqttCaFile;
+    config.clientId = appConfig.mqttClientId;
+    config.keepAliveSeconds = appConfig.mqttKeepAliveSeconds;
     return config;
 }
 

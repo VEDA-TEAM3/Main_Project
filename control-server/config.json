@@ -1,0 +1,10 @@
+{
+    "mqttHost": "172.20.27.174",
+    "mqttPort": 8883,
+    "mqttUseTls": true,
+    "mqttCaFile": "/etc/veda/certs/ca.crt",
+    "mqttClientId": "veda-control",
+    "mqttKeepAliveSeconds": 60,
+    "mqttReceiveTopic": "veda/ch/+/topview",
+    "mqttSendTopic": "veda/risk"
+}

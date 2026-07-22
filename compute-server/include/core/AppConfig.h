@@ -41,7 +41,13 @@ struct AppConfig {
     // Homography
     std::array<double, 9> homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
 
-    // TODO: sinks.risk / sinks.blur MQTT 브로커 주소
+    // MQTT
+    std::string mqttHost;
+    int mqttPort = 0;
+    std::string mqttCaFile = "/etc/veda/certs/ca.crt";
+    std::string mqttClientId;
+    int mqttKeepAliveSeconds = 30;
+    std::size_t mqttMaxQueueSize = 8;
 
     /**
      * @brief       외부 JSON 설정 파일에서 AppConfig를 로드하는 함수
@@ -76,6 +82,15 @@ struct AppConfig {
         cfg.rtspPass = veda::detail::get_or<std::string>(j, "rtspPass", cfg.rtspPass);
         cfg.rtspSetupUri = veda::detail::get_or<std::string>(j, "rtspSetupUri", cfg.rtspSetupUri);
         cfg.rtspPlayUri = veda::detail::get_or<std::string>(j, "rtspPlayUri", cfg.rtspPlayUri);
+
+        cfg.mqttHost = veda::detail::get_or<std::string>(j, "mqttHost", cfg.mqttHost);
+        cfg.mqttPort = veda::detail::get_or<int>(j, "mqttPort", cfg.mqttPort);
+        cfg.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", cfg.mqttCaFile);
+        cfg.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", cfg.mqttClientId);
+        cfg.mqttKeepAliveSeconds =
+            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", cfg.mqttKeepAliveSeconds);
+        cfg.mqttMaxQueueSize =
+            veda::detail::get_or<std::size_t>(j, "mqttMaxQueueSize", cfg.mqttMaxQueueSize);
 
         cfg.sanitizerIouThresh = veda::detail::get_or<double>(j, "sanitizerIouThresh", cfg.sanitizerIouThresh);
         cfg.sanitizerContainThresh =

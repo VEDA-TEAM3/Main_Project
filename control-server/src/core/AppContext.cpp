@@ -22,7 +22,11 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto clock = std::make_shared<SystemClock>();
     auto metric = std::make_shared<EuclideanMetric>();
 
-    auto receiver = std::make_shared<MqttChannelReceiver>();
+    auto mqttTransport = std::make_shared<MqttTransport>(config_);
+    MqttChannelReceiver::Config receiverConfig;
+    receiverConfig.channelCount = config_.channelCount;
+    receiverConfig.topViewTopic = config_.mqttReceiveTopic;
+    auto receiver = std::make_shared<MqttChannelReceiver>(mqttTransport, std::move(receiverConfig));
     auto aggregator = std::make_shared<TimeWindowAggregatorV2>(clock, config_.windowSizeMs, config_.channelCount);
     auto transform = std::make_shared<NullTransform>();
     auto fuser = std::make_shared<ConcatFuser>(metric, config_.risk.dedupMergeDistance);
@@ -30,11 +34,11 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk.warningDistance,
                                                             config_.risk.dangerousDistance, config_.channelCount);
     auto dispatcher = std::make_shared<ConsoleDispatcher>();
-    auto sink = std::make_shared<MqttTransport>(config_);
+    auto sink = mqttTransport;
 
     logSuccess(kIface,
-               "파이프라인 조립 완료 (receiver=NullReceiver, transform=NullTransform, "
-               "zoneMapper=AngleZoneMapper, sink=ConsoleSink)");
+               "파이프라인 조립 완료 (receiver=MqttChannelReceiver, transform=NullTransform, "
+               "zoneMapper=AngleZoneMapper, sink=MqttTransport)");
 
     return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
                                         sink);
