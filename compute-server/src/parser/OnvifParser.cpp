@@ -4,9 +4,15 @@
 #include <cstdint>
 #include <ctime>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <utility>
+
+#include "log/Logger.h"
 
 namespace {
+
+constexpr const char* kIface = "Parser";
 
 /**
  * @brief   안전한 숫자 파싱을 위한 std::from_chars 래퍼 함수
@@ -28,19 +34,29 @@ std::optional<T> parseNumber(std::string_view sv) {
  * @param   s 검색을 수행할 대상 문자열 (내부에서 시작 위치를 결정)
  * @param   key 찾고자 하는 속성의 키 문자열
  * @return  std::optional<std::string_view> 추출된 따옴표 안의 문자열, 실패 시 nullopt
+ *
+ * @note    "key" + "=\"" 를 이어붙인 임시 std::string을 만들어 검색하던 방식 대신,
+ *          key만 먼저 찾고 바로 뒤가 ="인지 직접 확인함 -> 프레임당 수십 회 호출되는
+ *          지점에서 임시 문자열 생성(및 SSO 범위를 벗어날 경우의 힙 할당)을 없앰
  */
 std::optional<std::string_view> extractQuoted(std::string_view s, std::string_view key) {
-    const std::string pattern = std::string(key) + "=\"";
-    const size_t pos = s.find(pattern);
-    if (pos == std::string_view::npos)
-        return std::nullopt;
+    std::size_t searchFrom = 0;
+    for (;;) {
+        const std::size_t keyPos = s.find(key, searchFrom);
+        if (keyPos == std::string_view::npos)
+            return std::nullopt;
 
-    const size_t valueStart = pos + pattern.size();
-    const size_t valueEnd = s.find('"', valueStart);
-    if (valueEnd == std::string_view::npos)
-        return std::nullopt;
+        const std::size_t afterKey = keyPos + key.size();
+        if (afterKey + 1 < s.size() && s[afterKey] == '=' && s[afterKey + 1] == '"') {
+            const std::size_t valueStart = afterKey + 2;
+            const std::size_t valueEnd = s.find('"', valueStart);
+            if (valueEnd == std::string_view::npos)
+                return std::nullopt;
+            return s.substr(valueStart, valueEnd - valueStart);
+        }
 
-    return s.substr(valueStart, valueEnd - valueStart);
+        searchFrom = keyPos + 1;
+    }
 }
 
 /**
@@ -170,25 +186,35 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
     const std::string_view payload(reinterpret_cast<const char*>(raw.bytes.data()), raw.bytes.size());
 
     const size_t framePos = payload.find("<tt:Frame");
-    if (framePos == std::string_view::npos)
+    if (framePos == std::string_view::npos) {
+        logError(kIface, "ch=" + std::to_string(raw.channelId) + " <tt:Frame> 태그 없음 - 프레임 스킵");
         return result;
+    }
 
     const size_t frameEnd = payload.find("</tt:Frame>", framePos);
-    if (frameEnd == std::string_view::npos)
+    if (frameEnd == std::string_view::npos) {
+        logError(kIface, "ch=" + std::to_string(raw.channelId) + " </tt:Frame> 종료 태그 없음 - 프레임 스킵");
         return result;
+    }
 
     const std::string_view frame = payload.substr(framePos, frameEnd - framePos);
 
     auto utcAttr = extractQuoted(frame, "UtcTime");
-    if (!utcAttr)
+    if (!utcAttr) {
+        logError(kIface, "ch=" + std::to_string(raw.channelId) + " UtcTime 속성 없음 - 프레임 스킵");
         return result;
+    }
     auto utcMs = parseUtcTimeMs(*utcAttr);
-    if (!utcMs)
+    if (!utcMs) {
+        logError(kIface, "ch=" + std::to_string(raw.channelId) + " UtcTime 형식 파싱 실패 - 프레임 스킵");
         return result;
+    }
 
     auto transform = parseTransformation(frame);
-    if (!transform)
+    if (!transform) {
+        logError(kIface, "ch=" + std::to_string(raw.channelId) + " Transformation 파싱 실패 - 프레임 스킵");
         return result;
+    }
 
     result.utcTime = *utcMs;
 
@@ -268,7 +294,7 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         const std::string_view typeText = obj.substr(typeTextStart + 1, typeTextEnd - typeTextStart - 1);
         det.cls = veda::objectClassFromString(typeText);
 
-        result.objects.push_back(det);
+        result.objects.push_back(std::move(det));
     }
 
     return result;

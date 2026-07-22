@@ -1,4 +1,4 @@
-#include "source/RtspOnvifSource.h"
+#include "source/RtspOnvifSourceV2.h"
 
 #include <algorithm>
 #include <chrono>
@@ -10,37 +10,50 @@
 
 namespace {
 constexpr const char* kIface = "Source";
+
 }  // namespace
 
-RtspOnvifSource::RtspOnvifSource(const AppConfig& config) : config_(config) {
-    worker_ = std::thread(&RtspOnvifSource::workerLoop, this);
+RtspOnvifSourceV2::RtspOnvifSourceV2(const AppConfig& config) : config_(config) {
+    ring_.resize(kRingCapacity);
+    worker_ = std::thread(&RtspOnvifSourceV2::workerLoop, this);
 }
 
-RtspOnvifSource::~RtspOnvifSource() {
+RtspOnvifSourceV2::~RtspOnvifSourceV2() {
     stopping_ = true;
     cv_.notify_all();
     if (worker_.joinable())
         worker_.join();
 }
 
-void RtspOnvifSource::workerLoop() {
+void RtspOnvifSourceV2::workerLoop() {
     int backoffSec = 1;
     constexpr int kMaxBackoffSec = 30;
 
     while (!stopping_) {
         RtspClientV2 client(config_);
         client.onPayloadReceived = [this](std::string_view payload) {
-            domain::RawPacket pkt;
-            pkt.channelId = config_.channelId;
-            pkt.bytes.assign(payload.begin(), payload.end());
-            pkt.recvTime = std::chrono::system_clock::now();
-            const std::size_t sz = pkt.bytes.size();
-            {
-                std::lock_guard<std::mutex> lk(mtx_);
-                queue_.push(std::move(pkt));
-                ++metrics_.producedCount;
-                metrics_.totalBytes += sz;
+            std::lock_guard<std::mutex> lk(mtx_);
+
+            std::size_t writeIdx = 0;
+            if (count_ == kRingCapacity) {
+                // 링이 가득 참: 가장 오래된 프레임 자리를 그대로 재사용 -> drop-oldest
+                writeIdx = head_;
+                head_ = (head_ + 1) % kRingCapacity;
+                ++metrics_.droppedCount;
+            } else {
+                writeIdx = (head_ + count_) % kRingCapacity;
+                ++count_;
             }
+
+            // 슬롯에 직접 assign(): 슬롯의 기존 vector capacity를 재사용 (콜백당 힙 할당 없음)
+            domain::RawPacket& slot = ring_[writeIdx];
+            slot.channelId = config_.channelId;
+            slot.bytes.assign(payload.begin(), payload.end());
+            slot.recvTime = std::chrono::system_clock::now();
+
+            ++metrics_.producedCount;
+            metrics_.totalBytes += slot.bytes.size();
+
             cv_.notify_one();
         };
 
@@ -62,17 +75,24 @@ void RtspOnvifSource::workerLoop() {
     }
 }
 
-bool RtspOnvifSource::next(domain::RawPacket& out) {
+bool RtspOnvifSourceV2::next(domain::RawPacket& out) {
     std::string report;
     {
         std::unique_lock<std::mutex> lk(mtx_);
-        cv_.wait(lk, [this] { return !queue_.empty() || stopping_.load(); });
+        cv_.wait(lk, [this] { return count_ > 0 || stopping_.load(); });
 
-        if (queue_.empty())
+        if (count_ == 0)
             return false;
 
-        out = std::move(queue_.front());
-        queue_.pop();
+        const domain::RawPacket& slot = ring_[head_];
+
+        // move 대신 copy: 슬롯의 capacity를 보존해서 다음 write에서 재사용(할당 제거)
+        out.channelId = slot.channelId;
+        out.bytes.assign(slot.bytes.begin(), slot.bytes.end());
+        out.recvTime = slot.recvTime;
+
+        head_ = (head_ + 1) % kRingCapacity;
+        --count_;
 
         // 지연 시간 계측: 네트워크 도착(recvTime) ~ Pipeline이 실제로 꺼내가는 시점
         const auto latency = std::chrono::system_clock::now() - out.recvTime;
@@ -86,7 +106,7 @@ bool RtspOnvifSource::next(domain::RawPacket& out) {
     return true;
 }
 
-std::string RtspOnvifSource::buildMetricsReportIfDue() {
+std::string RtspOnvifSourceV2::buildMetricsReportIfDue() {
     using namespace std::chrono;
 
     const auto now = steady_clock::now();

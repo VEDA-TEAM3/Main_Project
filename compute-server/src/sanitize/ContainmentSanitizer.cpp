@@ -2,10 +2,15 @@
 #include "sanitize/ContainmentSanitizer.h"
 
 #include <algorithm>
+#include <string>
+#include <utility>
 
 #include "Contract.h"
+#include "log/Logger.h"
 
 namespace {
+
+constexpr const char* kIface = "Sanitizer";
 
 /**
  * @brief   bbox의 면적을 계산
@@ -76,6 +81,8 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
     const size_t n = frame.objects.size();
     std::vector<bool> drop(n, false);
 
+    // 1단계: 판정만 수행 (i의 판정이 다른 모든 j의 "원본" 데이터를 참조하므로,
+    // 이 단계가 끝나기 전에는 frame.objects를 절대 변형하면 안 됨)
     for (size_t i = 0; i < n; ++i) {
         const auto& x = frame.objects[i];
         if (!veda::isRiskClass(x.cls))
@@ -89,24 +96,32 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             // 규칙 A
             if (veda::isBlurClass(y.cls) && iou(x.box, y.box) > iouThresh_) {
                 drop[i] = true;
+                logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
+                                       " 제거 (규칙 A: " + std::string(veda::toString(y.cls)) +
+                                       " id=" + std::to_string(y.id) + "와 IoU>" + std::to_string(iouThresh_) + ")");
                 break;
             }
 
             // 규칙 B
             if (x.cls == y.cls && area(x.box) < area(y.box) && ioMin(x.box, y.box) > containThresh_) {
                 drop[i] = true;
+                logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
+                                       " 제거 (규칙 B: id=" + std::to_string(y.id) + " 안에 포함)");
                 break;
             }
         }
     }
 
-    domain::ChannelFrame result;
-    result.utcTime = frame.utcTime;
-    result.channelId = frame.channelId;
-    result.objects.reserve(n);
+    // 2단계: 판정이 모두 끝난 뒤에만 frame.objects를 in-place로 압축
+    // (별도 벡터를 새로 만들지 않음 -> resize()로 줄이는 건 재할당을 유발하지 않으므로 할당 없음)
+    size_t writeIdx = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (!drop[i])
-            result.objects.push_back(std::move(frame.objects[i]));
+        if (drop[i])
+            continue;
+        if (writeIdx != i)
+            frame.objects[writeIdx] = std::move(frame.objects[i]);
+        ++writeIdx;
     }
-    return result;
+    frame.objects.resize(writeIdx);
+    return frame;
 }

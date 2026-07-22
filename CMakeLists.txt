@@ -4,7 +4,7 @@ project(parking_vms LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(nlohmann_json 3.11 REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 add_library(shared INTERFACE)
 target_include_directories(shared INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/shared)

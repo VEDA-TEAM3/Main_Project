@@ -1,8 +1,9 @@
 #include "core/AppContext.h"
 
-#include "aggregate/TimeWindowAggregator.h"
+#include "aggregate/TimeWindowAggregatorV2.h"
 #include "dispatch/ConsoleDispatcher.h"
 #include "fuse/ConcatFuser.h"
+#include "log/Logger.h"
 #include "metric/EuclideanMetric.h"
 #include "receive/MqttChannelReceiver.h"
 #include "risk/ThresholdRiskPolicy.h"
@@ -11,6 +12,10 @@
 #include "transform/NullTransform.h"
 #include "zone/AngleZoneMapper.h"
 
+namespace {
+constexpr const char* kIface = "AppContext";
+}  // namespace
+
 AppContext::AppContext(const AppConfig& config) : config_(config) {}
 
 std::shared_ptr<Controller> AppContext::buildController() {
@@ -18,7 +23,7 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto metric = std::make_shared<EuclideanMetric>();
 
     auto receiver = std::make_shared<MqttChannelReceiver>();
-    auto aggregator = std::make_shared<TimeWindowAggregator>(clock, config_.windowSizeMs);
+    auto aggregator = std::make_shared<TimeWindowAggregatorV2>(clock, config_.windowSizeMs, config_.channelCount);
     auto transform = std::make_shared<NullTransform>();
     auto fuser = std::make_shared<ConcatFuser>(metric, config_.risk.dedupMergeDistance);
     auto zoneMapper = std::make_shared<AngleZoneMapper>(config_.zoneBoundaries);
@@ -26,6 +31,10 @@ std::shared_ptr<Controller> AppContext::buildController() {
                                                             config_.risk.dangerousDistance, config_.channelCount);
     auto dispatcher = std::make_shared<ConsoleDispatcher>();
     auto sink = std::make_shared<MqttTransport>(config_);
+
+    logSuccess(kIface,
+               "파이프라인 조립 완료 (receiver=NullReceiver, transform=NullTransform, "
+               "zoneMapper=AngleZoneMapper, sink=ConsoleSink)");
 
     return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
                                         sink);

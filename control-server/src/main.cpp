@@ -2,6 +2,11 @@
 
 #include "core/AppConfig.h"
 #include "core/AppContext.h"
+#include "log/Logger.h"
+
+namespace {
+constexpr const char* kIface = "Main";
+}  // namespace
 
 int main() {
     AppConfig config = AppConfig::load("config.json");
@@ -10,11 +15,13 @@ int main() {
     auto controller = context.buildController();
 
     controller->start();
+    logSuccess(kIface, "===control-server start===");
 
-    std::cout << "종료하려면 Enter 키를 누르세요.\n";
+    std::cout << "If you want to stop, you push Enter...\n";
     std::cin.get();
 
     controller->stop();
+    logSuccess(kIface, "===control-server stop===");
 
     return 0;
 }

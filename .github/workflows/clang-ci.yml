@@ -7,24 +7,38 @@ on:
       - '**/*.c'
       - '**/*.cpp'
       - '**/*.h'
-      - '**/*.hpp'
       - '**/CMakeLists.txt'
 
 jobs:
-  # 1. Format Check (가장 먼저 실행)
   format-check:
     name: 🎨 Format Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run clang-format check
-        uses: jidicula/clang-format-action@v4.11.0
-        with:
-          clang-format-version: '16'
-          check-path: '.'
-          exclude-regex: '^(.github|build|third_party)/.*'
-          fallback-style: 'Google'
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          FILES=$(find . \
+            -type f \( \
+              -name "*.c" -o \
+              -name "*.cpp" -o \
+              -name "*.h" \
+            \) \
+            -not -path "./build/*" \
+            -not -path "./device-rpi/kernel/*" \
+            -not -path "./.git/*")
+
+          if [ -z "$FILES" ]; then
+            echo "No C/C++ files found."
+            exit 0
+          fi
+
+          clang-format-18 --dry-run --Werror $FILES
 
       - name: Send Slack Alert (Format)
         if: failure()
@@ -36,69 +50,96 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  # 2. Static Analysis (Tidy) - Format 통과 후, Build 전에 실행
   tidy-check:
-    name: ☢️ Static Analysis (Tidy)
-    runs-on: ubuntu-latest
-    needs: format-check
-    steps:
-      - uses: actions/checkout@v4
+      name: ☢️ Static Analysis (Tidy)
+      runs-on: self-hosted
+      needs: format-check
+      steps:
+        # 변경된 파일을 찾기(git diff) 위해 전체 히스토리를 가져옵니다 (fetch-depth: 0)
+        - uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
 
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          # OpenCV, OpenSSL, 그리고 JSON 병합용 jq 설치
-          sudo apt-get install -y libopencv-dev libssl-dev jq nlohmann-json3-dev
+        - name: Install System Dependencies
+          run: |
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates clang-tidy g++-10 gcc-10 \
+            libssl-dev jq nlohmann-json3-dev libmosquitto-dev
 
-      - name: Configure CMake projects (For compile_commands.json)
-        run: |
-          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 Configure 수행
-          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
-            dir=$(dirname "$file")
-            echo "Configuring CMake in $dir"
-            cmake -S "$dir" -B "$dir/build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          done
+        - name: Configure CMake projects (For compile_commands.json)
+          run: |
+            find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+              dir=$(dirname "$file")
+              echo "Configuring CMake in $dir"
+              cmake -S "$dir" -B "$dir/build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            done
 
-      - name: Merge compile_commands.json
-        run: |
-          # 각 서브폴더에 생성된 compile_commands.json을 하나로 합쳐서 루트에 배치
-          FILES=$(find . -type f -path "*/build/compile_commands.json")
-          if [ -n "$FILES" ]; then
-            jq -s 'add' $FILES > compile_commands.json
-          else
-            echo "[]" > compile_commands.json
-          fi
+        - name: Merge compile_commands.json
+          run: |
+            FILES=$(find . -type f -path "*/build/compile_commands.json")
+            if [ -n "$FILES" ]; then
+              jq -s 'add' $FILES > compile_commands.json
+            else
+              echo "[]" > compile_commands.json
+            fi
 
-      - name: Run Clang-Tidy
-        id: linter
-        uses: cpp-linter/cpp-linter-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          style: '' # 이미 format-check에서 하므로 비워둠
-          tidy-checks: ''
-          database: '.' # 병합된 compile_commands.json이 루트에 있음
-          ignore: '.github|build|third_party'
-          files-changed-only: true
+        # cpp-linter-action 제거 후 Native 스크립트로 교체
+        - name: Run Clang-Tidy (Native)
+          run: |
+            # 1. PR인지 확인하고 변경된 대상 파일만 추출 (files-changed-only 로직)
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              BASE_SHA=${{ github.event.pull_request.base.sha }}
+              # PR 대상 브랜치와 현재 커밋 비교하여 추가/수정된 C/C++ 파일만 필터링
+              TARGET_FILES=$(git diff --name-only --diff-filter=ACMRT $BASE_SHA ${{ github.sha }} | grep -E '\.(cpp|hpp|c|h)$' | grep -vE '(build/|third_party/|\.github/)' || true)
+            else
+              # PR이 아니면 전체 소스 중 C/C++ 파일 찾기
+              TARGET_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \) -not -path "*/build/*" -not -path "*/third_party/*" -not -path "*/\.github/*")
+            fi
 
-      - name: Fail workflow if tidy failed
-        if: steps.linter.outputs.checks-failed > 0
-        run: exit 1
+            # 2. 검사할 파일이 없으면 정상 종료
+            if [ -z "$TARGET_FILES" ]; then
+              echo "✅ 검사할 C/C++ 파일이 없습니다. (변경사항 없음)"
+              exit 0
+            fi
 
-      - name: Send Slack Alert (Tidy)
-        if: failure()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: failure
-          fields: repo,message,commit,author
-          text: "[Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C/C++ 원칙 위반이 발견되었습니다."
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+            echo "🔍 다음 파일들을 검사합니다:"
+            echo "$TARGET_FILES"
 
-  # 3. Build Check - Tidy까지 완벽할 때만 실제 빌드 시도
+            # 3. Clang-Tidy 실행 및 에러 카운트
+            ERROR_COUNT=0
+            for file in $TARGET_FILES; do
+              echo "---------------------------------------------------"
+              echo "Checking: $file"
+              # 실패하면 카운트 증가 (경고를 에러로 취급하려면 끝에 --warnings-as-errors='*' 추가)
+              if ! clang-tidy -p . "$file"; then
+                ERROR_COUNT=$((ERROR_COUNT + 1))
+              fi
+            done
+
+            # 4. 에러가 1개라도 발생했다면 워크플로우 실패 처리
+            if [ $ERROR_COUNT -gt 0 ]; then
+              echo "❌ $ERROR_COUNT 개의 파일에서 Clang-Tidy 원칙 위반이 발견되었습니다."
+              exit 1
+            else
+              echo "✅ 모든 파일이 Clang-Tidy 검사를 통과했습니다."
+            fi
+
+        - name: Send Slack Alert (Tidy)
+          if: failure()
+          uses: 8398a7/action-slack@v3
+          with:
+            status: failure
+            fields: repo,message,commit,author
+            text: "[Tidy 에러] 잠재적 버그, 메모리 릭 위험, 또는 모던 C/C++ 원칙 위반이 발견되었습니다."
+          env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
   build-check:
     name: 🔨 Build Check
-    runs-on: ubuntu-latest
+    runs-on: self-hosted  
+    env:
+      CC: gcc-10
+      CXX: g++-10
     needs: tidy-check
     steps:
       - uses: actions/checkout@v4
@@ -106,12 +147,11 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 빌드 시에도 OpenCV와 OpenSSL 헤더/라이브러리가 필요하므로 동일하게 설치
-          sudo apt-get install -y libopencv-dev libssl-dev nlohmann-json3-dev
+          sudo apt-get install -y ca-certificates g++-10 gcc-10 \
+          libopencv-dev libssl-dev nlohmann-json3-dev libmosquitto-dev
 
       - name: Build all CMake projects
         run: |
-          # 모든 폴더를 돌며 CMakeLists.txt가 있는 곳에서 빌드 수행
           find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
             dir=$(dirname "$file")
             echo "========================================="

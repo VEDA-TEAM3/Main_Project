@@ -1,12 +1,14 @@
-#include "network/RtspClient.h"
+#include "network/RtspClientV2.h"
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <openssl/md5.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <chrono>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
@@ -16,11 +18,15 @@
 
 namespace {
 constexpr const char* kIface = "Network";
+
 }  // namespace
 
-RtspClient::RtspClient(const AppConfig& config) : cfg_(config) {}
+RtspClientV2::RtspClientV2(const AppConfig& config) : cfg_(config) {
+    sockBuf_.resize(kSocketReadBufSize);
+    rtpPacket_.resize(kMaxRtpPayloadSize);
+}
 
-RtspClient::~RtspClient() {
+RtspClientV2::~RtspClientV2() {
     keepRunning_ = false;
     if (keepaliveThread_.joinable())
         keepaliveThread_.join();
@@ -30,7 +36,7 @@ RtspClient::~RtspClient() {
     }
 }
 
-bool RtspClient::connect() {
+bool RtspClientV2::connect() {
     sock_ = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_ < 0) {
         logError(kIface, "소켓 생성 실패");
@@ -41,6 +47,12 @@ bool RtspClient::connect() {
         5, 0
     };
     setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    const int noDelay = 1;
+    setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
+
+    const int rcvBufBytes = 1 << 20;  // 1MB
+    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &rcvBufBytes, sizeof(rcvBufBytes));
 
     struct sockaddr_in serverAddr {};
     serverAddr.sin_family = AF_INET;
@@ -55,7 +67,44 @@ bool RtspClient::connect() {
     return true;
 }
 
-bool RtspClient::recvHeaders(std::string& out) {
+bool RtspClientV2::fillReadBuffer() {
+    sockBufPos_ = 0;
+    const ssize_t n = recv(sock_, sockBuf_.data(), sockBuf_.size(), 0);
+    ++metrics_.recvSyscalls;
+    if (n <= 0) {
+        sockBufLen_ = 0;
+        return false;
+    }
+    sockBufLen_ = static_cast<std::size_t>(n);
+    return true;
+}
+
+bool RtspClientV2::readByte(std::uint8_t& out) {
+    if (sockBufPos_ >= sockBufLen_) {
+        if (!fillReadBuffer())
+            return false;
+    }
+    out = sockBuf_[sockBufPos_++];
+    return true;
+}
+
+bool RtspClientV2::readBytes(std::uint8_t* dest, std::size_t len) {
+    std::size_t copied = 0;
+    while (copied < len) {
+        if (sockBufPos_ >= sockBufLen_) {
+            if (!fillReadBuffer())
+                return false;
+        }
+        const std::size_t avail = sockBufLen_ - sockBufPos_;
+        const std::size_t take = std::min(avail, len - copied);
+        std::memcpy(dest + copied, sockBuf_.data() + sockBufPos_, take);
+        sockBufPos_ += take;
+        copied += take;
+    }
+    return true;
+}
+
+bool RtspClientV2::recvHeaders(std::string& out) {
     out.clear();
     char buf[4096];
     while (out.find("\r\n\r\n") == std::string::npos) {
@@ -69,15 +118,17 @@ bool RtspClient::recvHeaders(std::string& out) {
     return true;
 }
 
-bool RtspClient::setup() {
+bool RtspClientV2::setup() {
     std::string req1 = "SETUP " + cfg_.rtspSetupUri +
                        " RTSP/1.0\r\nCSeq: 1\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
     send(sock_, req1.c_str(), req1.length(), 0);
 
     std::string res1;
-    if (!recvHeaders(res1))
+    if (!recvHeaders(res1)) {
+        logError(kIface, "SETUP 1차 응답 수신 실패");
         return false;
+    }
 
     const size_t realmPos = res1.find("realm=\"");
     const size_t noncePos = res1.find("nonce=\"");
@@ -85,8 +136,10 @@ bool RtspClient::setup() {
         realm_ = res1.substr(realmPos + 7, res1.find('"', realmPos + 7) - (realmPos + 7));
     if (noncePos != std::string::npos)
         nonce_ = res1.substr(noncePos + 7, res1.find('"', noncePos + 7) - (noncePos + 7));
-    if (nonce_.empty())
+    if (nonce_.empty()) {
+        logError(kIface, "인증 파라미터(nonce) 파싱 실패");
         return false;
+    }
 
     std::string auth = buildDigestHeader("SETUP", cfg_.rtspSetupUri);
     std::string req2 = "SETUP " + cfg_.rtspSetupUri +
@@ -96,19 +149,23 @@ bool RtspClient::setup() {
     send(sock_, req2.c_str(), req2.length(), 0);
 
     std::string res2;
-    if (!recvHeaders(res2))
+    if (!recvHeaders(res2)) {
+        logError(kIface, "SETUP 2차(인증) 응답 수신 실패");
         return false;
+    }
 
     const size_t sessPos = res2.find("Session: ");
-    if (sessPos == std::string::npos)
+    if (sessPos == std::string::npos) {
+        logError(kIface, "세션 ID 파싱 실패");
         return false;
+    }
 
     sessionId_ = res2.substr(sessPos + 9, res2.find_first_of(";\r\n", sessPos) - (sessPos + 9));
     logSuccess(kIface, "인증 성공, 세션 ID: " + sessionId_);
     return true;
 }
 
-void RtspClient::play() {
+void RtspClientV2::play() {
     std::string auth = buildDigestHeader("PLAY", cfg_.rtspPlayUri);
     std::string req =
         "PLAY " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: 3\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
@@ -119,26 +176,30 @@ void RtspClient::play() {
     logSuccess(kIface, "PLAY 명령 전송 완료, 스트리밍 시작");
 
     keepRunning_ = true;
-    keepaliveThread_ = std::thread(&RtspClient::keepAliveLoop, this);
+    keepaliveThread_ = std::thread(&RtspClientV2::keepAliveLoop, this);
 }
 
-void RtspClient::run() {
-    std::vector<std::uint8_t> header;
-    std::vector<std::uint8_t> rtpPacket;
+void RtspClientV2::run() {
     std::string metadataBuffer;
+    metadataBuffer.reserve(8192);
 
     while (true) {
-        if (!readExact(header, 1))
+        std::uint8_t sync = 0;
+        if (!readByte(sync))
             break;
-        if (header[0] != '$')
+        if (sync != '$')
             continue;
 
-        if (!readExact(header, 3))
+        std::uint8_t header[3];
+        if (!readBytes(header, 3))
             break;
         const int channel = header[0];
         const int payloadLen = (header[1] << 8) | header[2];
 
-        if (!readExact(rtpPacket, static_cast<size_t>(payloadLen)))
+        if (static_cast<std::size_t>(payloadLen) > kMaxRtpPayloadSize)
+            break;
+
+        if (!readBytes(rtpPacket_.data(), static_cast<std::size_t>(payloadLen)))
             break;
         if (channel != 0)
             continue;
@@ -148,8 +209,8 @@ void RtspClient::run() {
         if (metadataBuffer.empty())
             frameAssembleStart_ = std::chrono::steady_clock::now();
 
-        const bool marker = (rtpPacket[1] & 0x80) != 0;
-        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket.data() + kRtpHeaderSize),
+        const bool marker = (rtpPacket_[1] & 0x80) != 0;
+        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
                               static_cast<size_t>(payloadLen - kRtpHeaderSize));
 
         if (marker) {
@@ -170,50 +231,7 @@ void RtspClient::run() {
     logError(kIface, "스트림 종료 또는 연결 끊김");
 }
 
-std::string RtspClient::md5Hex(const std::string& input) {
-    unsigned char hash[MD5_DIGEST_LENGTH];
-    // NOLINTNEXTLINE
-    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
-    char output[33];
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
-        snprintf(output + i * 2, 3, "%02x", hash[i]);
-    return std::string(output);
-}
-
-std::string RtspClient::buildDigestHeader(const std::string& method, const std::string& uri) {
-    char ncBuf[9];
-    snprintf(ncBuf, sizeof(ncBuf), "%08x", nonceCount_++);
-    const std::string nc(ncBuf);
-    const std::string cnonce = "0a4f113b";
-    const std::string qop = "auth";
-
-    const std::string ha1 = md5Hex(cfg_.rtspUser + ":" + realm_ + ":" + cfg_.rtspPass);
-    const std::string ha2 = md5Hex(method + ":" + uri);
-    const std::string response = md5Hex(ha1 + ":" + nonce_ + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2);
-
-    char header[1024];
-    snprintf(header, sizeof(header),
-             "Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", "
-             "uri=\"%s\", response=\"%s\", qop=%s, nc=%s, cnonce=\"%s\"\r\n",
-             cfg_.rtspUser.c_str(), realm_.c_str(), nonce_.c_str(), uri.c_str(), response.c_str(), qop.c_str(),
-             nc.c_str(), cnonce.c_str());
-    return std::string(header);
-}
-
-bool RtspClient::readExact(std::vector<std::uint8_t>& buf, std::size_t len) {
-    buf.resize(len);
-    std::size_t totalRead = 0;
-    while (totalRead < len) {
-        const ssize_t n = recv(sock_, buf.data() + totalRead, len - totalRead, 0);
-        ++metrics_.recvSyscalls;
-        if (n <= 0)
-            return false;
-        totalRead += static_cast<size_t>(n);
-    }
-    return true;
-}
-
-void RtspClient::reportMetricsIfDue() {
+void RtspClientV2::reportMetricsIfDue() {
     using namespace std::chrono;
 
     const auto now = steady_clock::now();
@@ -242,7 +260,37 @@ void RtspClient::reportMetricsIfDue() {
     metrics_.windowStart = now;
 }
 
-void RtspClient::keepAliveLoop() {
+std::string RtspClientV2::md5Hex(const std::string& input) {
+    unsigned char hash[MD5_DIGEST_LENGTH];
+    // NOLINTNEXTLINE
+    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
+    char output[33];
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
+        snprintf(output + i * 2, 3, "%02x", hash[i]);
+    return std::string(output);
+}
+
+std::string RtspClientV2::buildDigestHeader(const std::string& method, const std::string& uri) {
+    char ncBuf[9];
+    snprintf(ncBuf, sizeof(ncBuf), "%08x", nonceCount_++);
+    const std::string nc(ncBuf);
+    const std::string cnonce = "0a4f113b";
+    const std::string qop = "auth";
+
+    const std::string ha1 = md5Hex(cfg_.rtspUser + ":" + realm_ + ":" + cfg_.rtspPass);
+    const std::string ha2 = md5Hex(method + ":" + uri);
+    const std::string response = md5Hex(ha1 + ":" + nonce_ + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2);
+
+    char header[1024];
+    snprintf(header, sizeof(header),
+             "Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", "
+             "uri=\"%s\", response=\"%s\", qop=%s, nc=%s, cnonce=\"%s\"\r\n",
+             cfg_.rtspUser.c_str(), realm_.c_str(), nonce_.c_str(), uri.c_str(), response.c_str(), qop.c_str(),
+             nc.c_str(), cnonce.c_str());
+    return std::string(header);
+}
+
+void RtspClientV2::keepAliveLoop() {
     while (keepRunning_) {
         for (int i = 0; i < 30 && keepRunning_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));

@@ -1,7 +1,13 @@
 #include "risk/ThresholdRiskPolicy.h"
 
-#include <iostream>
 #include <limits>
+#include <string>
+
+#include "log/Logger.h"
+
+namespace {
+constexpr const char* kIface = "RiskPolicy";
+}  // namespace
 
 ThresholdRiskPolicy::ThresholdRiskPolicy(std::shared_ptr<IDistanceMetric> metric, double warningDistance,
                                          double dangerousDistance, int channelCount)
@@ -62,6 +68,12 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
             vehicle.riskLevel = veda::RiskLevel::None;
         }
 
+        if (vehicle.riskLevel != veda::RiskLevel::None) {
+            logSuccess(kIface, "gid=" + std::to_string(vehicle.gid) + " " +
+                                   std::string(veda::toString(vehicle.riskLevel)) + " 판정 (최근접 gid=" +
+                                   std::to_string(nearestGid) + ", 거리=" + std::to_string(minDist) + "m)");
+        }
+
         // 최근접 대상이 이 위험 상황에 관여된 당사자이므로, 그 객체의 riskLevel 도
         // 함께 갱신한다 (대시보드가 "누가 위험한지"를 개별 마커로 표시할 수 있도록).
         // 한 객체가 여러 차량의 최근접 대상일 수 있으므로 더 높은 레벨로만 덮어씀
@@ -79,8 +91,8 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
         // 대시보드 표시 전용이며, HW 이벤트 통지(zoneLevels)에는 영향을 주지 않는다 —
         // HW는 이미 이 차량 자체의 판정을 통해 해당 zone 에 반영되었기 때문에 중복 집계 불필요.
         if (vehicle.zoneId < 0 || vehicle.zoneId >= channelCount_) {
-            std::cerr << "[ThresholdRiskPolicy] 경고: gid=" << vehicle.gid << " zoneId 미배정 또는 범위 밖("
-                      << vehicle.zoneId << "), zone 집계에서 제외\n";
+            logError(kIface, "gid=" + std::to_string(vehicle.gid) + " zoneId 미배정 또는 범위 밖(" +
+                                 std::to_string(vehicle.zoneId) + "), zone 집계에서 제외");
             continue;
         }
 
