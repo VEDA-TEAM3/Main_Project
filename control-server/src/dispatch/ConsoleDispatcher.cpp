@@ -1,6 +1,12 @@
 #include "dispatch/ConsoleDispatcher.h"
 
-#include <iostream>
+#include <string>
+
+#include "log/Logger.h"
+
+namespace {
+constexpr const char* kIface = "Dispatcher";
+}  // namespace
 
 void ConsoleDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     for (const auto& zone : eval.zoneLevels) {
@@ -10,20 +16,9 @@ void ConsoleDispatcher::dispatch(const domain::RiskEvaluation& eval) {
             continue;
         }
 
-        std::cout << "[Dispatcher] UART 이벤트 통지 → 채널 " << zone.zoneId << ": ";
-        switch (zone.level) {
-            case veda::RiskLevel::Danger:
-                std::cout << "DANGER";
-                break;
-            case veda::RiskLevel::Warning:
-                std::cout << "WARNING";
-                break;
-            case veda::RiskLevel::None:
-            default:
-                std::cout << "NONE";
-                break;
-        }
-        std::cout << " (거리: " << zone.minDist << "m, 기준 시간: " << eval.timestamp << ")\n";
+        logSuccess(kIface, "UART 이벤트 통지 → 채널 " + std::to_string(zone.zoneId) + ": " +
+                                std::string(veda::toString(zone.level)) + " (거리: " + std::to_string(zone.minDist) +
+                                "m, 기준 시간: " + std::to_string(eval.timestamp) + ")");
 
         lastSentLevel_[zone.zoneId] = zone.level;
     }

@@ -1,5 +1,13 @@
 #include "core/Controller.h"
 
+#include <string>
+
+#include "log/Logger.h"
+
+namespace {
+constexpr const char* kIface = "Controller";
+}  // namespace
+
 Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                        std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
                        std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
@@ -37,4 +45,12 @@ void Controller::processPipeline(std::vector<veda::TopViewFrame> frames) {
     dispatcher_->dispatch(riskEval);
 
     sink_->send(worldFrame);
+
+    veda::RiskLevel maxLevel = veda::RiskLevel::None;
+    for (const auto& zone : riskEval.zoneLevels) {
+        if (zone.level > maxLevel)
+            maxLevel = zone.level;
+    }
+    logSuccess(kIface, std::to_string(frames.size()) + "채널 → 객체 " + std::to_string(worldFrame.objects.size()) +
+                            "개 융합, 최고 위험도=" + std::string(veda::toString(maxLevel)));
 }
