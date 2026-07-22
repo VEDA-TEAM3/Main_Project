@@ -1,9 +1,10 @@
 {
     "channelId": 0,
+    "channelCount": 4,
     "mqttHost": "172.20.27.174",
     "mqttPort": 8883,
     "mqttCaFile": "/etc/veda/certs/ca.crt",
-    "mqttClientId": "veda-compute-blur-ch0",
+    "mqttClientId": "veda-compute-ch0",
     "mqttKeepAliveSeconds": 30,
     "mqttMaxQueueSize": 8
 }

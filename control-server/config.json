@@ -1,4 +1,5 @@
 {
+    "channelCount": 4,
     "mqttHost": "172.20.27.174",
     "mqttPort": 8883,
     "mqttUseTls": true,

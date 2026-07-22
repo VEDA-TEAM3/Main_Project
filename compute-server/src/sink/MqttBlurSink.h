@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file    MqttBlurSink.h
+ * @brief   BlurFrame 전용 MQTT 발행 Sink
+ *
+ * @details
+ * send()는 큐에 넣고 즉시 반환(논블로킹), 실제 발행은 백그라운드 워커 스레드가 전담
+ * 연결 전이거나 큐가 가득 찼을 때는 drop-oldest 정책으로 최신 프레임을 우선함
+ * 접속 정보/큐 크기 등은 전부 Config(=AppConfig에서 채워짐)를 통해 주입받음 -> 하드코딩 없음
+ */
+
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -14,26 +24,23 @@
 
 struct mosquitto;
 
-/**
- * @brief BlurFrame 전용 MQTT 송신 Sink
- *
- * AppContext에서 직접 생성하지 않아도
- * publishBlurToMqtt()를 통해 프로세스 단일 인스턴스를 사용한다.
- */
 class MqttBlurSink final : public ISink<veda::BlurFrame> {
 public:
     struct Config {
-        std::string host;
-        int port = 0;
-        std::string caFile = "/etc/veda/certs/ca.crt";
-        std::string clientId;
+        std::string host;  ///< MQTT 브로커 주소
+        int port = 8883;
+        std::string caFile;  ///< TLS CA 인증서 경로
+        std::string clientId;  ///< 비어있으면 생성자가 자동 생성
 
         int keepAliveSeconds = 30;
         std::size_t maxQueueSize = 8;
+
+        /// @brief frame.ch 유효성 검사 범위 [0, channelCount) (AppConfig::channelCount)
+        int channelCount = 0;
     };
 
     explicit MqttBlurSink(Config config);
-    ~MqttBlurSink() noexcept override;
+    ~MqttBlurSink() override;
 
     MqttBlurSink(const MqttBlurSink&) = delete;
     MqttBlurSink& operator=(const MqttBlurSink&) = delete;
@@ -54,21 +61,10 @@ private:
     void publishFrame(const veda::BlurFrame& frame) noexcept;
     void recordDrop(const char* reason) noexcept;
 
-    static bool isValidFrame(
-        const veda::BlurFrame& frame
-    ) noexcept;
+    bool isValidFrame(const veda::BlurFrame& frame) const noexcept;
 
-    static void onConnect(
-        struct mosquitto* client,
-        void* userData,
-        int resultCode
-    );
-
-    static void onDisconnect(
-        struct mosquitto* client,
-        void* userData,
-        int resultCode
-    );
+    static void onConnect(struct mosquitto* client, void* userData, int resultCode);
+    static void onDisconnect(struct mosquitto* client, void* userData, int resultCode);
 
     Config config_;
     struct mosquitto* client_ = nullptr;

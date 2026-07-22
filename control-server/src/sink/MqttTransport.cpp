@@ -87,8 +87,7 @@ veda::RiskFrame toRiskFrame(const domain::WorldFrame& frame) {
 
 MqttTransport::MqttTransport(Config config) : config_(std::move(config)) {}
 
-MqttTransport::MqttTransport(const AppConfig& config)
-    : MqttTransport(transportConfigFrom(config)) {
+MqttTransport::MqttTransport(const AppConfig& config) : MqttTransport(transportConfigFrom(config)) {
     publishTopic_ = config.mqttSendTopic.empty() ? std::string(veda::topic::kRisk) : config.mqttSendTopic;
 }
 
@@ -152,8 +151,8 @@ bool MqttTransport::start() noexcept {
     const int connectResult =
         mosquitto_connect_async(client_, config_.host.c_str(), config_.port, config_.keepAliveSeconds);
     if (connectResult != MOSQ_ERR_SUCCESS) {
-        std::fprintf(stderr, "[MqttTransport] connect setup failed: host=%s port=%d error=%s\n",
-                     config_.host.c_str(), config_.port, mosquitto_strerror(connectResult));
+        std::fprintf(stderr, "[MqttTransport] connect setup failed: host=%s port=%d error=%s\n", config_.host.c_str(),
+                     config_.port, mosquitto_strerror(connectResult));
         running_.store(false, std::memory_order_release);
         destroyClient();
         return false;
@@ -167,8 +166,8 @@ bool MqttTransport::start() noexcept {
         return false;
     }
 
-    std::fprintf(stdout, "[MqttTransport] connecting: host=%s port=%d tls=%s clientId=%s\n",
-                 config_.host.c_str(), config_.port, config_.useTls ? "on" : "off", config_.clientId.c_str());
+    std::fprintf(stdout, "[MqttTransport] connecting: host=%s port=%d tls=%s clientId=%s\n", config_.host.c_str(),
+                 config_.port, config_.useTls ? "on" : "off", config_.clientId.c_str());
     return true;
 }
 
@@ -272,8 +271,7 @@ bool MqttTransport::initializeClient() noexcept {
     if (!config_.username.empty()) {
         const int result = mosquitto_username_pw_set(client_, config_.username.c_str(), config_.password.c_str());
         if (result != MOSQ_ERR_SUCCESS) {
-            std::fprintf(stderr, "[MqttTransport] username/password setup failed: %s\n",
-                         mosquitto_strerror(result));
+            std::fprintf(stderr, "[MqttTransport] username/password setup failed: %s\n", mosquitto_strerror(result));
             destroyClient();
             return false;
         }
@@ -382,7 +380,8 @@ void MqttTransport::onMessage(mosquitto*, void* userData, const mosquitto_messag
     }
 
     const auto* payload = static_cast<const char*>(message->payload);
-    const std::string_view payloadView(payload != nullptr ? payload : "", static_cast<std::size_t>(message->payloadlen));
+    const std::string_view payloadView(payload != nullptr ? payload : "",
+                                       static_cast<std::size_t>(message->payloadlen));
     try {
         handler(message->topic, payloadView);
     } catch (...) {

@@ -17,6 +17,7 @@
 
 struct AppConfig {
     veda::ChannelId channelId = 0;
+    int channelCount = 0;
 
     // Network
     std::string rtspUrl;
@@ -73,6 +74,7 @@ struct AppConfig {
         }
 
         cfg.channelId = veda::detail::get_or<veda::ChannelId>(j, "channelId", cfg.channelId);
+        cfg.channelCount = veda::detail::get_or<int>(j, "channelCount", cfg.channelCount);
 
         cfg.rtspUrl = veda::detail::get_or<std::string>(j, "rtspUrl", cfg.rtspUrl);
         cfg.rtspLatencyMs = veda::detail::get_or<int>(j, "rtspLatencyMs", cfg.rtspLatencyMs);
@@ -87,10 +89,8 @@ struct AppConfig {
         cfg.mqttPort = veda::detail::get_or<int>(j, "mqttPort", cfg.mqttPort);
         cfg.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", cfg.mqttCaFile);
         cfg.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", cfg.mqttClientId);
-        cfg.mqttKeepAliveSeconds =
-            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", cfg.mqttKeepAliveSeconds);
-        cfg.mqttMaxQueueSize =
-            veda::detail::get_or<std::size_t>(j, "mqttMaxQueueSize", cfg.mqttMaxQueueSize);
+        cfg.mqttKeepAliveSeconds = veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", cfg.mqttKeepAliveSeconds);
+        cfg.mqttMaxQueueSize = veda::detail::get_or<std::size_t>(j, "mqttMaxQueueSize", cfg.mqttMaxQueueSize);
 
         cfg.sanitizerIouThresh = veda::detail::get_or<double>(j, "sanitizerIouThresh", cfg.sanitizerIouThresh);
         cfg.sanitizerContainThresh =

@@ -106,7 +106,7 @@ inline void from_json(const nlohmann::json& j, CameraCalibration& c) {
 struct AppConfig {
     // [파이프라인 설정]
     uint64_t windowSizeMs = 100;  ///< 프레임 집계 시간 윈도우 (ms)
-    int channelCount = 4;         ///< 채널(zone) 개수
+    int channelCount = 0;         ///< 채널(zone) 개수 (JSON 설정 필수)
 
     // [위험도 정책 설정]
     RiskConfig risk;
@@ -170,10 +170,13 @@ struct AppConfig {
         config.mqttUseTls = veda::detail::get_or<bool>(j, "mqttUseTls", config.mqttUseTls);
         config.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", config.mqttCaFile);
         config.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", config.mqttClientId);
-        config.mqttKeepAliveSeconds =
-            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
+        config.mqttKeepAliveSeconds = veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
         config.mqttReceiveTopic = veda::detail::get_or<std::string>(j, "mqttReceiveTopic", config.mqttReceiveTopic);
         config.mqttSendTopic = veda::detail::get_or<std::string>(j, "mqttSendTopic", config.mqttSendTopic);
+
+        if (config.channelCount <= 0) {
+            std::cerr << "[Config] 오류: channelCount는 1 이상이어야 합니다. config.json 설정을 확인하세요.\n";
+        }
 
         if (config.risk.dedupMergeDistance >= config.risk.warningDistance) {
             std::cerr << "[Config] 경고: dedupMergeDistance(" << config.risk.dedupMergeDistance
