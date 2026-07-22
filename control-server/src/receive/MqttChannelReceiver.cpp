@@ -2,15 +2,16 @@
 
 #include <charconv>
 #include <cmath>
-#include <cstdlib>
-#include <cstdio>
+#include <cstddef>
 #include <utility>
 
+#include "log/Logger.h"
 #include "sink/MqttTransport.h"
 
 namespace {
 
-constexpr std::string_view channelPrefix = "veda/ch/";
+constexpr const char* kIface = "MqttChannelReceiver";
+constexpr std::string_view kChannelPrefix = "veda/ch/";
 
 bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noexcept {
     if (frame.v != veda::kSchemaVersion || frame.ts <= 0 || frame.ch < 0 || frame.ch >= channelCount) {
@@ -24,40 +25,11 @@ bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noex
     return true;
 }
 
-MqttTransport::Config makeDefaultTransportConfig() {
-    MqttTransport::Config config;
-    config.clientId = "veda-control-receiver";
-
-    if (const char* value = std::getenv("VEDA_MQTT_HOST")) {
-        config.host = value;
-    }
-    if (const char* value = std::getenv("VEDA_MQTT_PORT")) {
-        try {
-            config.port = std::stoi(value);
-        } catch (...) {
-            std::fprintf(stderr, "[MqttChannelReceiver] invalid VEDA_MQTT_PORT; using %d\n", config.port);
-        }
-    }
-    if (const char* value = std::getenv("VEDA_MQTT_CA_FILE")) {
-        config.caFile = value;
-    }
-    if (const char* value = std::getenv("VEDA_MQTT_USE_TLS")) {
-        const std::string_view enabled(value);
-        config.useTls = enabled == "1" || enabled == "true" || enabled == "TRUE" || enabled == "on";
-    }
-    return config;
-}
-
 }  // namespace
 
-MqttChannelReceiver::MqttChannelReceiver()
-    : MqttChannelReceiver(std::make_shared<MqttTransport>(makeDefaultTransportConfig()), Config{}) {}
-
-MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport)
-    : MqttChannelReceiver(std::move(transport), Config{}) {}
-
-MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, Config config)
-    : transport_(std::move(transport)), config_(std::move(config)) {}
+MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
+                                        std::uint64_t retryIntervalMs)
+    : transport_(std::move(transport)), channelCount_(channelCount), retryInterval_(retryIntervalMs) {}
 
 MqttChannelReceiver::~MqttChannelReceiver() { stop(); }
 
@@ -78,21 +50,18 @@ void MqttChannelReceiver::start() {
     }
     if (transport_ == nullptr) {
         running_.store(false, std::memory_order_release);
-        std::fprintf(stderr, "[MqttChannelReceiver] transport is null\n");
+        logError(kIface, "transport가 null임 (AppContext에서 공유 MqttTransport 주입 필요)");
         return;
     }
 
     transport_->setMessageHandler(
         [this](std::string_view topic, std::string_view payload) { handleMessage(topic, payload); });
-    transport_->setConnectionHandler(
-        [this](bool connected, int) { handleConnection(connected); });
+    transport_->setConnectionHandler([this](bool connected, int) { handleConnection(connected); });
 
-    if (!transport_->subscribe(config_.topViewTopic, config_.topViewQos) ||
-        !transport_->subscribe(config_.aliveTopic, config_.aliveQos) || !transport_->start()) {
-        running_.store(false, std::memory_order_release);
-        transport_->setMessageHandler({});
-        transport_->setConnectionHandler({});
-        std::fprintf(stderr, "[MqttChannelReceiver] start failed\n");
+    if (!tryConnect()) {
+        logError(kIface, "start 실패 (구독 또는 transport 시작 실패) — " + std::to_string(retryInterval_.count()) +
+                              "ms 간격으로 백그라운드 재시도함");
+        retryThread_ = std::thread(&MqttChannelReceiver::retryLoop, this);
     }
 }
 
@@ -100,10 +69,46 @@ void MqttChannelReceiver::stop() {
     if (!running_.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
+    retryCv_.notify_all();
+    if (retryThread_.joinable()) {
+        retryThread_.join();
+    }
     if (transport_ != nullptr) {
+        // transport_는 sink(발행 경로)와 공유하는 연결이므로 여기서 stop()하지 않고
+        // 이 receiver가 등록한 핸들러만 해제함 (연결 자체의 수명주기는 AppContext 몫)
         transport_->setMessageHandler({});
         transport_->setConnectionHandler({});
-        transport_->stop();
+    }
+}
+
+bool MqttChannelReceiver::tryConnect() noexcept {
+    if (!transport_->subscribe(std::string(veda::topic::kTopViewAll), veda::qos::kTopView) ||
+        !transport_->subscribe(std::string(veda::topic::kAliveAll), veda::qos::kAlive) || !transport_->start()) {
+        return false;
+    }
+
+    logSuccess(kIface, "구독 시작 (topView=" + std::string(veda::topic::kTopViewAll) +
+                            ", alive=" + std::string(veda::topic::kAliveAll) + ")");
+    return true;
+}
+
+void MqttChannelReceiver::retryLoop() noexcept {
+    std::unique_lock<std::mutex> lock(retryMutex_);
+    while (running_.load(std::memory_order_acquire)) {
+        const bool stopped =
+            retryCv_.wait_for(lock, retryInterval_, [this] { return !running_.load(std::memory_order_acquire); });
+        if (stopped) {
+            return;
+        }
+
+        lock.unlock();
+        const bool connected = tryConnect();
+        lock.lock();
+
+        if (connected) {
+            return;
+        }
+        logError(kIface, "재시도 실패, " + std::to_string(retryInterval_.count()) + "ms 후 다시 시도함");
     }
 }
 
@@ -122,7 +127,7 @@ void MqttChannelReceiver::handleMessage(std::string_view topic, std::string_view
 
     if (const auto channel = parseChannel(topic, "/topview")) {
         const veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
-        if (!isValidTopViewFrame(frame, config_.channelCount)) {
+        if (!isValidTopViewFrame(frame, channelCount_)) {
             recordDrop(topic, "invalid TopViewFrame");
             return;
         }
@@ -185,7 +190,7 @@ void MqttChannelReceiver::handleConnection(bool connected) noexcept {
         return;
     }
 
-    for (veda::ChannelId channel = 0; channel < config_.channelCount; ++channel) {
+    for (veda::ChannelId channel = 0; channel < channelCount_; ++channel) {
         try {
             callback(channel, false);
         } catch (...) {
@@ -197,12 +202,12 @@ void MqttChannelReceiver::handleConnection(bool connected) noexcept {
 
 std::optional<veda::ChannelId> MqttChannelReceiver::parseChannel(std::string_view topic,
                                                                  std::string_view suffix) const noexcept {
-    if (!topic.starts_with(channelPrefix) || !topic.ends_with(suffix)) {
+    if (!topic.starts_with(kChannelPrefix) || !topic.ends_with(suffix)) {
         return std::nullopt;
     }
 
-    const std::size_t numberBegin = channelPrefix.size();
-    const std::size_t numberLength = topic.size() - channelPrefix.size() - suffix.size();
+    const std::size_t numberBegin = kChannelPrefix.size();
+    const std::size_t numberLength = topic.size() - kChannelPrefix.size() - suffix.size();
     if (numberLength == 0) {
         return std::nullopt;
     }
@@ -211,7 +216,7 @@ std::optional<veda::ChannelId> MqttChannelReceiver::parseChannel(std::string_vie
     const char* begin = topic.data() + numberBegin;
     const char* end = begin + numberLength;
     const auto [parsedEnd, error] = std::from_chars(begin, end, channel);
-    if (error != std::errc{} || parsedEnd != end || channel < 0 || channel >= config_.channelCount) {
+    if (error != std::errc{} || parsedEnd != end || channel < 0 || channel >= channelCount_) {
         return std::nullopt;
     }
     return channel;
@@ -220,8 +225,7 @@ std::optional<veda::ChannelId> MqttChannelReceiver::parseChannel(std::string_vie
 void MqttChannelReceiver::recordDrop(std::string_view topic, const char* reason) noexcept {
     const std::uint64_t count = droppedCount_.fetch_add(1, std::memory_order_relaxed) + 1;
     if (count == 1 || count % 100 == 0) {
-        std::fprintf(stderr, "[MqttChannelReceiver] dropped=%llu topic=%.*s reason=%s\n",
-                     static_cast<unsigned long long>(count), static_cast<int>(topic.size()), topic.data(),
-                     reason != nullptr ? reason : "unknown");
+        logError(kIface, "드랍 누적 " + std::to_string(count) + "건, topic=" + std::string(topic) +
+                              ", 사유=" + std::string(reason != nullptr ? reason : "unknown"));
     }
 }

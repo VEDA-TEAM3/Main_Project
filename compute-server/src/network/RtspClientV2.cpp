@@ -1,14 +1,17 @@
 #include "network/RtspClientV2.h"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <openssl/md5.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
@@ -59,10 +62,50 @@ bool RtspClientV2::connect() {
     serverAddr.sin_port = htons(static_cast<uint16_t>(cfg_.rtspPort));
     inet_pton(AF_INET, cfg_.rtspIp.c_str(), &serverAddr.sin_addr);
 
-    if (::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr)) < 0) {
-        logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ")");
+    // connect() 자체는 SO_RCVTIMEO의 영향을 받지 않으므로, 논블로킹으로 전환한 뒤
+    // select()로 명시적 타임아웃을 건다 (카메라 무응답/방화벽 SYN drop 시 무한 대기 방지)
+    const int origFlags = fcntl(sock_, F_GETFL, 0);
+    fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK);
+
+    const int connectResult =
+        ::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr));
+    if (connectResult < 0 && errno != EINPROGRESS) {
+        logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
+                              std::strerror(errno));
+        fcntl(sock_, F_SETFL, origFlags);
         return false;
     }
+
+    if (connectResult != 0) {
+        fd_set writeSet;
+        FD_ZERO(&writeSet);
+        FD_SET(sock_, &writeSet);
+        struct timeval connectTimeout {
+            kConnectTimeoutSec, 0
+        };
+
+        const int selectResult = select(sock_ + 1, nullptr, &writeSet, nullptr, &connectTimeout);
+        if (selectResult <= 0) {
+            logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
+                                  std::to_string(kConnectTimeoutSec) + "초)");
+            fcntl(sock_, F_SETFL, origFlags);
+            return false;
+        }
+
+        int sockErr = 0;
+        socklen_t sockErrLen = sizeof(sockErr);
+        getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen);
+        if (sockErr != 0) {
+            logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
+                                  std::strerror(sockErr));
+            fcntl(sock_, F_SETFL, origFlags);
+            return false;
+        }
+    }
+
+    // 이후 recvHeaders/readBytes 등은 블로킹 소켓을 전제로 하므로 원래 모드로 복원
+    fcntl(sock_, F_SETFL, origFlags);
+
     logSuccess(kIface, "연결 성공 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ")");
     return true;
 }

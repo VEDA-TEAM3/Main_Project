@@ -22,7 +22,7 @@ add_executable(control-server
     src/dispatch/ConsoleDispatcher.cpp
     src/sink/MqttTransport.cpp
     src/zone/AngleZoneMapper.cpp
-    src/transform/NullTransform.cpp
+    src/transform/AffineLocalToWorldTransform.cpp
 )
 
 target_include_directories(control-server PRIVATE 

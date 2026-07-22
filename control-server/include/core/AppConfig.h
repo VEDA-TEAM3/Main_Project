@@ -125,8 +125,15 @@ struct AppConfig {
 
     // [네트워크 설정]
     std::string mqttBrokerUrl = "tcp://localhost:1883";
-    std::string mqttReceiveTopic = "veda/+/frame";
     std::string mqttSendTopic = "veda/server/merged";
+    std::string mqttCaFile = "/etc/veda/certs/ca.crt";  ///< mqttBrokerUrl이 ssl/mqtts일 때 사용하는 TLS CA 인증서 경로
+    std::string mqttClientId;                           ///< 비어있으면 MqttTransport가 자동 생성
+    int mqttKeepAliveSeconds = 60;
+    int mqttReconnectDelaySeconds = 1;      ///< 재연결 대기 시간 초기값 (초)
+    int mqttReconnectDelayMaxSeconds = 10;  ///< 재연결 대기 시간 상한 (초, 지수 백오프)
+
+    /// @brief MqttChannelReceiver가 최초 구독/연결에 실패했을 때 재시도하는 간격 (ms)
+    uint64_t mqttReceiverRetryIntervalMs = 2000;
 
     /**
      * @brief   외부 JSON 설정 파일에서 설정값을 읽어옵니다.
@@ -161,8 +168,17 @@ struct AppConfig {
         config.hwHealthCheck = veda::detail::get_or<HwHealthCheckConfig>(j, "hwHealthCheck", config.hwHealthCheck);
         config.simulation = veda::detail::get_or<SimulationConfig>(j, "simulation", config.simulation);
         config.mqttBrokerUrl = veda::detail::get_or<std::string>(j, "mqttBrokerUrl", config.mqttBrokerUrl);
-        config.mqttReceiveTopic = veda::detail::get_or<std::string>(j, "mqttReceiveTopic", config.mqttReceiveTopic);
         config.mqttSendTopic = veda::detail::get_or<std::string>(j, "mqttSendTopic", config.mqttSendTopic);
+        config.mqttCaFile = veda::detail::get_or<std::string>(j, "mqttCaFile", config.mqttCaFile);
+        config.mqttClientId = veda::detail::get_or<std::string>(j, "mqttClientId", config.mqttClientId);
+        config.mqttKeepAliveSeconds =
+            veda::detail::get_or<int>(j, "mqttKeepAliveSeconds", config.mqttKeepAliveSeconds);
+        config.mqttReconnectDelaySeconds =
+            veda::detail::get_or<int>(j, "mqttReconnectDelaySeconds", config.mqttReconnectDelaySeconds);
+        config.mqttReconnectDelayMaxSeconds =
+            veda::detail::get_or<int>(j, "mqttReconnectDelayMaxSeconds", config.mqttReconnectDelayMaxSeconds);
+        config.mqttReceiverRetryIntervalMs =
+            veda::detail::get_or<uint64_t>(j, "mqttReceiverRetryIntervalMs", config.mqttReceiverRetryIntervalMs);
 
         if (config.risk.dedupMergeDistance >= config.risk.warningDistance) {
             std::cerr << "[Config] 경고: dedupMergeDistance(" << config.risk.dedupMergeDistance
