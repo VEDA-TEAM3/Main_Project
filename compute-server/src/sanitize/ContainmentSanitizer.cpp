@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "Contract.h"
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 
@@ -96,17 +96,22 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             // 규칙 A
             if (veda::isBlurClass(y.cls) && iou(x.box, y.box) > iouThresh_) {
                 drop[i] = true;
-                logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
-                                       " 제거 (규칙 A: " + std::string(veda::toString(y.cls)) +
-                                       " id=" + std::to_string(y.id) + "와 IoU>" + std::to_string(iouThresh_) + ")");
+                // 프레임마다 도는 정상 동작이라 Debug (문자열 조립도 레벨로 걸러냄)
+                if (isLogEnabled(LogLevel::Debug)) {
+                    logDebug(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
+                                         " 제거 (규칙 A: " + std::string(veda::toString(y.cls)) +
+                                         " id=" + std::to_string(y.id) + "와 IoU>" + std::to_string(iouThresh_) + ")");
+                }
                 break;
             }
 
             // 규칙 B
             if (x.cls == y.cls && area(x.box) < area(y.box) && ioMin(x.box, y.box) > containThresh_) {
                 drop[i] = true;
-                logSuccess(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
-                                       " 제거 (규칙 B: id=" + std::to_string(y.id) + " 안에 포함)");
+                if (isLogEnabled(LogLevel::Debug)) {
+                    logDebug(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(x.id) +
+                                         " 제거 (규칙 B: id=" + std::to_string(y.id) + " 안에 포함)");
+                }
                 break;
             }
         }

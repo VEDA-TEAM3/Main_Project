@@ -13,7 +13,9 @@
  * @endcode
  */
 
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "Contract.h"
@@ -34,7 +36,7 @@ public:
     Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
                std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
-               std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink);
+               std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink, int channelCount);
 
     /**
      * @brief   receiver를 먼저 stop()시켜 워커 스레드를 join한 뒤 소멸
@@ -69,4 +71,27 @@ private:
     std::shared_ptr<IRiskPolicy> riskPolicy_;
     std::shared_ptr<IHwEventDispatcher> dispatcher_;
     std::shared_ptr<ISink> sink_;
+
+    /**
+     * @name 채널 생존 상태 (LWT + STM32 하트비트)
+     *
+     * @details
+     * 예전에는 MqttChannelReceiver 가 veda/ch/+/alive 를 구독까지 해놓고도
+     * Controller 가 setAliveCallback() 을 부르지 않아 신호가 통째로 버려졌음
+     * -- compute-server 가 LWT 를 발행해도 받는 쪽이 없어 '빈 프레임'과 '채널 사망'을
+     *    끝내 구분하지 못하는 상태였음
+     *
+     * 여기서 상태를 들고 전환(alive<->dead)만 로그로 남김. 대시보드 통지는 wire contract
+     * (RiskFrame)에 채널 상태 필드가 없어 아직 못 보냄 -- 계약 확장 시 여기서 sink 로 흘리면 됨
+     *
+     * @note MQTT 콜백 스레드와 UART 리더 스레드 양쪽에서 갱신되므로 뮤텍스로 보호
+     * @{
+     */
+    void onChannelAlive(veda::ChannelId channel, bool alive, const char* source);
+
+    int channelCount_;
+    std::mutex aliveMutex_;
+    std::vector<bool> channelAlive_;   ///< 인덱스 = channelId, MQTT LWT 기준
+    std::vector<bool> hardwareAlive_;  ///< 인덱스 = channelId, STM32 하트비트 기준
+    /** @} */
 };

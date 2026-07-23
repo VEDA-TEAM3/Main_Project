@@ -48,6 +48,9 @@ public:
 
     bool next(domain::RawPacket& out) override;
 
+    /// @brief 워커 루프와 대기 중인 next()를 깨움 (멱등)
+    void stop() noexcept override;
+
 private:
     /**
      * @brief   [connect->setup->play->run]을 재연결 백오프와 함께 반복하는 워커 루프

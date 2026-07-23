@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 
@@ -165,10 +165,9 @@ double normX(double px, const Transformation& t) { return (t.scaleX * px + t.tra
  */
 double normY(double py, const Transformation& t) { return (1.0 - (t.scaleY * py + t.translateY)) * 0.5; }
 
-/** @brief 이 값 이내면 프레임 경계에 닿은 것으로 간주하는 오차율(Epsilon) */
-constexpr double kEdgeEpsilon = 0.002;
-
 }  // namespace
+
+OnvifParser::OnvifParser(double edgeEpsilon) : edgeEpsilon_(edgeEpsilon) {}
 
 /**
  * @brief   메타데이터 RawPacket을 파싱하여 시스템 처리 단위인 ChannelFrame 으로 변환
@@ -275,8 +274,10 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         det.box.t = normY(*t, *transform);
         det.box.b = normY(*b, *transform);
 
-        det.touchesBorder = det.box.l <= kEdgeEpsilon || det.box.r >= 1.0 - kEdgeEpsilon || det.box.t <= kEdgeEpsilon ||
-                            det.box.b >= 1.0 - kEdgeEpsilon;
+        // 아래변 잘림은 지면점을 직접 망가뜨리므로 따로 표시 (DetectedObject::bottomTruncated 참고)
+        det.bottomTruncated = det.box.b >= 1.0 - edgeEpsilon_;
+        det.touchesBorder = det.bottomTruncated || det.box.l <= edgeEpsilon_ || det.box.r >= 1.0 - edgeEpsilon_ ||
+                            det.box.t <= edgeEpsilon_;
 
         size_t searchFrom = 0;
         if (const size_t candEnd = obj.find("</tt:ClassCandidate>"); candEnd != std::string_view::npos) {

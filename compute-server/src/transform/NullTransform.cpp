@@ -1,7 +1,7 @@
 #include "transform/NullTransform.h"
 
-std::optional<veda::WorldPoint> NullTransform::toWorld(const domain::ImagePoint& p) {
-    veda::WorldPoint wp;
+std::optional<veda::LocalPoint> NullTransform::toLocal(const domain::ImagePoint& p) {
+    veda::LocalPoint wp;
     wp.x = p.u;
     wp.y = p.v;
     return wp;

@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <sstream>
 
-#include "log/Logger.h"
+#include "Logger.h"
 #include "network/RtspClientV2.h"
 
 namespace {
@@ -13,21 +13,29 @@ constexpr const char* kIface = "Source";
 
 }  // namespace
 
-RtspOnvifSourceV2::RtspOnvifSourceV2(const AppConfig& config) : config_(config) {
-    ring_.resize(kRingCapacity);
+RtspOnvifSourceV2::RtspOnvifSourceV2(const AppConfig& config)
+    : ringCapacity_(static_cast<std::size_t>(config.sourceRingCapacity)),
+      metricsReportInterval_(config.metricsReportIntervalMs),
+      backoffInitialSec_(config.rtspReconnectBackoffInitialSec),
+      backoffMaxSec_(config.rtspReconnectBackoffMaxSec),
+      config_(config) {
+    ring_.resize(ringCapacity_);
     worker_ = std::thread(&RtspOnvifSourceV2::workerLoop, this);
 }
 
 RtspOnvifSourceV2::~RtspOnvifSourceV2() {
-    stopping_ = true;
-    cv_.notify_all();
+    stop();
     if (worker_.joinable())
         worker_.join();
 }
 
+void RtspOnvifSourceV2::stop() noexcept {
+    stopping_.store(true);
+    cv_.notify_all();
+}
+
 void RtspOnvifSourceV2::workerLoop() {
-    int backoffSec = 1;
-    constexpr int kMaxBackoffSec = 30;
+    int backoffSec = backoffInitialSec_;
 
     while (!stopping_) {
         RtspClientV2 client(config_);
@@ -35,13 +43,13 @@ void RtspOnvifSourceV2::workerLoop() {
             std::lock_guard<std::mutex> lk(mtx_);
 
             std::size_t writeIdx = 0;
-            if (count_ == kRingCapacity) {
+            if (count_ == ringCapacity_) {
                 // 링이 가득 참: 가장 오래된 프레임 자리를 그대로 재사용 -> drop-oldest
                 writeIdx = head_;
-                head_ = (head_ + 1) % kRingCapacity;
+                head_ = (head_ + 1) % ringCapacity_;
                 ++metrics_.droppedCount;
             } else {
-                writeIdx = (head_ + count_) % kRingCapacity;
+                writeIdx = (head_ + count_) % ringCapacity_;
                 ++count_;
             }
 
@@ -71,7 +79,7 @@ void RtspOnvifSourceV2::workerLoop() {
 
         std::unique_lock<std::mutex> lk(mtx_);
         cv_.wait_for(lk, std::chrono::seconds(backoffSec), [this] { return stopping_.load(); });
-        backoffSec = std::min(backoffSec * 2, kMaxBackoffSec);
+        backoffSec = std::min(backoffSec * 2, backoffMaxSec_);
     }
 }
 
@@ -91,7 +99,7 @@ bool RtspOnvifSourceV2::next(domain::RawPacket& out) {
         out.bytes.assign(slot.bytes.begin(), slot.bytes.end());
         out.recvTime = slot.recvTime;
 
-        head_ = (head_ + 1) % kRingCapacity;
+        head_ = (head_ + 1) % ringCapacity_;
         --count_;
 
         // 지연 시간 계측: 네트워크 도착(recvTime) ~ Pipeline이 실제로 꺼내가는 시점
@@ -111,7 +119,7 @@ std::string RtspOnvifSourceV2::buildMetricsReportIfDue() {
 
     const auto now = steady_clock::now();
     const auto elapsed = duration_cast<milliseconds>(now - metrics_.windowStart);
-    if (elapsed < kMetricsReportInterval || metrics_.consumedCount == 0)
+    if (elapsed < metricsReportInterval_ || metrics_.consumedCount == 0)
         return {};
 
     const double avgLatencyUs = duration_cast<duration<double, std::micro>>(metrics_.totalQueueLatency).count() /

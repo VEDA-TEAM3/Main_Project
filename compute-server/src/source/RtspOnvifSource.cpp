@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <sstream>
 
-#include "log/Logger.h"
+#include "Logger.h"
 #include "network/RtspClientV2.h"
 
 namespace {
@@ -17,10 +17,14 @@ RtspOnvifSource::RtspOnvifSource(const AppConfig& config) : config_(config) {
 }
 
 RtspOnvifSource::~RtspOnvifSource() {
-    stopping_ = true;
-    cv_.notify_all();
+    stop();
     if (worker_.joinable())
         worker_.join();
+}
+
+void RtspOnvifSource::stop() noexcept {
+    stopping_.store(true);
+    cv_.notify_all();
 }
 
 void RtspOnvifSource::workerLoop() {

@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <utility>
 
-#include "log/Logger.h"
+#include "Logger.h"
 #include "sink/MqttTransport.h"
 
 namespace {

@@ -23,12 +23,28 @@ struct RiskConfig {
     double warningDistance = 5.0;     ///< m, 차량 기준 Warning 트리거 거리
     double dangerousDistance = 2.0;   ///< m, 차량 기준 Danger 트리거 거리
     double dedupMergeDistance = 1.0;  ///< m, 채널 간 dedup 병합 판정 거리
+
+    /**
+     * @brief   사람이 감지된 것만으로 해당 zone 을 Warning 으로 올릴지 여부
+     * @details Contract.h 의 RiskLevel 정의(`Warning = 사람 감지 or 거리 이내`)에 맞춘 동작
+     *          예전 구현은 차량이 있을 때만 평가해서 사람만 있으면 항상 None 이었음
+     */
+    bool warnOnHumanPresence = true;
+
+    /**
+     * @brief   같은 실체를 프레임 간에 이어붙일 최대 이동 거리 (m)
+     * @details 이 거리 안에서 같은 클래스면 이전 프레임의 GlobalId 를 물려받음
+     *          0 이하면 추적을 끄고 매 프레임 새 gid 를 부여 (예전 동작)
+     */
+    double trackMaxDistance = 2.0;
 };
 
 inline void from_json(const nlohmann::json& j, RiskConfig& r) {
     r.warningDistance = veda::detail::get_or<double>(j, "warningDistance", r.warningDistance);
     r.dangerousDistance = veda::detail::get_or<double>(j, "dangerousDistance", r.dangerousDistance);
     r.dedupMergeDistance = veda::detail::get_or<double>(j, "dedupMergeDistance", r.dedupMergeDistance);
+    r.warnOnHumanPresence = veda::detail::get_or<bool>(j, "warnOnHumanPresence", r.warnOnHumanPresence);
+    r.trackMaxDistance = veda::detail::get_or<double>(j, "trackMaxDistance", r.trackMaxDistance);
 }
 
 /**
@@ -55,6 +71,21 @@ struct HwHealthCheckConfig {
     uint32_t missedBeatsForTimeout = 3;        ///< 연속 유실 시 채널 dead 판정 기준
     uint32_t mismatchRetryCount = 2;           ///< 명령-실제상태 불일치 시 재전송 횟수
     bool mismatchEscalateAfterRetries = true;  ///< 재시도 소진 시 대시보드 fault 표시 여부
+
+    /**
+     * @brief   하드웨어 이벤트 디스패처 종류
+     * @details
+     * - "serial"  : SerialHwEventDispatcher — 실제 STM32 UART 링크 (기본값)
+     * - "console" : ConsoleDispatcher — 하드웨어 없이 콘솔로만 확인 (개발/테스트용)
+     *
+     * @note 예전에는 AppContext 가 ConsoleDispatcher 를 하드코딩해서 연결하고 있었고,
+     *       SerialHwEventDispatcher.cpp 는 CMakeLists 에도 없어 빌드조차 되지 않았음
+     *       -> LED/사이렌/부저가 전혀 동작하지 않는 상태였으므로 기본값을 serial 로 둠
+     */
+    std::string dispatcher = "serial";
+
+    /// @brief STM32 가 연결된 시리얼 장치 경로 (dispatcher == "serial" 일 때)
+    std::string devicePath = "/dev/serial0";
 };
 
 inline void from_json(const nlohmann::json& j, HwHealthCheckConfig& h) {
@@ -63,6 +94,13 @@ inline void from_json(const nlohmann::json& j, HwHealthCheckConfig& h) {
     h.mismatchRetryCount = veda::detail::get_or<uint32_t>(j, "mismatchRetryCount", h.mismatchRetryCount);
     h.mismatchEscalateAfterRetries =
         veda::detail::get_or<bool>(j, "mismatchEscalateAfterRetries", h.mismatchEscalateAfterRetries);
+    h.dispatcher = veda::detail::get_or<std::string>(j, "dispatcher", h.dispatcher);
+    h.devicePath = veda::detail::get_or<std::string>(j, "devicePath", h.devicePath);
+    if (h.dispatcher != "serial" && h.dispatcher != "console") {
+        std::cerr << "[Config] 경고: hwHealthCheck.dispatcher=\"" << h.dispatcher
+                  << "\" 는 알 수 없는 값입니다 (serial|console) — \"serial\"로 처리합니다.\n";
+        h.dispatcher = "serial";
+    }
 }
 
 /**
@@ -108,6 +146,19 @@ struct AppConfig {
     uint64_t windowSizeMs = 100;  ///< 프레임 집계 시간 윈도우 (ms)
     int channelCount = 4;         ///< 채널(zone) 개수
 
+    /**
+     * @name 로깅 (shared/Logger.h)
+     * @details compute-server 와 동일한 키/의미를 사용함
+     *          프레임마다 도는 이벤트는 Debug 레벨이라 기본값(info)에서는 큐에도 안 들어감
+     * @{
+     */
+    std::string logLevel = "info";  ///< "debug" | "info" | "error" | "off"
+    bool logToConsole = true;
+    bool logToFile = true;
+    int logFlushIntervalMs = 500;
+    int logMaxPendingEntries = 10000;
+    /** @} */
+
     // [위험도 정책 설정]
     RiskConfig risk;
 
@@ -125,7 +176,13 @@ struct AppConfig {
 
     // [네트워크 설정]
     std::string mqttBrokerUrl = "tcp://localhost:1883";
-    std::string mqttSendTopic = "veda/server/merged";
+    /**
+     * @brief   RiskFrame 발행 토픽
+     * @warning 기본값이 계약(veda::topic::kRisk = "veda/risk")과 달라서, 이대로 두면
+     *          클라이언트가 구독하는 토픽으로 나가지 않음 -> 계약값으로 맞춤
+     *          다른 값을 넣으면 Contract.h 를 어기는 것이므로 클라이언트도 함께 바꿔야 함
+     */
+    std::string mqttSendTopic = veda::topic::kRisk;
     std::string mqttCaFile = "/etc/veda/certs/ca.crt";  ///< mqttBrokerUrl이 ssl/mqtts일 때 사용하는 TLS CA 인증서 경로
     std::string mqttClientId;                           ///< 비어있으면 MqttTransport가 자동 생성
     int mqttKeepAliveSeconds = 60;
@@ -160,6 +217,18 @@ struct AppConfig {
 
         config.windowSizeMs = veda::detail::get_or<uint64_t>(j, "windowSizeMs", config.windowSizeMs);
         config.channelCount = veda::detail::get_or<int>(j, "channelCount", config.channelCount);
+
+        config.logLevel = veda::detail::get_or<std::string>(j, "logLevel", config.logLevel);
+        if (config.logLevel != "debug" && config.logLevel != "info" && config.logLevel != "error" &&
+            config.logLevel != "off") {
+            std::cerr << "[Config] 경고: logLevel=\"" << config.logLevel
+                      << "\" 는 알 수 없는 값입니다 (debug|info|error|off) — \"info\"로 처리합니다.\n";
+            config.logLevel = "info";
+        }
+        config.logToConsole = veda::detail::get_or<bool>(j, "logToConsole", config.logToConsole);
+        config.logToFile = veda::detail::get_or<bool>(j, "logToFile", config.logToFile);
+        config.logFlushIntervalMs = veda::detail::get_or<int>(j, "logFlushIntervalMs", config.logFlushIntervalMs);
+        config.logMaxPendingEntries = veda::detail::get_or<int>(j, "logMaxPendingEntries", config.logMaxPendingEntries);
         config.risk = veda::detail::get_or<RiskConfig>(j, "risk", config.risk);
         config.zoneBoundaries =
             veda::detail::get_or<std::vector<ZoneBoundary>>(j, "zoneBoundaries", config.zoneBoundaries);

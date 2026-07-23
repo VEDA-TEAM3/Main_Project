@@ -4,7 +4,7 @@
 #include <sstream>
 #include <string>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "Aggregator";

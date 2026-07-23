@@ -2,7 +2,7 @@
 
 /**
  * @file    AffineImageCoordinateMapper.h
- * @brief   scale, offset
+ * @brief   scale, offset (blur 경로 전용)
  */
 
 #include "interfaces/IImageCoordinateMapper.h"
@@ -10,7 +10,7 @@
 class AffineImageCoordinateMapper final : public IImageCoordinateMapper {
 public:
     AffineImageCoordinateMapper(double scaleX, double scaleY, double offsetX, double offsetY);
-    domain::ChannelFrame map(domain::ChannelFrame frame) const override;
+    void map(std::vector<domain::DetectedObject>& objects, veda::ChannelId channelId) const override;
 
 private:
     double scaleX_;

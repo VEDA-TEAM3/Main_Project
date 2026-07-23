@@ -21,7 +21,7 @@ struct AppConfig;
  *
  * 접속 정보는 전부 AppConfig에서 직접 읽어옴 (mqttBrokerUrl을 host/port/TLS 여부로 파싱,
  * clientId/keepAlive/재연결 대기시간도 AppConfig 값을 그대로 사용) -> 하드코딩도,
- * 별도 Config 복제도 없음. 로그는 log/Logger.h의 logSuccess/logError만 사용
+ * 별도 Config 복제도 없음. 로그는 shared/Logger.h의 logSuccess/logError만 사용
  * (호출 스레드를 막지 않는 비동기 배치 기록 -> mosquitto 콜백 스레드에서 안전하게 호출 가능)
  */
 class MqttTransport final : public ISink {
