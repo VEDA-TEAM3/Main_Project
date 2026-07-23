@@ -3,7 +3,7 @@
 #include <string>
 
 #include "Contract.h"
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "Router";
@@ -24,8 +24,12 @@ RouteResult ParentBasedRouter::route(const domain::ChannelFrame& frame) {
         } else if (veda::isRiskClass(o.cls)) {
             result.risk.push_back(o);
         } else {
-            logError(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(o.id) +
-                                 " cls=" + std::string(veda::toString(o.cls)) + " 분류 불가 - drop");
+            // Unknown 클래스는 스트림에 섞여 들어오는 게 드물지 않아 프레임마다 반복될 수 있음
+            // -- 정책상 정의된 drop 이므로 Debug (원인 추적은 Parser 의 Unknown Type 집계 로그가 담당)
+            if (isLogEnabled(LogLevel::Debug)) {
+                logDebug(kIface, "ch=" + std::to_string(frame.channelId) + " id=" + std::to_string(o.id) +
+                                     " cls=" + std::string(veda::toString(o.cls)) + " 분류 불가 - drop");
+            }
         }
     }
     return result;

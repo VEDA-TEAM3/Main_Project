@@ -29,6 +29,7 @@ add_executable(compute-server
     src/route/ParentBasedRouter.cpp
     src/ground/BottomCenterExtractor.cpp
     src/transform/HomographyTransform.cpp
+    src/mqtt/MqttTransport.cpp
     src/sink/MqttBlurSink.cpp
     src/sink/MqttTopViewSink.cpp
 )
@@ -50,3 +51,45 @@ target_link_libraries(
         Threads::Threads
         PkgConfig::MOSQUITTO
 )
+
+# 로컬->월드 좌표 변환 검증 하네스.
+# 변환 관련 소스만 실제로 링크하므로 mosquitto/OpenSSL 의존이 없음.
+#   cmake --build build --target verify-world && ./build/verify-world
+add_executable(verify-world
+    test/verify_world.cpp
+    src/transform/HomographyTransform.cpp
+    src/ground/BottomCenterExtractor.cpp
+)
+
+target_include_directories(
+    verify-world
+    PRIVATE
+        include
+        src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_compile_options(verify-world PRIVATE -O2)
+
+target_link_libraries(verify-world PRIVATE Threads::Threads)
+
+# Sink 수명/동시성 회귀 테스트.
+# IMqttTransport 를 Fake 로 주입하므로 libmosquitto 없이도 Sink 로직을 검증함.
+#   cmake --build build --target sink-lifecycle && ./build/sink-lifecycle
+add_executable(sink-lifecycle
+    test/sink_lifecycle.cpp
+    src/sink/MqttTopViewSink.cpp
+    src/sink/MqttBlurSink.cpp
+)
+
+target_include_directories(
+    sink-lifecycle
+    PRIVATE
+        include
+        src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_compile_options(sink-lifecycle PRIVATE -O2)
+
+target_link_libraries(sink-lifecycle PRIVATE Threads::Threads)

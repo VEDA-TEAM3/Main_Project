@@ -1,0 +1,85 @@
+{
+    "_comment": "compute-server 설정 샘플. 채널마다 이 파일을 복사해 channelId/rtsp/homography/mqtt clientId만 바꾸면 됨 (코드 수정 불필요). 실제 사용 시 config.json 으로 복사해서 실행 디렉터리에 둘 것.",
+
+    "channelId": 0,
+    "channelCount": 4,
+
+    "rtspIp": "192.168.0.6",
+    "rtspPort": 554,
+    "rtspUser": "admin",
+    "rtspPass": "5hanwha!",
+    "rtspSetupUri": "rtsp://192.168.0.6:554/2/profile4/media.smp/trackId=m",
+    "rtspPlayUri": "rtsp://192.168.0.6:554/2/profile4/media.smp/",
+
+    "_comment_rtsp_tuning": "아래 값들은 전부 예전에 소스에 박혀 있던 상수. 기본값은 performance/compute-server.md 에 측정된 값과 동일하므로, 건드리지 않으면 문서의 지표가 그대로 유효함. 바꾸면 재측정할 것.",
+    "rtspConnectTimeoutSec": 5,
+    "rtspRecvTimeoutSec": 5,
+    "rtspSocketRecvBufBytes": 1048576,
+    "rtspReadBufBytes": 65536,
+    "rtspMaxMetadataFrameBytes": 1048576,
+    "rtspKeepAliveIntervalSec": 30,
+    "rtspReconnectBackoffInitialSec": 1,
+    "rtspReconnectBackoffMaxSec": 30,
+
+    "_comment_source": "Source 링버퍼 용량. 가득 차면 drop-oldest -> 지연이 무한정 누적되지 않음. 키우면 burst 내성이 늘고, 줄이면 최신성이 올라감.",
+    "sourceRingCapacity": 8,
+    "metricsReportIntervalMs": 5000,
+
+    "_comment_log": "로그는 콘솔/파일 모두 백그라운드 워커가 배치로 내보내므로 호출 스레드 I/O가 0. 프레임마다 도는 이벤트(발행 성공, 팬텀 객체 제거, 라우팅 drop)는 debug 레벨이라 기본값 info에서는 큐에도 안 들어감 -- 진단할 때만 debug로 낮출 것. 실측: debug 차단 시 호출당 2ns, 예전 동기 방식은 cout 3745ns / cerr 16501ns.",
+    "logLevel": "info",
+    "logToConsole": true,
+    "logToFile": true,
+    "logFlushIntervalMs": 500,
+    "logMaxPendingEntries": 10000,
+
+    "_comment_edge": "bbox가 프레임 경계에 닿았다고 볼 정규화 좌표 오차율. 파서에서만 판정함.",
+    "edgeEpsilon": 0.002,
+
+    "_comment_sanitize": "팬텀 객체 제거 임계값 (규칙 A: IoU, 규칙 B: 포함비율 IoMin)",
+    "sanitizerIouThresh": 0.5,
+    "sanitizerContainThresh": 0.9,
+
+    "_comment_mapper": "[blur 경로 전용] Metadata 좌표계 -> 앱이 그리는 RTSP 프레임 좌표계 보정. risk 경로(로컬 좌표)에는 영향 없음. 화각/crop이 같으면 항등(1,1,0,0) 유지.",
+    "imageMapScaleX": 1.0,
+    "imageMapScaleY": 1.0,
+    "imageMapOffsetX": 0.0,
+    "imageMapOffsetY": 0.0,
+
+    "_comment_homography_1": "[risk 경로 전용] 지면점 -> '카메라 로컬' 지면 좌표(m) 사상. 도면 좌표가 아님 -- 원점=카메라, +y=카메라 전방. 도면 좌표로 옮기는 건 control-server 의 cameraCalibrations 가 담당하므로, 여기서 도면 기준으로 캘리브레이션하면 이중 회전이 되어 조용히 틀어짐. row-major 3x3 (h0..h2 / h3..h5 / h6..h8).",
+    "_comment_homography_2": "homographySpace 를 반드시 맞출 것. OpenCV findHomography() 결과는 픽셀 좌표계이므로 \"pixel\" + imageWidth/imageHeight 를 지정해야 함. 틀리면 예외도 경고도 없이 수십 m 오차가 발생함 (실측: 평균 30m).",
+    "_comment_homography_3": "아래 값은 1920x1080 기준 4점 대응 예시 -- (300,1000)->(-5,3)m, (1620,1000)->(5,3)m, (700,620)->(-5,15)m, (1220,620)->(5,15)m. 반드시 현장 실측값으로 교체할 것.",
+    "homographySpace": "pixel",
+    "imageWidth": 1920,
+    "imageHeight": 1080,
+    "homography": [
+        -1.273458e-2,  0.0,          1.222520e1,
+         0.0,          1.286863e-2, -1.791153e1,
+         0.0,         -2.680965e-3,  1.0
+    ],
+
+    "_comment_bounds": "카메라 로컬 좌표 sanity check. 지평선 근처 지면점은 수백~수천 m로 발산하므로 주차장 도면 범위를 지정해 걸러냄 (실측: 지평선+2px 지점이 2440m로 산출됨). 카메라 로컬 좌표계 기준 m 단위 (전방 거리/좌우 폭).",
+    "localBoundsEnabled": true,
+    "localMinX": -20.0,
+    "localMaxX": 20.0,
+    "localMinY": 0.0,
+    "localMaxY": 40.0,
+
+    "_comment_edgepolicy": "bbox가 잘린 risk 객체 처리 정책. keep | dropBottomTruncated | dropAnyEdge. 아래변이 잘리면 발 위치를 모른 채 잘린 지점을 지면으로 오인해 실측 0.83m 오차가 발생하므로 기본은 dropBottomTruncated. 좌/우/위 잘림은 발이 보이므로 지면점이 유효 -> dropAnyEdge 는 화면에 막 진입한 사람을 통째로 놓치니 주의.",
+    "riskEdgePolicy": "dropBottomTruncated",
+
+    "_comment_mqtt": "프로세스당 TLS 커넥션 1개(MqttTransport)를 Blur/TopView 두 sink가 공유함. mqttClientId 는 채널(=프로세스)마다 반드시 달라야 함 -- 같은 clientId로 두 커넥션이 붙으면 브로커가 먼저 붙은 쪽을 끊음.",
+    "mqttHost": "172.20.27.174",
+    "mqttPort": 8883,
+    "mqttCaFile": "ca.crt",
+    "mqttKeepAliveSeconds": 30,
+    "mqttRetryIntervalMs": 2000,
+    "mqttClientId": "veda-compute-ch0",
+
+    "_comment_mqtt_reconnect": "mqttRetryIntervalMs 는 '최초 접속조차 실패한' 경우 우리가 직접 도는 재시도 간격. 아래 둘은 '한 번 붙었다가 끊긴' 경우 mosquitto 가 알아서 재시도하는 지수 백오프.",
+    "mqttReconnectDelaySec": 1,
+    "mqttReconnectDelayMaxSec": 10,
+
+    "_comment_queue": "큐 크기는 sink마다 독립. blur가 밀린다고 risk(안전 크리티컬) 발행까지 지연되면 안 되므로 커넥션과 달리 큐/워커 스레드는 공유하지 않음.",
+    "mqttBlurMaxQueueSize": 8,
+    "mqttTopViewMaxQueueSize": 8
+}

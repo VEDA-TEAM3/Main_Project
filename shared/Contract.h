@@ -58,14 +58,44 @@ using GlobalId = std::int64_t;
  */
 
 /**
- * @brief 월드 좌표 (모든 채널이 같은 프레임을 씀)
+ * @brief 카메라 로컬 지면 좌표 (채널마다 원점과 축 방향이 다름)
  *
  * @details
  * - 단위 : meter
- * - 원점 : 도면상 지정한 지면 위의 CCTV 위치
- * - +x  : 도면 기준 오른쪽
- * - +y  : 도면 기준 위쪽
+ * - 원점 : 해당 채널 카메라의 설치 위치
+ * - +y  : 그 카메라의 전방
+ * - +x  : 전방 기준 좌우 오프셋 (어느 쪽이 +인지는 control-server 의
+ *         CameraCalibration::lateralSign 이 정함)
  * - z   : 없음
+ *
+ * @warning [ WorldPoint 와 헷갈리지 말 것 ]
+ * compute-server 는 도면을 전혀 모른다. 호모그래피는 '카메라 로컬 지면 평면'에서
+ * 캘리브레이션되며, 여기서 나온 좌표를 도면 공통 좌표로 옮기는 것은 control-server 의
+ * ILocalToWorldTransform 책임이다
+ * -- 즉 호모그래피를 도면 좌표로 캘리브레이션하면 control-server 가 한 번 더 회전시켜
+ *    예외도 경고도 없이 완전히 틀린 위치가 나온다
+ *
+ * @note
+ * 예전에는 이 자리에 WorldPoint 를 그대로 썼고 문서도 "모든 채널이 같은 프레임"이라고
+ * 적혀 있었음 -- 실제 파이프라인(ILocalToWorldTransform)과 모순이라 타입을 분리함
+ * 직렬화 형식은 {"x","y"} 로 WorldPoint 와 동일하므로 wire 호환성은 그대로임
+ */
+struct LocalPoint {
+    double x = 0.0;  ///< meters, 전방 기준 좌우 오프셋
+    double y = 0.0;  ///< meters, 카메라 전방 거리
+};
+
+/**
+ * @brief 도면 공통 월드 좌표 (모든 채널이 같은 프레임을 씀)
+ *
+ * @details
+ * - 단위 : meter
+ * - 원점 : 도면상의 기준점 (control-server 설정 기준 = 사거리 중심)
+ * - +x  : 도면 기준 오른쪽 (동)
+ * - +y  : 도면 기준 위쪽 (북)
+ * - z   : 없음
+ *
+ * @note LocalPoint 를 CameraCalibration(설치 위치 + 방위각)으로 회전·평행이동한 결과
  */
 struct WorldPoint {
     double x = 0.0;  ///< meters
@@ -200,8 +230,8 @@ inline RiskLevel riskLevelFromString(std::string_view s) {
 struct TopViewObject {
     ObjectId id = 0;                         ///< 채널 내 추적 ID
     ObjectClass cls = ObjectClass::Unknown;  ///< Human | Vehicle
-    WorldPoint pos;                          ///< 지면 접촉점을 호모그래피로 사상한 결과
-    bool edge = false;                       ///< bbox가 화면 경계에 닿았음
+    LocalPoint pos;     ///< 지면 접촉점을 호모그래피로 사상한 '카메라 로컬' 좌표
+    bool edge = false;  ///< bbox가 화면 경계에 닿았음
 };
 
 /**
@@ -341,6 +371,13 @@ inline void from_json(const nlohmann::json& j, WorldPoint& p) {
     p.y = detail::get_or<double>(j, "y", 0.0);
 }
 
+// LocalPoint 는 WorldPoint 와 동일한 {"x","y"} 로 직렬화됨 (타입만 분리, wire 는 그대로)
+inline void to_json(nlohmann::json& j, const LocalPoint& p) { j = nlohmann::json{{"x", p.x}, {"y", p.y}}; }
+inline void from_json(const nlohmann::json& j, LocalPoint& p) {
+    p.x = detail::get_or<double>(j, "x", 0.0);
+    p.y = detail::get_or<double>(j, "y", 0.0);
+}
+
 inline void to_json(nlohmann::json& j, const NormRect& r) {
     j = nlohmann::json{{"l", r.l}, {"t", r.t}, {"r", r.r}, {"b", r.b}};
 }
@@ -357,7 +394,7 @@ inline void to_json(nlohmann::json& j, const TopViewObject& o) {
 inline void from_json(const nlohmann::json& j, TopViewObject& o) {
     o.id = detail::get_or<ObjectId>(j, "id", 0);
     o.cls = objectClassFromString(detail::get_or<std::string>(j, "cls", ""));
-    o.pos = detail::get_or<WorldPoint>(j, "pos", WorldPoint{});
+    o.pos = detail::get_or<LocalPoint>(j, "pos", LocalPoint{});
     o.edge = detail::get_or<bool>(j, "edge", false);
 }
 

@@ -20,5 +20,5 @@ public:
      * @param   p IGroundPointExtractor가 추출한 정규화 이미지 좌표 [0,1]
      * @return  변환 없이 그대로 매핑된 좌표
      */
-    std::optional<veda::WorldPoint> toWorld(const domain::ImagePoint& p) override;
+    std::optional<veda::LocalPoint> toLocal(const domain::ImagePoint& p) override;
 };

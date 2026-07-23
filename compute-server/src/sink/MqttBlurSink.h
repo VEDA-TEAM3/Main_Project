@@ -5,58 +5,29 @@
  * @brief   BlurFrame 전용 MQTT 발행 Sink
  *
  * @details
- * send()는 큐에 넣고 즉시 반환(논블로킹), 실제 발행은 백그라운드 워커 스레드가 전담
- * 연결 전이거나 큐가 가득 찼을 때는 drop-oldest 정책으로 최신 프레임을 우선함
- * 접속 정보/큐 크기 등은 전부 AppConfig에서 직접 읽어옴 -> 하드코딩도, 별도 Config 복제도 없음
- *
- * @note [ 최초 연결 실패 시 재시도 ]
- * mosquitto의 자동 재접속(mosquitto_reconnect_delay_set)은 "한 번 연결된 뒤 끊긴" 경우만
- * 커버함. 생성자의 최초 initialize()가 실패하면(TLS/CA 파일 오류, 브로커 미기동 등) 워커
- * 스레드가 아예 생성되지 않아 영구히 죽은 상태가 되므로, 실패 시 별도 스레드에서
- * mqttRetryIntervalMs 간격으로 initialize()를 재시도함
+ * 큐잉/워커/드랍 집계는 MqttFrameSink<T> 가, 연결은 IMqttTransport 가 담당하므로
+ * 이 클래스에는 'BlurFrame 을 어떻게 검증하고 어느 토픽으로 보낼지'만 남음
  */
 
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cstddef>
-#include <cstdint>
-#include <deque>
-#include <mutex>
+#include <memory>
 #include <string>
-#include <thread>
 
 #include "Contract.h"
 #include "core/AppConfig.h"
-#include "interfaces/ISink.h"
+#include "interfaces/IMqttTransport.h"
+#include "sink/MqttFrameSink.h"
 
-struct mosquitto;
-
-class MqttBlurSink final : public ISink<veda::BlurFrame> {
+class MqttBlurSink final : public MqttFrameSink<veda::BlurFrame> {
 public:
-    explicit MqttBlurSink(const AppConfig& config);
+    MqttBlurSink(std::shared_ptr<IMqttTransport> transport, const AppConfig& config);
     ~MqttBlurSink() override;
 
-    MqttBlurSink(const MqttBlurSink&) = delete;
-    MqttBlurSink& operator=(const MqttBlurSink&) = delete;
-
-    void send(const veda::BlurFrame& frame) noexcept override;
-
-    bool isReady() const noexcept;
-    bool isConnected() const noexcept;
-
-    std::uint64_t publishedCount() const noexcept;
-    std::uint64_t droppedCount() const noexcept;
+protected:
+    bool prepare(const veda::BlurFrame& in, veda::BlurFrame& out) noexcept override;
+    std::string describe(const veda::BlurFrame& frame) const override;
 
 private:
-    bool initialize() noexcept;
-    void shutdown() noexcept;
-    void retryLoop() noexcept;
-
-    void workerLoop() noexcept;
-    void publishFrame(const veda::BlurFrame& frame) noexcept;
-    void recordDrop(const char* reason) noexcept;
-
     /**
      * @brief   프레임 단위 유효성 검사 (스키마 버전/타임스탬프/채널 범위)
      * @details 여기서 실패하면 blurs 내용과 무관하게 프레임 자체가 구조적으로 잘못된 것이므로
@@ -69,36 +40,5 @@ private:
     /// @brief 개별 blur 대상 하나의 유효성 검사 (클래스가 Head/LicensePlate인지, box 좌표가 정상인지)
     bool isValidBlurTarget(const veda::BlurTarget& blur) const noexcept;
 
-    static void onConnect(struct mosquitto* client, void* userData, int resultCode);
-    static void onDisconnect(struct mosquitto* client, void* userData, int resultCode);
-
-    std::string host_;          ///< AppConfig::mqttHost (공통)
-    int port_;                  ///< AppConfig::mqttPort (공통)
-    std::string caFile_;        ///< AppConfig::mqttCaFile (공통)
-    std::string clientId_;      ///< AppConfig::mqttBlurClientId, 비어있으면 생성자가 자동 생성
-    int keepAliveSeconds_;      ///< AppConfig::mqttKeepAliveSeconds (공통)
-    std::size_t maxQueueSize_;  ///< AppConfig::mqttBlurMaxQueueSize (최소 1로 clamp)
-    int channelCount_;          ///< AppConfig::channelCount, frame.ch 유효성 검사 범위 [0, channelCount)
-    std::chrono::milliseconds retryInterval_;  ///< AppConfig::mqttRetryIntervalMs (공통)
-
-    struct mosquitto* client_ = nullptr;
-
-    std::mutex queueMutex_;
-    std::condition_variable queueChanged_;
-    std::deque<veda::BlurFrame> queue_;
-    std::thread worker_;
-
-    bool stopping_ = false;
-    bool libraryInitialized_ = false;
-
-    std::atomic_bool ready_{false};
-    std::atomic_bool connected_{false};
-    std::atomic_bool shuttingDown_{false};
-
-    std::atomic_uint64_t publishedCount_{0};
-    std::atomic_uint64_t droppedCount_{0};
-
-    std::mutex retryMutex_;
-    std::condition_variable retryCv_;
-    std::thread retryThread_;
+    int channelCount_;  ///< AppConfig::channelCount, frame.ch 유효성 검사 범위 [0, channelCount)
 };

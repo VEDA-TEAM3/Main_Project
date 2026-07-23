@@ -7,12 +7,11 @@
 #include <string>
 #include <utility>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 
 constexpr const char* kIface = "Mapper";
-constexpr double kEdgeEpsilon = 0.002;
 
 bool isFinite(double value) { return std::isfinite(value); }
 
@@ -34,15 +33,15 @@ AffineImageCoordinateMapper::AffineImageCoordinateMapper(double scaleX, double s
         throw std::invalid_argument("image coordinate mapper requires finite positive scales");
 }
 
-domain::ChannelFrame AffineImageCoordinateMapper::map(domain::ChannelFrame frame) const {
-    const std::size_t inputCount = frame.objects.size();
+void AffineImageCoordinateMapper::map(std::vector<domain::DetectedObject>& objects, veda::ChannelId channelId) const {
+    const std::size_t inputCount = objects.size();
 
     // in-place 필터링: 출력 개수는 항상 입력 이하이므로 별도 벡터를 새로 만들지 않고
-    // frame.objects 자체에서 통과하는 원소만 앞으로 당긴 뒤 resize()로 잘라냄
+    // objects 자체에서 통과하는 원소만 앞으로 당긴 뒤 resize()로 잘라냄
     // (resize()로 줄이는 건 재할당을 유발하지 않음) -> 이 함수의 힙 할당이 0이 됨
     std::size_t writeIdx = 0;
-    for (std::size_t readIdx = 0; readIdx < frame.objects.size(); ++readIdx) {
-        auto& object = frame.objects[readIdx];
+    for (std::size_t readIdx = 0; readIdx < objects.size(); ++readIdx) {
+        auto& object = objects[readIdx];
 
         domain::NormBox mapped;
         mapped.l = object.box.l * scaleX_ + offsetX_;
@@ -59,18 +58,18 @@ domain::ChannelFrame AffineImageCoordinateMapper::map(domain::ChannelFrame frame
             continue;
 
         object.box = mapped;
-        object.touchesBorder = mapped.l <= kEdgeEpsilon || mapped.r >= 1.0 - kEdgeEpsilon || mapped.t <= kEdgeEpsilon ||
-                               mapped.b >= 1.0 - kEdgeEpsilon;
+        // touchesBorder/bottomTruncated 는 건드리지 않음: 이 단계는 blur 경로 전용이고
+        // 경계 판정은 Metadata 좌표계 기준으로 파서가 이미 한 번만 수행함
+        // (여기서 clamp 후 재판정하면 '앱 화면 기준 경계'라는 다른 의미가 섞임)
 
         if (writeIdx != readIdx)
-            frame.objects[writeIdx] = std::move(object);
+            objects[writeIdx] = std::move(object);
         ++writeIdx;
     }
-    frame.objects.resize(writeIdx);
+    objects.resize(writeIdx);
 
     if (inputCount > 0 && writeIdx == 0) {
-        logError(kIface, "ch=" + std::to_string(frame.channelId) + " 입력 객체 " + std::to_string(inputCount) +
+        logError(kIface, "ch=" + std::to_string(channelId) + " 입력 blur 객체 " + std::to_string(inputCount) +
                              "개가 전부 필터링됨 (scale/offset 설정 확인 필요)");
     }
-    return frame;
 }

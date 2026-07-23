@@ -5,7 +5,13 @@
 #include <unistd.h>
 
 #include <cstring>
-#include <iostream>
+#include <string>
+
+#include "Logger.h"
+
+namespace {
+constexpr const char* kIface = "HwDispatcher";
+}  // namespace
 
 SerialHwEventDispatcher::SerialHwEventDispatcher(std::string devicePath, uint32_t heartbeatIntervalMs,
                                                  uint32_t missedBeatsForTimeout)
@@ -40,8 +46,8 @@ SerialHwEventDispatcher::~SerialHwEventDispatcher() {
 void SerialHwEventDispatcher::openPort() {
     fd_ = open(devicePath_.c_str(), O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
-        std::cerr << "[SerialHwEventDispatcher] 포트 열기 실패: " << devicePath_ << " (" << strerror(errno) << ")"
-                  << " — STM32로 전송/수신이 비활성화됩니다.\n";
+        logError(kIface,
+                 "포트 열기 실패: " + devicePath_ + " (" + strerror(errno) + ") — STM32로 전송/수신이 비활성화됩니다");
         return;
     }
 
@@ -67,7 +73,7 @@ void SerialHwEventDispatcher::openPort() {
 
     tcsetattr(fd_, TCSANOW, &tty);
 
-    std::cout << "[SerialHwEventDispatcher] " << devicePath_ << " 연결됨 (115200 8N1)\n";
+    logSuccess(kIface, devicePath_ + " 연결됨 (115200 8N1)");
 }
 
 /**
@@ -81,11 +87,11 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     }
 
     for (const auto& zone : eval.zoneLevels) {
-        std::cout << "[Dispatcher] UART 이벤트 통지 → 채널 " << zone.zoneId << "\n";
-
         auto it = lastSentLevel_.find(zone.zoneId);
         const bool changed = (it == lastSentLevel_.end()) || (it->second != zone.level);
         if (!changed) {
+            // 변경분만 전송 -- 예전에는 여기 도달 전에 매 zone 마다 콘솔에 찍고 있어서
+            // 윈도우마다(초당 10회) x 채널수 만큼 동기 출력이 발생했음
             continue;
         }
 
@@ -104,12 +110,15 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
 
         ssize_t written = write(fd_, &frame, sizeof(frame));
         if (written != static_cast<ssize_t>(sizeof(frame))) {
-            std::cerr << "[SerialHwEventDispatcher] 전송 실패: 채널 " << zone.zoneId << " (" << strerror(errno)
-                      << ")\n";
+            logError(kIface, "전송 실패: 채널 " + std::to_string(zone.zoneId) + " (" + strerror(errno) + ")");
             continue;  // lastSentLevel_ 갱신 안 함 -> 다음 프레임에서 재시도됨
         }
 
         lastSentLevel_[zone.zoneId] = zone.level;
+        // 레벨이 바뀔 때만 찍히므로 Info 여도 도배되지 않음 (상태 전이 = 운영자가 봐야 할 이벤트)
+        logSuccess(kIface, "UART 통지 채널 " + std::to_string(zone.zoneId) + " -> " +
+                               std::string(veda::toString(zone.level)) + " (거리 " + std::to_string(zone.minDist) +
+                               "m)");
     }
 }
 

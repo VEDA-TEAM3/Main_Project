@@ -17,15 +17,29 @@
 #include <iomanip>
 #include <sstream>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "Network";
 
+/// @brief RTSP 응답의 첫 줄(상태 줄, 예: "RTSP/1.0 401 Unauthorized")만 잘라냄 - 진단용
+std::string statusLine(const std::string& response) {
+    const size_t end = response.find("\r\n");
+    return end == std::string::npos ? response : response.substr(0, end);
+}
+
 }  // namespace
 
-RtspClientV2::RtspClientV2(const AppConfig& config) : cfg_(config) {
-    sockBuf_.resize(kSocketReadBufSize);
+RtspClientV2::RtspClientV2(const AppConfig& config)
+    : readBufBytes_(static_cast<std::size_t>(config.rtspReadBufBytes)),
+      maxMetadataFrameSize_(static_cast<std::size_t>(config.rtspMaxMetadataFrameBytes)),
+      connectTimeoutSec_(config.rtspConnectTimeoutSec),
+      recvTimeoutSec_(config.rtspRecvTimeoutSec),
+      socketRecvBufBytes_(config.rtspSocketRecvBufBytes),
+      keepAliveIntervalSec_(config.rtspKeepAliveIntervalSec),
+      metricsReportInterval_(config.metricsReportIntervalMs),
+      cfg_(config) {
+    sockBuf_.resize(readBufBytes_);
     rtpPacket_.resize(kMaxRtpPayloadSize);
 }
 
@@ -47,15 +61,14 @@ bool RtspClientV2::connect() {
     }
 
     struct timeval tv {
-        5, 0
+        recvTimeoutSec_, 0
     };
     setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     const int noDelay = 1;
     setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
 
-    const int rcvBufBytes = 1 << 20;  // 1MB
-    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &rcvBufBytes, sizeof(rcvBufBytes));
+    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &socketRecvBufBytes_, sizeof(socketRecvBufBytes_));
 
     struct sockaddr_in serverAddr {};
     serverAddr.sin_family = AF_INET;
@@ -80,13 +93,13 @@ bool RtspClientV2::connect() {
         FD_ZERO(&writeSet);
         FD_SET(sock_, &writeSet);
         struct timeval connectTimeout {
-            kConnectTimeoutSec, 0
+            connectTimeoutSec_, 0
         };
 
         const int selectResult = select(sock_ + 1, nullptr, &writeSet, nullptr, &connectTimeout);
         if (selectResult <= 0) {
             logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
-                                 std::to_string(kConnectTimeoutSec) + "초)");
+                                 std::to_string(connectTimeoutSec_) + "초)");
             fcntl(sock_, F_SETFL, origFlags);
             return false;
         }
@@ -179,7 +192,7 @@ bool RtspClientV2::setup() {
     if (noncePos != std::string::npos)
         nonce_ = res1.substr(noncePos + 7, res1.find('"', noncePos + 7) - (noncePos + 7));
     if (nonce_.empty()) {
-        logError(kIface, "인증 파라미터(nonce) 파싱 실패");
+        logError(kIface, "인증 파라미터(nonce) 파싱 실패 - SETUP 1차 응답: [" + statusLine(res1) + "]");
         return false;
     }
 
@@ -198,7 +211,11 @@ bool RtspClientV2::setup() {
 
     const size_t sessPos = res2.find("Session: ");
     if (sessPos == std::string::npos) {
-        logError(kIface, "세션 ID 파싱 실패");
+        // Session 헤더가 없다 = 카메라가 인증 SETUP을 200 OK로 받지 않았다는 뜻
+        // 상태 줄로 사유를 구분: 401=인증 거부(계정/비밀번호), 4xx=URI/Transport 문제
+        // 이 클라이언트는 DESCRIBE 없이 곧바로 SETUP하므로 rtspSetupUri가 정확해야 함
+        logError(kIface, "세션 ID 파싱 실패 - SETUP 2차 응답: [" + statusLine(res2) +
+                             "] (401=인증 거부, 454/455/461=URI/Transport 문제, uri=" + cfg_.rtspSetupUri + ")");
         return false;
     }
 
@@ -214,8 +231,21 @@ void RtspClientV2::play() {
     send(sock_, req.c_str(), req.length(), 0);
 
     std::string res;
-    recvHeaders(res);
-    logSuccess(kIface, "PLAY 명령 전송 완료, 스트리밍 시작");
+    if (!recvHeaders(res)) {
+        logError(kIface, "PLAY 응답 수신 실패 (uri=" + cfg_.rtspPlayUri + ")");
+        return;
+    }
+
+    // PLAY 응답을 반드시 확인 - 200이 아니면 카메라가 곧바로 연결을 끊어 run()이 즉시 종료됨
+    // (예: PLAY URL이 aggregate control URL과 다르면 404/455)
+    const std::string status = statusLine(res);
+    if (status.find(" 200") == std::string::npos) {
+        logError(kIface, "PLAY 실패 - 응답: [" + status + "] (uri=" + cfg_.rtspPlayUri +
+                             ") PLAY는 트랙이 아니라 세션 aggregate URL(끝의 trackID/슬래시 없이)로 보내야 함");
+        return;
+    }
+
+    logSuccess(kIface, "PLAY 성공, 스트리밍 시작 - 응답: [" + status + "]");
 
     keepRunning_ = true;
     keepaliveThread_ = std::thread(&RtspClientV2::keepAliveLoop, this);
@@ -255,10 +285,10 @@ void RtspClientV2::run() {
         metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
                               static_cast<size_t>(payloadLen - kRtpHeaderSize));
 
-        if (metadataBuffer.size() > kMaxMetadataFrameBytes) {
+        if (metadataBuffer.size() > maxMetadataFrameSize_) {
             // marker bit가 누락됐거나 스트림이 손상된 것으로 간주 -> 무한정 쌓이기 전에
             // 버퍼를 버리고 연결 자체를 재수립 (상위 Source의 재연결 백오프에 위임)
-            logError(kIface, "metadata 프레임 크기가 상한(" + std::to_string(kMaxMetadataFrameBytes) +
+            logError(kIface, "metadata 프레임 크기가 상한(" + std::to_string(maxMetadataFrameSize_) +
                                  "B)을 초과 (marker 누락 의심) - 연결 재수립");
             break;
         }
@@ -286,7 +316,7 @@ void RtspClientV2::reportMetricsIfDue() {
 
     const auto now = steady_clock::now();
     const auto elapsed = duration_cast<milliseconds>(now - metrics_.windowStart);
-    if (elapsed < kMetricsReportInterval || metrics_.payloadCount == 0)
+    if (elapsed < metricsReportInterval_ || metrics_.payloadCount == 0)
         return;
 
     const double avgAssembleUs = duration_cast<duration<double, std::micro>>(metrics_.totalAssembleTime).count() /
@@ -342,7 +372,8 @@ std::string RtspClientV2::buildDigestHeader(const std::string& method, const std
 
 void RtspClientV2::keepAliveLoop() {
     while (keepRunning_) {
-        for (int i = 0; i < 30 && keepRunning_; ++i) {
+        // 1초씩 쪼개서 자는 이유: 종료 요청(keepRunning_=false)에 최대 1초 안에 반응하기 위함
+        for (int i = 0; i < keepAliveIntervalSec_ && keepRunning_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         if (!keepRunning_)

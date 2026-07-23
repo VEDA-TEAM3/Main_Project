@@ -3,17 +3,18 @@
 #include <limits>
 #include <string>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "RiskPolicy";
 }  // namespace
 
-ThresholdRiskPolicy::ThresholdRiskPolicy(std::shared_ptr<IDistanceMetric> metric, double warningDistance,
-                                         double dangerousDistance, int channelCount)
+ThresholdRiskPolicy::ThresholdRiskPolicy(std::shared_ptr<IDistanceMetric> metric, const RiskConfig& risk,
+                                         int channelCount)
     : metric_(std::move(metric)),
-      warningDistance_(warningDistance),
-      dangerousDistance_(dangerousDistance),
+      warningDistance_(risk.warningDistance),
+      dangerousDistance_(risk.dangerousDistance),
+      warnOnHumanPresence_(risk.warnOnHumanPresence),
       channelCount_(channelCount) {}
 
 domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) {
@@ -69,9 +70,14 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
         }
 
         if (vehicle.riskLevel != veda::RiskLevel::None) {
-            logSuccess(kIface, "gid=" + std::to_string(vehicle.gid) + " " +
-                                   std::string(veda::toString(vehicle.riskLevel)) + " 판정 (최근접 gid=" +
-                                   std::to_string(nearestGid) + ", 거리=" + std::to_string(minDist) + "m)");
+            // 차량이 가까이 있는 동안 윈도우마다(초당 10회) 같은 판정이 반복되므로 rate-limit
+            ++riskLogCount_;
+            if (riskLogCount_ == 1 || riskLogCount_ % 50 == 0) {
+                logSuccess(kIface,
+                           "gid=" + std::to_string(vehicle.gid) + " " + std::string(veda::toString(vehicle.riskLevel)) +
+                               " 판정 (최근접 gid=" + std::to_string(nearestGid) + ", 거리=" + std::to_string(minDist) +
+                               "m, 누적 " + std::to_string(riskLogCount_) + "건)");
+            }
         }
 
         // 최근접 대상이 이 위험 상황에 관여된 당사자이므로, 그 객체의 riskLevel 도
@@ -102,6 +108,23 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
             zone.minDist = vehicle.nearestDist;
         } else if (vehicle.riskLevel == zone.level && (zone.minDist < 0.0 || vehicle.nearestDist < zone.minDist)) {
             zone.minDist = vehicle.nearestDist;
+        }
+    }
+
+    // Contract.h 의 RiskLevel 정의: `Warning = 사람 감지 or 거리 warningDistance 이내`
+    // -- 차량이 한 대도 없어도 사람이 있으면 그 zone 은 최소 Warning 이어야 함
+    //    (차량 기준 루프만 돌면 주차장에 사람만 있는 상황이 통째로 None 이 됨)
+    // 이미 Danger 로 올라간 zone 은 깎지 않도록 '올리기만' 함
+    if (warnOnHumanPresence_) {
+        for (const auto& object : frame.objects) {
+            if (object.cls != veda::ObjectClass::Human)
+                continue;
+            if (object.zoneId < 0 || object.zoneId >= channelCount_)
+                continue;
+
+            auto& zone = eval.zoneLevels[static_cast<size_t>(object.zoneId)];
+            if (zone.level < veda::RiskLevel::Warning)
+                zone.level = veda::RiskLevel::Warning;
         }
     }
 

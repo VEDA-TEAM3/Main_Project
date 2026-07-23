@@ -88,34 +88,40 @@ private:
      */
     void reportMetricsIfDue();
 
-    static constexpr int kRtpHeaderSize = 12;
+    /// @name 프로토콜 불변 상수
+    /// @details RTP/인터리브 프레이밍이 정한 값이라 설정으로 노출하지 않음
+    ///          (튜닝 대상이 아니고, 바꾸면 파싱이 깨짐)
+    /// @{
 
-    /// @brief 사용자 공간 소켓 read 버퍼 크기 (이 크기 단위로 recv() 호출)
-    static constexpr std::size_t kSocketReadBufSize = 65536;
+    static constexpr int kRtpHeaderSize = 12;
 
     /// @brief RTP 인터리브 프레임의 2바이트 length 필드가 표현 가능한 최댓값
     static constexpr std::size_t kMaxRtpPayloadSize = 65535;
 
-    /**
-     * @brief   metadataBuffer(marker bit로 재조합되는 하나의 ONVIF metadata frame) 최대 크기
-     * @details 실측 ONVIF metadata frame은 보통 수 KB 수준이라 1MiB는 충분히 여유 있는 상한.
-     *          손상된 스트림이나 marker bit 누락으로 이 크기를 넘으면 marker를 영영 못 볼 수
-     *          있으므로, run()이 버퍼를 비우고 루프를 종료해 상위(Source)가 재연결하게 함
-     *          (OOM 방지)
-     */
-    static constexpr std::size_t kMaxMetadataFrameBytes = 1024 * 1024;
+    /// @}
 
     /**
-     * @brief   connect()의 최대 대기 시간 (초)
-     * @details SO_RCVTIMEO는 recv()에만 적용되고 connect() 자체에는 영향이 없어서,
-     *          카메라가 응답 없거나 방화벽이 SYN을 조용히 버리면 커널 기본 타임아웃
-     *          (Linux 기본 tcp_syn_retries 기준 1~2분)까지 아무 로그 없이 블로킹됨
-     *          -> 논블로킹 connect + select()로 여기서 명시적으로 제한
+     * @name 설정으로 빠진 튜닝 값들 (AppConfig)
+     * @details
+     * 예전엔 static constexpr 로 여기 박혀 있었음. 기본값은 performance/compute-server.md 에
+     * 측정된 값 그대로이므로, config 에서 건드리지 않으면 문서의 지표가 그대로 유효함
+     *
+     * - readBufBytes_        : 이 크기 단위로 recv() 호출 -> 프레임당 syscall 수를 좌우 (측정값 65536)
+     * - maxMetadataFrameSize_: marker 누락/스트림 손상 시 무한정 쌓이는 것을 막는 상한 (측정값 1MiB)
+     *                          넘으면 run()이 버퍼를 버리고 종료해 상위(Source)가 재연결
+     * - connectTimeoutSec_   : SO_RCVTIMEO 는 connect() 에 적용되지 않음. 논블로킹 connect +
+     *                          select() 로 명시적 제한을 걸지 않으면 카메라 무응답/방화벽 SYN drop 시
+     *                          커널 기본 타임아웃(1~2분)까지 아무 로그 없이 블로킹됨
+     * @{
      */
-    static constexpr int kConnectTimeoutSec = 5;
-
-    /// @brief 성능 지표를 로그로 남기는 주기
-    static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
+    std::size_t readBufBytes_;
+    std::size_t maxMetadataFrameSize_;
+    int connectTimeoutSec_;
+    int recvTimeoutSec_;
+    int socketRecvBufBytes_;
+    int keepAliveIntervalSec_;
+    std::chrono::milliseconds metricsReportInterval_;
+    /** @} */
 
     AppConfig cfg_;
     int sock_ = -1;

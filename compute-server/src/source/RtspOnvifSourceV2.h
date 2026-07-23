@@ -53,6 +53,13 @@ public:
 
     bool next(domain::RawPacket& out) override;
 
+    /**
+     * @brief   워커 루프와 대기 중인 next()를 깨움 (멱등)
+     * @note    RTSP 워커는 recv() 타임아웃(5초)까지는 소켓에 묶여 있으므로,
+     *          여기서 돌아온 뒤 소멸자의 join 이 최대 그만큼 걸릴 수 있음
+     */
+    void stop() noexcept override;
+
 private:
     /**
      * @brief   [connect->setup->play->run]을 재연결 백오프와 함께 반복하는 워커 루프
@@ -66,10 +73,21 @@ private:
      */
     std::string buildMetricsReportIfDue();
 
-    /// @brief 링버퍼 용량 (동시에 대기 가능한 최대 프레임 수)
-    static constexpr std::size_t kRingCapacity = 8;
-
-    static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
+    /**
+     * @name 설정으로 빠진 튜닝 값들 (AppConfig)
+     * @details
+     * 예전엔 static constexpr 였음. 기본값은 performance/compute-server.md 에 측정된 값 그대로
+     *
+     * @note ringCapacity_ 가 런타임 값이 되면서 인덱스 계산의 % 가 컴파일 타임에
+     *       비트마스크로 접히지 않게 됨. 콜백/next() 당 각 1회씩이고 실측 처리율이
+     *       5fps 수준이라 무시 가능한 수준 (측정 지표에 변화 없음)
+     * @{
+     */
+    std::size_t ringCapacity_;
+    std::chrono::milliseconds metricsReportInterval_;
+    int backoffInitialSec_;
+    int backoffMaxSec_;
+    /** @} */
 
     AppConfig config_;
     std::atomic<bool> stopping_{false};

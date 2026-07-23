@@ -3,7 +3,7 @@
 #include <iomanip>
 #include <sstream>
 
-#include "log/Logger.h"
+#include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "Aggregator";
@@ -80,8 +80,11 @@ void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
     if (windowClosed) {
         const std::size_t channelCount = flushedFrames.size();
         callbackCopy(std::move(flushedFrames));
-        logSuccess(kIface,
-                   "윈도우 마감, " + std::to_string(channelCount) + "채널 집계 완료 → 다음 단계 전달 (락 밖에서 호출)");
+        // 윈도우마다(초당 10회) 도는 정상 경로라 Debug
+        if (isLogEnabled(LogLevel::Debug)) {
+            logDebug(kIface, "윈도우 마감, " + std::to_string(channelCount) +
+                                 "채널 집계 완료 → 다음 단계 전달 (락 밖에서 호출)");
+        }
     } else if (callbackMissing) {
         logError(kIface, "윈도우 마감했지만 콜백 미등록 - " + std::to_string(missedChannelCount) + "채널 데이터 유실");
     }
