@@ -46,6 +46,7 @@ public:
 
     bool publish(std::string_view topic, std::string_view payload, int qos, bool retain = false) noexcept;
     void send(const domain::WorldFrame& frame) override;
+    void sendChannelStatus(const veda::ChannelStatus& status) override;
 
     bool isRunning() const noexcept { return running_.load(std::memory_order_acquire); }
     bool isConnected() const noexcept { return connected_.load(std::memory_order_acquire); }
@@ -81,6 +82,14 @@ private:
     std::string password_;
 
     std::string publishTopic_;  ///< AppConfig::mqttSendTopic (비어있으면 veda::topic::kRisk)
+
+    /// @name send() 전용 재사용 버퍼 (파이프라인 단일 스레드에서만 접근 -> 락 불필요, zero-DOM 발행)
+    /// @details ChannelStatus(저빈도 이벤트)는 여전히 DOM encode() 를 씀 -- hot path 가 아님
+    /// @{
+    veda::RiskFrame riskScratch_;  ///< WorldFrame -> RiskFrame 변환 결과 (objects capacity 재사용)
+    std::string riskPayloadBuf_;   ///< encodeInto 출력 버퍼 (clear() 로 capacity 유지)
+    /// @}
+
     mosquitto* client_ = nullptr;
 
     mutable std::mutex clientMutex_;

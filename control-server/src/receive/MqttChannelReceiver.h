@@ -22,7 +22,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -59,7 +61,9 @@ private:
     bool tryConnect() noexcept;
     void retryLoop() noexcept;
 
-    void handleMessage(std::string_view topic, std::string_view payload) noexcept;
+    void handleMessage(std::string_view topic, std::string_view payload) noexcept;   ///< mosquitto 스레드: enqueue 만
+    void pipelineLoop() noexcept;                                                    ///< PipelineWorker 스레드 루프
+    void processMessage(std::string_view topic, std::string_view payload) noexcept;  ///< 디코드+파이프라인(워커에서)
     void handleConnection(bool connected) noexcept;
     std::optional<veda::ChannelId> parseChannel(std::string_view topic, std::string_view suffix) const noexcept;
     void recordDrop(std::string_view topic, const char* reason) noexcept;
@@ -78,4 +82,22 @@ private:
     std::mutex retryMutex_;
     std::condition_variable retryCv_;
     std::thread retryThread_;
+
+    /// @name 네트워크 스레드 분리 (mosquitto 콜백 -> 큐 -> PipelineWorker)
+    /// @details mosquitto 콜백은 payload 복사+enqueue 만 하고, 무거운 디코드/fusion/dispatch 는 워커에서.
+    ///          단일 생산자(mosquitto 네트워크 스레드) - 단일 소비자(pipelineThread_)라 SPSC 지만,
+    ///          유휴 시 CPU 를 태우지 않도록(라즈베리파이) lock-free 대신 mutex+CV 큐를 씀 (Principle #7).
+    /// @{
+    struct RawMessage {
+        std::string topic;
+        std::string payload;
+    };
+    static constexpr std::size_t kMaxQueuedMessages = 4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
+    std::mutex queueMutex_;
+    std::condition_variable queueCv_;
+    std::deque<RawMessage> queue_;  ///< queueMutex_ 로 보호
+    bool queueStopping_ = false;    ///< queueMutex_ 로 보호
+    std::thread pipelineThread_;
+    std::atomic_uint64_t queueDroppedCount_{0};
+    /// @}
 };

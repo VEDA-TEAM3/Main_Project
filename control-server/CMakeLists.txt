@@ -17,12 +17,12 @@ add_executable(control-server
     src/aggregate/TimeWindowAggregatorV2.cpp
     src/time/SystemClock.cpp
     src/fuse/ConcatFuser.cpp
+    src/fuse/GridFuser.cpp
     src/metric/EuclideanMetric.cpp
     src/risk/ThresholdRiskPolicy.cpp
-    src/dispatch/ConsoleDispatcher.cpp
     src/dispatch/SerialHwEventDispatcher.cpp
     src/sink/MqttTransport.cpp
-    src/zone/AngleZoneMapper.cpp
+    src/zone/SpatialZoneMapper.cpp
     src/transform/AffineLocalToWorldTransform.cpp
 )
 
@@ -46,7 +46,7 @@ target_link_libraries(control-server PRIVATE
 add_executable(verify-pipeline
     test/verify_pipeline.cpp
     src/transform/AffineLocalToWorldTransform.cpp
-    src/zone/AngleZoneMapper.cpp
+    src/zone/SpatialZoneMapper.cpp
     src/risk/ThresholdRiskPolicy.cpp
     src/fuse/ConcatFuser.cpp
     src/metric/EuclideanMetric.cpp

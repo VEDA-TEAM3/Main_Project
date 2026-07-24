@@ -13,13 +13,16 @@
  * @endcode
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include "Contract.h"
+#include "domain/WorldObservation.h"
 #include "interfaces/IChannelReceiver.h"
+#include "interfaces/IClock.h"
 #include "interfaces/ICrossChannelFuser.h"
 #include "interfaces/IFrameAggregator.h"
 #include "interfaces/IHwEventDispatcher.h"
@@ -36,7 +39,8 @@ public:
     Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
                std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
-               std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink, int channelCount);
+               std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink,
+               std::shared_ptr<IClock> clock, int channelCount);
 
     /**
      * @brief   receiver를 먼저 stop()시켜 워커 스레드를 join한 뒤 소멸
@@ -71,6 +75,11 @@ private:
     std::shared_ptr<IRiskPolicy> riskPolicy_;
     std::shared_ptr<IHwEventDispatcher> dispatcher_;
     std::shared_ptr<ISink> sink_;
+    std::shared_ptr<IClock> clock_;
+
+    /// @brief transform() 결과를 담는 재사용 버퍼 (윈도우마다 재할당하지 않기 위해 멤버로 둠).
+    ///        processPipeline 은 단일 스레드에서만 도므로 락이 필요 없음
+    std::vector<domain::ObservationFrame> observations_;
 
     /**
      * @name 채널 생존 상태 (LWT + STM32 하트비트)
@@ -81,17 +90,31 @@ private:
      * -- compute-server 가 LWT 를 발행해도 받는 쪽이 없어 '빈 프레임'과 '채널 사망'을
      *    끝내 구분하지 못하는 상태였음
      *
-     * 여기서 상태를 들고 전환(alive<->dead)만 로그로 남김. 대시보드 통지는 wire contract
-     * (RiskFrame)에 채널 상태 필드가 없어 아직 못 보냄 -- 계약 확장 시 여기서 sink 로 흘리면 됨
+     * 이제 상태를 들고 전환(alive<->dead)마다 로그를 남기고, veda::ChannelStatus 로
+     * 묶어 sink_->sendChannelStatus() 로 Qt 클라이언트에도 발행함 (ISink/Contract.h 참고)
+     * -- cameraAlive(MQTT LWT)와 hardwareAlive(STM32 하트비트)를 하나의 메시지에 함께 실어
+     *    보내므로, 셋 중 하나만 바뀌어도 최신 조합 전체를 다시 보냄
+     * -- IHwEventDispatcher::StatusCallback이 hardwareAlive와 함께 실제 경광등/부저/LED
+     *    표시 상태(HwIndicatorState)도 실어 보내므로, 그것도 같은 스냅샷에 포함해 보냄
      *
      * @note MQTT 콜백 스레드와 UART 리더 스레드 양쪽에서 갱신되므로 뮤텍스로 보호
      * @{
      */
     void onChannelAlive(veda::ChannelId channel, bool alive, const char* source);
+    void onHardwareStatus(veda::ChannelId channel, bool alive, const HwIndicatorState& indicators);
+
+    /**
+     * @brief   현재 채널 상태(cameraAlive/hardwareAlive + 표시 상태)를 하나의 스냅샷으로 조립
+     * @param   idx 채널 인덱스 (= channelId)
+     * @return  발행 직전의 ChannelStatus (ts 는 호출자가 락 밖에서 채움)
+     * @warning 호출자가 aliveMutex_ 를 잡은 상태에서만 호출할 것 (뮤텍스로 보호되는 멤버를 읽음)
+     */
+    veda::ChannelStatus buildStatusLocked(std::size_t idx) const;
 
     int channelCount_;
     std::mutex aliveMutex_;
-    std::vector<bool> channelAlive_;   ///< 인덱스 = channelId, MQTT LWT 기준
-    std::vector<bool> hardwareAlive_;  ///< 인덱스 = channelId, STM32 하트비트 기준
+    std::vector<bool> channelAlive_;                 ///< 인덱스 = channelId, MQTT LWT 기준
+    std::vector<bool> hardwareAlive_;                ///< 인덱스 = channelId, STM32 하트비트 기준
+    std::vector<HwIndicatorState> indicatorState_;    ///< 인덱스 = channelId, STM32가 보고한 마지막 표시 상태
     /** @} */
 };

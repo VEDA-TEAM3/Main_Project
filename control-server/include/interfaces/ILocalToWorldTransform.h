@@ -12,25 +12,27 @@
 #include <vector>
 
 #include "Contract.h"
+#include "domain/WorldObservation.h"
 
 class ILocalToWorldTransform {
 public:
     virtual ~ILocalToWorldTransform() = default;
     /**
-     * @brief frames내 각 TopViewFrame 의 좌표를 그 채널의 카메라 캘리브레이션으로
-     *        로컬 → 공통 월드 좌표로 변환 (in-place)
-     * @param frames IFrameAggregator가 묶어준 채널별 프레임 목록
+     * @brief 채널별 로컬 좌표 프레임을 그 채널의 카메라 캘리브레이션으로 도면 공통 월드 좌표
+     *        관측치로 변환
      *
-     * @warning [ 반환 후 pos 의 의미가 바뀜 ]
-     * TopViewObject::pos 의 타입은 veda::LocalPoint 지만, 이 함수가 반환한 뒤에는
-     * 그 자리에 '도면 공통 월드 좌표'가 들어 있음 (수신 버퍼를 작업 버퍼로 재사용)
-     * -- 즉 이 호출 이후의 pos 를 로컬 좌표로 해석하면 안 됨
-     * -- 이 애매함이 유효한 구간은 Controller::processPipeline 안의
-     *    transform() ~ fuse() 사이 한 스텝뿐이며, fuse() 를 지나면 domain::WorldPoint 로
-     *    제대로 타입이 잡힘
+     * @param in   IFrameAggregator 가 묶어준 채널별 프레임 (카메라 로컬 좌표, 읽기 전용)
+     * @param out  변환 결과. 호출자가 소유·재사용하는 버퍼이며 구현체가 clear() 후 채움
+     *             (윈도우마다 새로 할당하지 않기 위해 반환값이 아닌 출력 인자로 받음)
      *
-     * @note 캘리브레이션이 없는 채널의 객체는 구현체가 폐기할 수 있음
-     *       (로컬 좌표를 월드 좌표인 척 통과시키면 위험 판정이 조용히 틀어지므로)
+     * @note [ 타입으로 경계를 강제함 ]
+     * 입력은 veda::TopViewFrame(로컬 좌표), 출력은 domain::ObservationFrame(월드 좌표)로
+     * 타입 자체가 다르다. 예전처럼 같은 버퍼를 in-place 로 덮어쓰지 않으므로, 로컬 좌표와
+     * 월드 좌표를 섞어 쓰는 실수는 런타임이 아니라 컴파일 타임에 걸린다
+     *
+     * @note 캘리브레이션이 없거나 월드 범위(worldBounds)를 벗어난 객체는 구현체가 폐기할 수 있음
+     *       (로컬 좌표를 월드 좌표인 척 통과시키면 zone 배정/위험 판정이 조용히 틀어지므로)
      */
-    virtual void transform(std::vector<veda::TopViewFrame>& frames) = 0;
+    virtual void transform(const std::vector<veda::TopViewFrame>& in,
+                           std::vector<domain::ObservationFrame>& out) = 0;
 };
