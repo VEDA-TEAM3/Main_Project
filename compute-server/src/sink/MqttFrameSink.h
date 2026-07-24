@@ -195,9 +195,11 @@ private:
 
     void publishFrame(const T& frame) noexcept {
         try {
-            const std::string payload = veda::encode(frame);
+            // Zero-DOM 직렬화: nlohmann DOM 트리를 프레임마다 새로 만들지 않고 재사용 버퍼에 직접
+            // append 한다. payloadBuf_ 는 clear() 로 capacity 를 유지하므로 warmup 이후 힙 할당이 없음.
+            veda::encodeInto(frame, payloadBuf_);
 
-            if (!transport_->publish(topic_, payload, qos_, false)) {
+            if (!transport_->publish(topic_, payloadBuf_, qos_, false)) {
                 recordDrop("transport publish failed");
                 return;
             }
@@ -207,7 +209,7 @@ private:
             // 프레임마다 도는 정상 경로라 Debug -- describe() 문자열 조립까지 레벨로 걸러냄
             if (isLogEnabled(LogLevel::Debug)) {
                 logDebug(iface_, "발행 성공 #" + std::to_string(count) + " topic=" + topic_ + " " + describe(frame) +
-                                     " bytes=" + std::to_string(payload.size()));
+                                     " bytes=" + std::to_string(payloadBuf_.size()));
             }
         } catch (const std::exception& error) {
             recordDrop(error.what());
@@ -224,6 +226,10 @@ private:
 
     /// @brief prepare() 결과를 담는 staging 버퍼. send() 는 파이프라인 스레드 전용이라 락 불필요
     T staging_;
+
+    /// @brief publishFrame 전용 재사용 직렬화 버퍼 (worker 스레드에서만 접근).
+    ///        clear() 로 capacity 를 유지 -> 프레임마다의 DOM/문자열 힙 할당 제거 (zero-DOM 직렬화)
+    std::string payloadBuf_;
 
     std::mutex queueMutex_;
     std::condition_variable queueChanged_;

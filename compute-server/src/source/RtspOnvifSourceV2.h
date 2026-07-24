@@ -31,6 +31,8 @@
 #include "domain/RawPacket.h"
 #include "interfaces/IMetadataSource.h"
 
+class RtspClientV2;
+
 /**
  * @brief   RtspClientV2의 push 콜백을 pull 인터페이스로 변환하는 어댑터 (최적화 버전)
  *
@@ -54,9 +56,15 @@ public:
     bool next(domain::RawPacket& out) override;
 
     /**
-     * @brief   워커 루프와 대기 중인 next()를 깨움 (멱등)
-     * @note    RTSP 워커는 recv() 타임아웃(5초)까지는 소켓에 묶여 있으므로,
-     *          여기서 돌아온 뒤 소멸자의 join 이 최대 그만큼 걸릴 수 있음
+     * @brief   워커 루프와 대기 중인 next()를 깨우고, 진행 중인 RTSP 세션을 즉시 취소 (멱등)
+     *
+     * @details
+     * 진행 중인 클라이언트에 cancel() 을 걸어 소켓에 shutdown(SHUT_RDWR) 을 하므로 블로킹 중인
+     * recv() 가 즉시 풀린다 -> 소멸자의 join 이 recv 타임아웃만큼 지연되지 않는다
+     *
+     * @warning 취소 '플래그'만으로는 부족하다: 스트림이 건강한 동안에는 recv() 가 계속 성공해
+     *          타임아웃이 나지 않으므로 run() 이 반환하지 않고 join 이 무한 대기한다
+     *          (그래서 소켓 shutdown 이 반드시 함께 필요함)
      */
     void stop() noexcept override;
 
@@ -92,6 +100,15 @@ private:
     AppConfig config_;
     std::atomic<bool> stopping_{false};
     std::thread worker_;
+
+    /// @name 진행 중인 RTSP 세션 취소 경로
+    /// @details stop() 이 워커가 붙들고 있는 클라이언트에 cancel() 을 걸 수 있도록 포인터를 공유한다.
+    ///          activeClient_ 는 clientMutex_ 로 보호되며, 워커는 클라이언트가 파괴되기 '전에' 반드시
+    ///          이 포인터를 nullptr 로 지운다 -> stop() 이 이미 죽은 객체를 만지는 UAF 를 막음
+    /// @{
+    std::mutex clientMutex_;
+    RtspClientV2* activeClient_ = nullptr;
+    /// @}
 
     std::mutex mtx_;
     std::condition_variable cv_;

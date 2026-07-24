@@ -109,8 +109,14 @@ int main() {
     pthread_kill(signalThread.native_handle(), SIGTERM);
     signalThread.join();
 
-    // 5) 명시적 파괴: Sink 큐 flush, MQTT 종료 신호("0") 발행, 스레드 join 이 여기서 일어남
+    // 5) 명시적 파괴: Sink 워커 정지, MQTT 종료 신호("0") 발행, 스레드 join 이 여기서 일어남
     //    (context 를 unique_ptr 로 둔 이유이기도 함)
+    //
+    //    [ 주의 ] Sink 큐는 flush 되지 '않는다'. MqttFrameSink::shutdown() 은 남아 있는 프레임을
+    //    drop 으로 집계하며 버린다 -- 실시간 좌표라 종료 시점의 잔여 프레임은 가치가 없고,
+    //    브로커가 죽어 있으면 flush 가 무한정 늘어질 수 있기 때문.
+    //    => SIGINT/SIGTERM 시 '마지막 프레임 전달'은 보장되지 않는다.
+    //       보장이 필요해지면 shutdown() 에 드레인 + 타임아웃을 넣어야 함 (지금은 의도적 미보장)
     context.reset();
 
     logSuccess(kIface, "정상 종료 (총 " + std::to_string(packetCount) + "개 패킷 처리)");
