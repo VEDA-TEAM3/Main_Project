@@ -47,18 +47,6 @@ void releaseMosquittoLibrary() noexcept {
 
 bool isValidQos(int qos) noexcept { return qos >= 0 && qos <= 2; }
 
-int riskRank(veda::RiskLevel level) noexcept {
-    switch (level) {
-        case veda::RiskLevel::Danger:
-            return 2;
-        case veda::RiskLevel::Warning:
-            return 1;
-        case veda::RiskLevel::None:
-            return 0;
-    }
-    return 0;
-}
-
 /// @brief AppConfig::mqttBrokerUrl 파싱 결과 (host/port/TLS 여부)
 struct ParsedBroker {
     std::string host = "172.20.27.174";
@@ -106,10 +94,19 @@ ParsedBroker parseBrokerUrl(const std::string& brokerUrl) {
     return parsed;
 }
 
-veda::RiskFrame toRiskFrame(const domain::WorldFrame& frame) {
-    veda::RiskFrame result;
-    result.ts = frame.timestamp;
-    result.objects.reserve(frame.objects.size());
+/// @brief WorldFrame 을 재사용 RiskFrame 버퍼(out)로 변환. out.objects 의 capacity 를 재사용해
+///        프레임마다의 벡터 재할당을 없앤다 (send() 파이프라인 단일 스레드에서만 호출됨).
+///        재사용 버퍼라 v/ts/level 은 매번 명시적으로 초기화해야 이전 프레임 값이 새지 않는다.
+///
+/// [Rule 4] 프레임 전체 위험도(out.level)는 여기서 재계산하지 않고 ThresholdRiskPolicy 가
+///          zoneLevels(=HW 로 나가는 값)의 max 로 확정해 실어준 frame.level 을 그대로 읽는다.
+///          -> UI 로 나가는 전체 위험도와 HW 채널 위험도가 항상 같은 소스에서 파생된다.
+void fillRiskFrame(const domain::WorldFrame& frame, veda::RiskFrame& out) {
+    out.v = veda::kSchemaVersion;
+    out.ts = frame.timestamp;
+    out.level = frame.level;  // 단일 진실 공급원: 위험 정책이 확정한 값 (재계산 금지)
+    out.objects.clear();      // capacity 유지 -> warmup 이후 재할당 없음
+    out.objects.reserve(frame.objects.size());
 
     for (const domain::WorldObject& source : frame.objects) {
         veda::RiskObject object;
@@ -119,13 +116,8 @@ veda::RiskFrame toRiskFrame(const domain::WorldFrame& frame) {
         object.level = source.riskLevel;
         object.nearest = source.nearestObj;
         object.dist = source.nearestDist;
-        result.objects.push_back(object);
-
-        if (riskRank(source.riskLevel) > riskRank(result.level)) {
-            result.level = source.riskLevel;
-        }
+        out.objects.push_back(object);
     }
-    return result;
 }
 
 }  // namespace
@@ -277,12 +269,54 @@ void MqttTransport::send(const domain::WorldFrame& frame) {
             return;
         }
 
-        const std::string payload = veda::encode(toRiskFrame(frame));
-        publish(publishTopic_, payload, veda::qos::kRisk, false);
+        // Zero-DOM: WorldFrame -> 재사용 RiskFrame(riskScratch_) -> 재사용 버퍼(riskPayloadBuf_)에
+        // 직접 직렬화. nlohmann DOM 을 프레임마다 만들지 않으므로 warmup 이후 힙 할당이 없음.
+        // riskScratch_/riskPayloadBuf_ 는 send()(파이프라인 단일 스레드)에서만 접근하므로 락 불필요.
+        fillRiskFrame(frame, riskScratch_);
+        veda::encodeInto(riskScratch_, riskPayloadBuf_);
+        publish(publishTopic_, riskPayloadBuf_, veda::qos::kRisk, false);
     } catch (const std::exception& error) {
         logError(kIface, std::string("WorldFrame 발행 실패: ") + error.what());
     } catch (...) {
         logError(kIface, "WorldFrame 발행 실패: 알 수 없는 예외");
+    }
+}
+
+void MqttTransport::sendChannelStatus(const veda::ChannelStatus& status) {
+    try {
+        // 상태 전환 이벤트라 호출 빈도가 낮음 -- RiskFrame(send())과 달리 rate-limit 없이
+        // 모든 분기에서 로그를 남겨도 도배되지 않음. 여기서 로그를 안 남기면 "연결이 안 되어
+        // 조용히 스킵됨"과 "정상 발행됨"을 로그만으로 구분할 수 없어서 원인 추적이 불가능해짐
+        const std::string label = "ch=" + std::to_string(status.ch) +
+                                  " cameraAlive=" + (status.cameraAlive ? "true" : "false") +
+                                  " hardwareAlive=" + (status.hardwareAlive ? "true" : "false");
+
+        if (!isRunning() && !start()) {
+            logError(kIface, "ChannelStatus 발행 실패 - transport 시작 안 됨 (" + label + ")");
+            return;
+        }
+        if (!isConnected()) {
+            // 연결이 끊긴 동안의 전환은 발행되지 않지만, retained 라 브로커에는 직전 값이
+            // 그대로 남아있으므로 재연결 후 다음 상태 전환이 오면 최신화됨 (RiskFrame과 동일 정책)
+            logError(kIface, "ChannelStatus 발행 안 함 - MQTT 미연결 (" + label + ")");
+            return;
+        }
+
+        const std::string topic = veda::topic::hwStatus(status.ch);
+        const std::string payload = veda::encode(status);
+        // retain=true: 클라이언트가 재접속했을 때 마지막 상태를 즉시 받도록
+        // (compute-server의 topic::alive(ch) LWT와 동일한 패턴)
+        if (publish(topic, payload, veda::qos::kHwStatus, /*retain=*/true)) {
+            logSuccess(kIface, "ChannelStatus 발행 성공 topic=" + topic + " (" + label + ")");
+        } else {
+            // publish() 내부의 실제 mosquitto_publish() 실패는 publish()가 자체적으로 로그를 남김
+            // 여기서는 그 앞단(연결 상태 재확인 등)에서 조용히 실패한 경우까지 잡기 위한 안전망
+            logError(kIface, "ChannelStatus 발행 실패 topic=" + topic + " (" + label + ")");
+        }
+    } catch (const std::exception& error) {
+        logError(kIface, std::string("ChannelStatus 발행 실패: ") + error.what());
+    } catch (...) {
+        logError(kIface, "ChannelStatus 발행 실패: 알 수 없는 예외");
     }
 }
 

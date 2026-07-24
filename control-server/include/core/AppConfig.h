@@ -5,6 +5,8 @@
  * @brief   관제 서버의 전체 구동 설정값을 담는 구조체
  */
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -25,13 +27,6 @@ struct RiskConfig {
     double dedupMergeDistance = 1.0;  ///< m, 채널 간 dedup 병합 판정 거리
 
     /**
-     * @brief   사람이 감지된 것만으로 해당 zone 을 Warning 으로 올릴지 여부
-     * @details Contract.h 의 RiskLevel 정의(`Warning = 사람 감지 or 거리 이내`)에 맞춘 동작
-     *          예전 구현은 차량이 있을 때만 평가해서 사람만 있으면 항상 None 이었음
-     */
-    bool warnOnHumanPresence = true;
-
-    /**
      * @brief   같은 실체를 프레임 간에 이어붙일 최대 이동 거리 (m)
      * @details 이 거리 안에서 같은 클래스면 이전 프레임의 GlobalId 를 물려받음
      *          0 이하면 추적을 끄고 매 프레임 새 gid 를 부여 (예전 동작)
@@ -43,24 +38,58 @@ inline void from_json(const nlohmann::json& j, RiskConfig& r) {
     r.warningDistance = veda::detail::get_or<double>(j, "warningDistance", r.warningDistance);
     r.dangerousDistance = veda::detail::get_or<double>(j, "dangerousDistance", r.dangerousDistance);
     r.dedupMergeDistance = veda::detail::get_or<double>(j, "dedupMergeDistance", r.dedupMergeDistance);
-    r.warnOnHumanPresence = veda::detail::get_or<bool>(j, "warnOnHumanPresence", r.warnOnHumanPresence);
     r.trackMaxDistance = veda::detail::get_or<double>(j, "trackMaxDistance", r.trackMaxDistance);
 }
 
 /**
- * @brief   채널별 zone 배정 각도 구간 (atan2 기반, 원점 = 사거리 중심)
- * @note    전체 zoneBoundaries 의 각도 구간 합은 360도여야 함 (등분 아님 — 실측값)
+ * @brief   월드 좌표를 하드웨어 zone 에 배정하는 축 정렬 경계 상자 (AABB)
+ *
+ * @details 전역 주차장 도면 위에 미리 계산된 사각형 영역. 객체의 월드 좌표 (x,y) 가
+ *          [minX,maxX] × [minY,maxY] 안에 들면(경계 포함) 그 zoneId 로 배정된다.
+ *          각도 기반(원점 pie-slice) 방식을 대체 — 카메라가 도면 전역에 흩어져 있어도
+ *          객체의 '실제 위치'로 배정하므로 100m 떨어진 다른 교차로가 엉뚱한 zone 으로
+ *          새지 않는다.
+ *
+ * @note    zoneId 는 하드웨어 액추에이터 채널과 동일 정수다 (zoneId == channelId, 디스패치 계약).
+ *          zones 는 서로 겹치지 않는 것을 전제로 하며, 겹치면 선언 순서상 먼저가 이긴다
+ *          (SpatialZoneMapper = first-match wins). 어느 상자에도 안 들면 zoneId = -1.
  */
-struct ZoneBoundary {
-    veda::ChannelId channelId = -1;
-    double angleMinDeg = 0.0;
-    double angleMaxDeg = 0.0;
+struct SpatialZone {
+    veda::ChannelId zoneId = -1;
+    double minX = 0.0;
+    double maxX = 0.0;
+    double minY = 0.0;
+    double maxY = 0.0;
 };
 
-inline void from_json(const nlohmann::json& j, ZoneBoundary& z) {
-    z.channelId = veda::detail::get_or<veda::ChannelId>(j, "channelId", -1);
-    z.angleMinDeg = veda::detail::get_or<double>(j, "angleMinDeg", 0.0);
-    z.angleMaxDeg = veda::detail::get_or<double>(j, "angleMaxDeg", 0.0);
+/**
+ * @brief   도면 공통 월드 좌표의 유효 범위 (로컬→월드 변환 결과 sanity check)
+ * @details compute-server 의 localBounds 와 같은 역할. cameraPosX/Y 오타 같은 캘리브레이션
+ *          오류로 도면 밖에 사상된 객체를 걸러낸다 (그냥 두면 zone/위험 판정이 조용히 틀어짐)
+ * @note    enabled=false 면 검사하지 않음 (기본값)
+ */
+struct WorldBounds {
+    bool enabled = false;
+    double minX = 0.0;
+    double maxX = 0.0;
+    double minY = 0.0;
+    double maxY = 0.0;
+};
+
+inline void from_json(const nlohmann::json& j, WorldBounds& b) {
+    b.enabled = veda::detail::get_or<bool>(j, "enabled", b.enabled);
+    b.minX = veda::detail::get_or<double>(j, "minX", b.minX);
+    b.maxX = veda::detail::get_or<double>(j, "maxX", b.maxX);
+    b.minY = veda::detail::get_or<double>(j, "minY", b.minY);
+    b.maxY = veda::detail::get_or<double>(j, "maxY", b.maxY);
+}
+
+inline void from_json(const nlohmann::json& j, SpatialZone& z) {
+    z.zoneId = veda::detail::get_or<veda::ChannelId>(j, "zoneId", -1);
+    z.minX = veda::detail::get_or<double>(j, "minX", 0.0);
+    z.maxX = veda::detail::get_or<double>(j, "maxX", 0.0);
+    z.minY = veda::detail::get_or<double>(j, "minY", 0.0);
+    z.maxY = veda::detail::get_or<double>(j, "maxY", 0.0);
 }
 
 /**
@@ -122,7 +151,7 @@ inline void from_json(const nlohmann::json& j, SimulationConfig& s) {
  *
  * @details
  * facingAngleDeg:  나침반 규약 — 북(도면 위쪽)=0도, 시계 방향(오른쪽) 증가
- *                  atan2 규약(zoneBoundaries 등)으로는 normalize(90 - facingAngleDeg)로 변환
+ *                  월드 좌표계 atan2 규약으로는 normalize(90 - facingAngleDeg)로 변환
  * lateralSign:     로컬 +x(좌우 오프셋)가 카메라 전방 기준 (오른쪽이면 +1, 왼쪽이면 -1)
  */
 struct CameraCalibration {
@@ -157,16 +186,30 @@ struct AppConfig {
     bool logToFile = true;
     int logFlushIntervalMs = 500;
     int logMaxPendingEntries = 10000;
+
+    /// @brief 로그 CSV 파일 이름 (작업 디렉터리 기준). 회전/압축/보존은 logrotate 가 담당하므로
+    ///        반드시 고정 이름이어야 함 (날짜별 이름을 쓰면 logrotate 와 이중 회전이 됨)
+    std::string logFileName = "veda.csv";
     /** @} */
 
     // [위험도 정책 설정]
     RiskConfig risk;
 
-    // [zone 배정 설정]
-    std::vector<ZoneBoundary> zoneBoundaries;
+    // [zone 배정 설정 — 전역 도면상의 공간 경계 상자]
+    /**
+     * @brief   객체를 하드웨어 zone(액추에이터 채널)에 배정하는 공간 경계 상자 목록 (AABB)
+     *
+     * @note 공간 상자는 본질적으로 현장 도면 실측값이라 의미 있는 범용 기본값이 없다.
+     *       비워 두면 모든 객체가 zoneId=-1(미배정)로 남아 알람이 울리지 않으므로(안전한 실패),
+     *       실제 배포에서는 반드시 config.json 의 "zones" 로 채울 것. SpatialZone 참고.
+     */
+    std::vector<SpatialZone> zones;
 
     // [좌표 변환 설정 — 채널별 카메라 캘리브레이션]
     std::vector<CameraCalibration> cameraCalibrations;
+
+    // [좌표 변환 결과 유효 범위 — 캘리브레이션 오류로 도면 밖에 사상된 객체를 폐기]
+    WorldBounds worldBounds;
 
     // [HW 헬스체크 설정]
     HwHealthCheckConfig hwHealthCheck;
@@ -229,11 +272,59 @@ struct AppConfig {
         config.logToFile = veda::detail::get_or<bool>(j, "logToFile", config.logToFile);
         config.logFlushIntervalMs = veda::detail::get_or<int>(j, "logFlushIntervalMs", config.logFlushIntervalMs);
         config.logMaxPendingEntries = veda::detail::get_or<int>(j, "logMaxPendingEntries", config.logMaxPendingEntries);
+        config.logFileName = veda::detail::get_or<std::string>(j, "logFileName", config.logFileName);
+        if (config.logFileName.empty()) {
+            std::cerr << "[Config] 경고: logFileName 이 비어 있습니다 — 기본값(veda.csv)을 사용합니다.\n";
+            config.logFileName = "veda.csv";
+        }
         config.risk = veda::detail::get_or<RiskConfig>(j, "risk", config.risk);
-        config.zoneBoundaries =
-            veda::detail::get_or<std::vector<ZoneBoundary>>(j, "zoneBoundaries", config.zoneBoundaries);
+        config.zones = veda::detail::get_or<std::vector<SpatialZone>>(j, "zones", config.zones);
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
+        config.worldBounds = veda::detail::get_or<WorldBounds>(j, "worldBounds", config.worldBounds);
+
+        if (config.worldBounds.enabled &&
+            (config.worldBounds.maxX <= config.worldBounds.minX || config.worldBounds.maxY <= config.worldBounds.minY)) {
+            std::cerr << "[Config] 경고: worldBounds 범위가 비어 있습니다 (max <= min) — 범위 검사를 끕니다.\n";
+            config.worldBounds.enabled = false;
+        }
+
+        // [캘리브레이션 값 검증] AppConfig 는 예외를 던지지 않으므로 경고 + 보정만 한다.
+        // 값이 조용히 잘못되면 좌표가 통째로 틀어지는데도 아무 증상이 없어서 추적이 매우 어렵다
+        for (std::size_t i = 0; i < config.cameraCalibrations.size(); ++i) {
+            CameraCalibration& cal = config.cameraCalibrations[i];
+
+            // 방위각을 [0,360) 으로 정규화 (음수/360 초과 입력 허용)
+            const double rawFacing = cal.facingAngleDeg;
+            cal.facingAngleDeg = std::fmod(cal.facingAngleDeg, 360.0);
+            if (cal.facingAngleDeg < 0.0)
+                cal.facingAngleDeg += 360.0;
+            if (std::abs(rawFacing - cal.facingAngleDeg) > 1e-9) {
+                std::cerr << "[Config] 경고: 채널 " << cal.channelId << " facingAngleDeg=" << rawFacing
+                          << " 를 [0,360) 으로 정규화했습니다 -> " << cal.facingAngleDeg << "\n";
+            }
+
+            // lateralSign 은 +1 / -1 만 유효. 0 이나 2 같은 오타를 통과시키면 좌우가 조용히 뒤집힘
+            if (cal.lateralSign != 1 && cal.lateralSign != -1) {
+                const int corrected = (cal.lateralSign > 0) ? 1 : -1;
+                std::cerr << "[Config] 경고: 채널 " << cal.channelId << " lateralSign=" << cal.lateralSign
+                          << " 은 +1 또는 -1 이어야 합니다 — " << corrected << " 로 보정합니다.\n";
+                cal.lateralSign = corrected;
+            }
+
+            if (cal.channelId < 0 || cal.channelId >= config.channelCount) {
+                std::cerr << "[Config] 경고: cameraCalibrations 의 channelId=" << cal.channelId << " 가 범위 [0, "
+                          << config.channelCount << ") 밖입니다 — 이 항목은 사용되지 않습니다.\n";
+            }
+
+            for (std::size_t k = 0; k < i; ++k) {
+                if (config.cameraCalibrations[k].channelId == cal.channelId) {
+                    std::cerr << "[Config] 경고: cameraCalibrations 에 channelId=" << cal.channelId
+                              << " 항목이 중복되었습니다 — 첫 번째 항목만 사용됩니다.\n";
+                    break;
+                }
+            }
+        }
         config.hwHealthCheck = veda::detail::get_or<HwHealthCheckConfig>(j, "hwHealthCheck", config.hwHealthCheck);
         config.simulation = veda::detail::get_or<SimulationConfig>(j, "simulation", config.simulation);
         config.mqttBrokerUrl = veda::detail::get_or<std::string>(j, "mqttBrokerUrl", config.mqttBrokerUrl);

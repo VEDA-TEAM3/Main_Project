@@ -18,16 +18,48 @@
 #include "Contract.h"
 #include "domain/RiskEvaluation.h"
 
+/**
+ * @brief   STM32가 상행(veda_uplink_packet_t, driver_protocol.h)으로 보고하는 실제 표시 상태
+ *
+ * @warning [ STRICT 계약 — alive 와 반드시 함께 해석할 것 ]
+ * 이 필드들은 alive 로 게이트되어야 하는 값이다:
+ *  - alive=true  : 실시간 유효값
+ *  - alive=false : watchdog timeout 직전 '마지막으로 확인된' 값(=stale) -- 최신값이 아니다
+ * StatusCallback 수신 측(Controller)은 이 값을 그대로 보존해 veda::ChannelStatus 로 전달하고,
+ * 최종 소비자(Qt)까지 동일한 계약이 이어진다. 어느 계층도 alive 를 무시한 채 표시 상태만
+ * 활성으로 해석해서는 안 된다. (하류 계약: Contract.h::ChannelStatus 의 클라이언트 계약)
+ */
+struct HwIndicatorState {
+    bool sirenOn = false;
+    bool buzzerOn = false;
+    bool ledRed = false;
+    bool ledYellow = false;
+    bool ledGreen = false;
+
+    bool operator==(const HwIndicatorState&) const = default;
+};
+
 class IHwEventDispatcher {
 public:
     virtual ~IHwEventDispatcher() = default;
 
     /**
-     * @brief STM32 하트비트(상태 보고) 수신 시 호출될 콜백 함수 타입
-     * @param ch 보고를 보낸 채널
-     * @param alive 정상 응답 여부 (false = missedBeatsForTimeout초과로 dead 판정)
+     * @brief STM32 상태 보고(ACK/HEARTBEAT) 수신 시 호출될 콜백 함수 타입
+     * @param ch          보고를 보낸 채널
+     * @param alive       정상 응답 여부 (false = missedBeatsForTimeout초과로 dead 판정)
+     * @param indicators  그 채널이 실제로 켜고 있는 경광등/부저/LED 상태
+     *
+     * @note alive 와 indicators 중 하나라도 바뀌면 호출됨 (변화 없으면 호출 안 됨).
+     *       alive=false 로 호출될 때의 indicators 는 끊기기 직전 마지막으로 확인된 값이다.
      */
-    using StatusCallback = std::function<void(veda::ChannelId ch, bool alive)>;
+    using StatusCallback = std::function<void(veda::ChannelId ch, bool alive, const HwIndicatorState& indicators)>;
+
+    /**
+     * @brief 명령-실제상태 불일치가 재시도 소진 후에도 해소되지 않을 때 호출될 콜백 함수 타입
+     * @param ch 대상 채널
+     * @param faulted true = 재시도 소진 후 에스컬레이션(불일치 지속), false = 해소되어 정상 복귀
+     */
+    using FaultCallback = std::function<void(veda::ChannelId ch, bool faulted)>;
 
     /**
      * @brief 위험 평가 결과를 UART 이벤트로 통지 (하행)
@@ -45,4 +77,10 @@ public:
      * @param callback 하트비트 수신 시 실행할 함수
      */
     virtual void setStatusCallback(StatusCallback callback) = 0;
+
+    /**
+     * @brief 명령-실제상태 불일치 에스컬레이션 콜백 등록 (상행)
+     * @param callback 재시도 소진/해소 시 실행할 함수
+     */
+    virtual void setFaultCallback(FaultCallback callback) = 0;
 };

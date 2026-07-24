@@ -54,6 +54,14 @@ void MqttChannelReceiver::start() {
         return;
     }
 
+    // PipelineWorker 를 먼저 띄운다 (메시지가 들어오기 전에 소비자 준비). mosquitto 콜백 스레드를
+    // 무거운 디코드/fusion 으로부터 보호하기 위한 전용 파이프라인 스레드.
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queueStopping_ = false;
+    }
+    pipelineThread_ = std::thread(&MqttChannelReceiver::pipelineLoop, this);
+
     transport_->setMessageHandler(
         [this](std::string_view topic, std::string_view payload) { handleMessage(topic, payload); });
     transport_->setConnectionHandler([this](bool connected, int) { handleConnection(connected); });
@@ -73,6 +81,17 @@ void MqttChannelReceiver::stop() {
     if (retryThread_.joinable()) {
         retryThread_.join();
     }
+
+    // PipelineWorker 정지: 남은 큐는 버리고 워커를 join (running_=false 이후라 새 enqueue 는 없음)
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queueStopping_ = true;
+    }
+    queueCv_.notify_all();
+    if (pipelineThread_.joinable()) {
+        pipelineThread_.join();
+    }
+
     if (transport_ != nullptr) {
         // transport_는 sink(발행 경로)와 공유하는 연결이므로 여기서 stop()하지 않고
         // 이 receiver가 등록한 핸들러만 해제함 (연결 자체의 수명주기는 AppContext 몫)
@@ -121,10 +140,44 @@ std::uint64_t MqttChannelReceiver::droppedCount() const noexcept {
 }
 
 void MqttChannelReceiver::handleMessage(std::string_view topic, std::string_view payload) noexcept {
+    // [네트워크 스레드 분리] mosquitto 콜백 스레드에서는 payload 를 복사해 큐에 넣기만 한다.
+    // 무거운 nlohmann 디코드 + fusion/dispatch 는 pipelineLoop(워커 스레드)에서 수행 -> 파이프라인이
+    // 밀려도 mosquitto 네트워크 수신 루프가 막히지 않는다 (Principle #7: 네트워크 스레드 보호).
     if (!running_.load(std::memory_order_acquire)) {
         return;
     }
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if (queueStopping_) {
+            return;
+        }
+        if (queue_.size() >= kMaxQueuedMessages) {
+            queue_.pop_front();  // drop-oldest: 실시간 좌표라 오래된 프레임보다 최신이 항상 유용
+            queueDroppedCount_.fetch_add(1, std::memory_order_relaxed);
+        }
+        queue_.push_back(RawMessage{std::string(topic), std::string(payload)});
+    }
+    queueCv_.notify_one();
+}
 
+void MqttChannelReceiver::pipelineLoop() noexcept {
+    while (true) {
+        RawMessage message;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueCv_.wait(lock, [this] { return queueStopping_ || !queue_.empty(); });
+            if (queueStopping_) {
+                return;  // 종료: 남은 큐는 버리고 빠져나감
+            }
+            message = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        // 무거운 작업(디코드 + fusion/dispatch 파이프라인 전체)은 전부 이 워커 스레드에서 수행
+        processMessage(message.topic, message.payload);
+    }
+}
+
+void MqttChannelReceiver::processMessage(std::string_view topic, std::string_view payload) noexcept {
     if (const auto channel = parseChannel(topic, "/topview")) {
         const veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
         if (!isValidTopViewFrame(frame, channelCount_)) {

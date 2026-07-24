@@ -54,3 +54,13 @@ void ConsoleSink::send(const domain::WorldFrame& frame) {
     logSuccess(kIface, std::to_string(frame.objects.size()) + "개 객체 전송 (Danger " + std::to_string(dangerCount) +
                            "개, Warning " + std::to_string(warningCount) + "개)");
 }
+
+void ConsoleSink::sendChannelStatus(const veda::ChannelStatus& status) {
+    const std::string cameraIcon = status.cameraAlive ? "🟢" : "🔴";
+    const std::string hardwareIcon = status.hardwareAlive ? "🟢" : "🔴";
+    std::cout << "[Sink] 채널 " << status.ch << " 상태 변경 - 카메라 " << cameraIcon << " / STM32 " << hardwareIcon
+              << "\n";
+    logSuccess(kIface, "채널 " + std::to_string(status.ch) +
+                           " 상태 발행: cameraAlive=" + (status.cameraAlive ? "true" : "false") +
+                           ", hardwareAlive=" + (status.hardwareAlive ? "true" : "false"));
+}

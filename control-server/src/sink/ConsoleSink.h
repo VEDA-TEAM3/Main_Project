@@ -13,4 +13,5 @@ public:
     ~ConsoleSink() override = default;
 
     void send(const domain::WorldFrame& frame) override;
+    void sendChannelStatus(const veda::ChannelStatus& status) override;
 };

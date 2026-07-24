@@ -14,7 +14,6 @@ ThresholdRiskPolicy::ThresholdRiskPolicy(std::shared_ptr<IDistanceMetric> metric
     : metric_(std::move(metric)),
       warningDistance_(risk.warningDistance),
       dangerousDistance_(risk.dangerousDistance),
-      warnOnHumanPresence_(risk.warnOnHumanPresence),
       channelCount_(channelCount) {}
 
 domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) {
@@ -80,10 +79,10 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
             }
         }
 
-        // 최근접 대상이 이 위험 상황에 관여된 당사자이므로, 그 객체의 riskLevel 도
-        // 함께 갱신한다 (대시보드가 "누가 위험한지"를 개별 마커로 표시할 수 있도록).
-        // 한 객체가 여러 차량의 최근접 대상일 수 있으므로 더 높은 레벨로만 덮어씀
-        // (Danger 로 이미 표시된 걸 나중 순회의 Warning 이 깎아내리지 않도록).
+        // [Rule 3] 상호 위험 부여: 판정된 위험 레벨을 차량뿐 아니라 그 위험에 얽힌
+        // 최근접 객체(사람이든 차량이든)에도 부여한다 (대시보드가 "누가 위험한지"를 개별
+        // 마커로 표시). 한 객체가 여러 차량의 최근접 대상일 수 있으므로 더 높은 레벨로만
+        // 덮어쓴다 (Danger 로 이미 표시된 걸 나중 순회의 Warning 이 깎아내리지 않도록).
         if (vehicle.riskLevel != veda::RiskLevel::None) {
             for (auto& other : frame.objects) {
                 if (other.gid == nearestGid && vehicle.riskLevel > other.riskLevel) {
@@ -92,10 +91,11 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
             }
         }
 
-        // zone 집계 — zoneId 미배정/범위 밖이면 집계 제외 (크래시 방지, 로그만 남김)
-        // 주의: zone 집계는 차량의 riskLevel 만 반영한다. 사람에게 전파된 riskLevel은
-        // 대시보드 표시 전용이며, HW 이벤트 통지(zoneLevels)에는 영향을 주지 않는다 —
-        // HW는 이미 이 차량 자체의 판정을 통해 해당 zone 에 반영되었기 때문에 중복 집계 불필요.
+        // [Rule 5] 채널(zone) 위험도 = 그 채널 안 '차량'들의 riskLevel max.
+        // 사람에게 전파된 riskLevel(Rule 3)은 여기 집계하지 않는다 — HW/UI 로 나가는
+        // 채널 위험도는 오직 차량 판정으로만 결정된다 (그 위험은 이미 차량 자신을 통해
+        // 해당 zone 에 반영됨).
+        // zoneId 미배정/범위 밖이면 집계 제외 (크래시 방지, 로그만 남김).
         if (vehicle.zoneId < 0 || vehicle.zoneId >= channelCount_) {
             logError(kIface, "gid=" + std::to_string(vehicle.gid) + " zoneId 미배정 또는 범위 밖(" +
                                  std::to_string(vehicle.zoneId) + "), zone 집계에서 제외");
@@ -111,22 +111,17 @@ domain::RiskEvaluation ThresholdRiskPolicy::evaluate(domain::WorldFrame& frame) 
         }
     }
 
-    // Contract.h 의 RiskLevel 정의: `Warning = 사람 감지 or 거리 warningDistance 이내`
-    // -- 차량이 한 대도 없어도 사람이 있으면 그 zone 은 최소 Warning 이어야 함
-    //    (차량 기준 루프만 돌면 주차장에 사람만 있는 상황이 통째로 None 이 됨)
-    // 이미 Danger 로 올라간 zone 은 깎지 않도록 '올리기만' 함
-    if (warnOnHumanPresence_) {
-        for (const auto& object : frame.objects) {
-            if (object.cls != veda::ObjectClass::Human)
-                continue;
-            if (object.zoneId < 0 || object.zoneId >= channelCount_)
-                continue;
-
-            auto& zone = eval.zoneLevels[static_cast<size_t>(object.zoneId)];
-            if (zone.level < veda::RiskLevel::Warning)
-                zone.level = veda::RiskLevel::Warning;
-        }
+    // [Rule 4] UI == HW 단일 진실 공급원.
+    // 프레임 전체 위험도(UI RiskFrame.level 이 읽음)를 여기서 '채널별 위험도(zoneLevels,
+    // HW/UART 로 나가는 값)의 max' 로 확정해 frame 에 실어 보낸다. sink(MqttTransport)는
+    // 이 값을 그대로 읽기만 하고 재계산하지 않으므로, UI 전체 위험도와 HW 채널 위험도가
+    // 반드시 같은 소스에서 파생된다.
+    veda::RiskLevel overall = veda::RiskLevel::None;
+    for (const auto& zone : eval.zoneLevels) {
+        if (zone.level > overall)
+            overall = zone.level;
     }
+    frame.level = overall;
 
     return eval;
 }
