@@ -194,11 +194,15 @@ inline ObjectClass objectClassFromString(std::string_view s) {
 
 /**
  * @brief 위험 레벨
+ *
+ * @note [ 차량 중심 판정 — 차량 없으면 무조건 None ]
+ * 위험은 오직 "검출된 차량 기준 최근접 객체까지의 거리"로만 판정한다.
+ * 차량이 한 대도 없으면 (사람만 있어도) 레벨은 항상 None 이다.
  */
 enum class RiskLevel {
-    None = 0,  ///< 사람 감지 X
-    Warning,   ///< 사람 감지 or 객체 간 거리 warningDistance 이내
-    Danger,    ///< 객체 간 거리 dangerousDistance 이내
+    None = 0,  ///< 위험 없음 (차량 미검출 또는 차량-최근접객체 거리 > warningDistance)
+    Warning,   ///< 차량-최근접객체 거리 warningDistance 이내
+    Danger,    ///< 차량-최근접객체 거리 dangerousDistance 이내
 };
 
 /// @brief RiskLevel을 문자열로 변환
