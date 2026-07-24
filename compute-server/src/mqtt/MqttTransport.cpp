@@ -137,47 +137,58 @@ bool MqttTransport::initializeClient() noexcept {
     }
     libraryAcquired_ = true;
 
-    {
-        std::lock_guard<std::mutex> lock(clientMutex_);
-        client_ = mosquitto_new(clientId_.c_str(), true, this);
-    }
-    if (client_ == nullptr) {
+    // [초기화 경합 차단] 설정이 끝나기 전에는 멤버(client_)에 공개하지 않는다. 로컬 포인터로
+    // 완전히 구성한 뒤에야 clientMutex_ 아래에서 대입 -> publish() 가 '반쯤 설정된' 클라이언트를
+    // 보거나, 설정 호출과 mosquitto_publish 가 동시에 같은 핸들을 만지는 일이 없음
+    mosquitto* client = mosquitto_new(clientId_.c_str(), true, this);
+    if (client == nullptr) {
         logError(kIface, "mosquitto_new 실패");
-        destroyClient();
+        destroyClient();  // client_ 는 아직 nullptr -> 라이브러리 참조만 반납
         return false;
     }
 
-    mosquitto_connect_callback_set(client_, &MqttTransport::onConnect);
-    mosquitto_disconnect_callback_set(client_, &MqttTransport::onDisconnect);
-    mosquitto_reconnect_delay_set(client_, static_cast<unsigned int>(reconnectDelaySec_),
+    mosquitto_connect_callback_set(client, &MqttTransport::onConnect);
+    mosquitto_disconnect_callback_set(client, &MqttTransport::onDisconnect);
+    mosquitto_reconnect_delay_set(client, static_cast<unsigned int>(reconnectDelaySec_),
                                   static_cast<unsigned int>(reconnectDelayMaxSec_), true);
 
     // LWT: 접속 '이전'에 걸어야 브로커가 유언으로 등록함 (접속 후에는 늦음)
-    int result = mosquitto_will_set(client_, aliveTopic_.c_str(), static_cast<int>(kDeadPayload.size()),
+    int result = mosquitto_will_set(client, aliveTopic_.c_str(), static_cast<int>(kDeadPayload.size()),
                                     kDeadPayload.data(), veda::qos::kAlive, true);
     if (result != MOSQ_ERR_SUCCESS)
         logError(kIface, std::string("LWT 설정 실패: ") + mosquitto_strerror(result));
 
     if (result == MOSQ_ERR_SUCCESS)
-        result = mosquitto_int_option(client_, MOSQ_OPT_PROTOCOL_VERSION, MQTT_PROTOCOL_V311);
+        result = mosquitto_int_option(client, MOSQ_OPT_PROTOCOL_VERSION, MQTT_PROTOCOL_V311);
 
     if (result == MOSQ_ERR_SUCCESS)
-        result = mosquitto_tls_set(client_, caFile_.c_str(), nullptr, nullptr, nullptr, nullptr);
+        result = mosquitto_tls_set(client, caFile_.c_str(), nullptr, nullptr, nullptr, nullptr);
 
     if (result == MOSQ_ERR_SUCCESS) {
         // false: 브로커 인증서의 IP/SAN을 정상적으로 검증
-        result = mosquitto_tls_insecure_set(client_, false);
+        result = mosquitto_tls_insecure_set(client, false);
     }
 
     if (result == MOSQ_ERR_SUCCESS)
-        result = mosquitto_connect_async(client_, host_.c_str(), port_, keepAliveSeconds_);
-
-    if (result == MOSQ_ERR_SUCCESS)
-        result = mosquitto_loop_start(client_);
+        result = mosquitto_connect_async(client, host_.c_str(), port_, keepAliveSeconds_);
 
     if (result != MOSQ_ERR_SUCCESS) {
         logError(kIface, std::string("초기화 실패: ") + mosquitto_strerror(result));
-        destroyClient();
+        mosquitto_destroy(client);  // 아직 멤버가 아니므로 destroyClient() 가 정리하지 못함
+        destroyClient();            // 라이브러리 참조/플래그만 되돌림
+        return false;
+    }
+
+    // loop_start '이전'에 공개해야 onConnect 콜백의 생존신호 publish() 가 client_ 를 찾을 수 있음
+    {
+        std::lock_guard<std::mutex> lock(clientMutex_);
+        client_ = client;
+    }
+
+    result = mosquitto_loop_start(client);
+    if (result != MOSQ_ERR_SUCCESS) {
+        logError(kIface, std::string("네트워크 loop 시작 실패: ") + mosquitto_strerror(result));
+        destroyClient();  // 이제 멤버에 있으므로 정상 경로로 정리됨
         return false;
     }
 
@@ -215,6 +226,10 @@ void MqttTransport::stop() noexcept {
     if (!stopping_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
         return;
 
+    // retryMutex_ 를 한 번 잡았다 놓은 뒤 notify: 그냥 notify 만 하면 retryLoop 가 "술어를 false 로
+    // 평가한 뒤 wait_for 에 진입하기 전" 구간에 알림이 끼어들어 놓치고, wait_for 타임아웃
+    // (mqttRetryIntervalMs)만큼 stop() 이 지연된다 (MqttFrameSink::start 와 동일한 패턴)
+    { std::lock_guard<std::mutex> lock(retryMutex_); }
     retryCv_.notify_all();
     if (retryThread_.joinable())
         retryThread_.join();

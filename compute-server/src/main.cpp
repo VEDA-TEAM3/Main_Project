@@ -37,14 +37,25 @@ constexpr const char* kIface = "Main";
  *           스레드가 시그널을 가로채지 않고 이 스레드만 받게 됨)
  */
 void waitForShutdownSignal(sigset_t mask, IMetadataSource& source) {
-    int signalNumber = 0;
-    if (sigwait(&mask, &signalNumber) != 0) {
-        logError(kIface, "sigwait 실패 - 시그널 감시 스레드를 종료함");
+    for (;;) {
+        int signalNumber = 0;
+        if (sigwait(&mask, &signalNumber) != 0) {
+            logError(kIface, "sigwait 실패 - 시그널 감시 스레드를 종료함");
+            return;
+        }
+
+        // SIGHUP: logrotate 가 파일을 rename 한 뒤 postrotate 로 보내는 신호 -> 새 파일로 다시 열고
+        // 계속 대기한다 (종료 신호가 아님). 실제 close/open 은 로그 워커가 다음 주기에 수행
+        if (signalNumber == SIGHUP) {
+            logSuccess(kIface, "SIGHUP 수신 - 로그 파일 재오픈 (logrotate)");
+            reopenLogFile();
+            continue;
+        }
+
+        logSuccess(kIface, "종료 시그널 수신 (signal=" + std::to_string(signalNumber) + ") - 정리 후 종료합니다");
+        source.stop();
         return;
     }
-
-    logSuccess(kIface, "종료 시그널 수신 (signal=" + std::to_string(signalNumber) + ") - 정리 후 종료합니다");
-    source.stop();
 }
 
 }  // namespace
@@ -55,6 +66,9 @@ int main() {
     sigemptyset(&shutdownMask);
     sigaddset(&shutdownMask, SIGINT);
     sigaddset(&shutdownMask, SIGTERM);
+    // SIGHUP 은 logrotate 의 postrotate 신호. 기본 처리 동작이 '프로세스 종료'라서,
+    // 여기서 블록해 두지 않으면 로그가 회전될 때마다 서버가 죽는다
+    sigaddset(&shutdownMask, SIGHUP);
     if (pthread_sigmask(SIG_BLOCK, &shutdownMask, nullptr) != 0) {
         logError(kIface, "시그널 마스크 설정 실패 - 정상 종료를 보장할 수 없습니다");
     }
@@ -68,6 +82,7 @@ int main() {
     logConfig.file = config.logToFile;
     logConfig.flushIntervalMs = config.logFlushIntervalMs;
     logConfig.maxPendingEntries = config.logMaxPendingEntries;
+    logConfig.fileName = config.logFileName;
     initLogger(logConfig);
 
     logSuccess(kIface,
@@ -109,8 +124,14 @@ int main() {
     pthread_kill(signalThread.native_handle(), SIGTERM);
     signalThread.join();
 
-    // 5) 명시적 파괴: Sink 큐 flush, MQTT 종료 신호("0") 발행, 스레드 join 이 여기서 일어남
+    // 5) 명시적 파괴: Sink 워커 정지, MQTT 종료 신호("0") 발행, 스레드 join 이 여기서 일어남
     //    (context 를 unique_ptr 로 둔 이유이기도 함)
+    //
+    //    [ 주의 ] Sink 큐는 flush 되지 '않는다'. MqttFrameSink::shutdown() 은 남아 있는 프레임을
+    //    drop 으로 집계하며 버린다 -- 실시간 좌표라 종료 시점의 잔여 프레임은 가치가 없고,
+    //    브로커가 죽어 있으면 flush 가 무한정 늘어질 수 있기 때문.
+    //    => SIGINT/SIGTERM 시 '마지막 프레임 전달'은 보장되지 않는다.
+    //       보장이 필요해지면 shutdown() 에 드레인 + 타임아웃을 넣어야 함 (지금은 의도적 미보장)
     context.reset();
 
     logSuccess(kIface, "정상 종료 (총 " + std::to_string(packetCount) + "개 패킷 처리)");

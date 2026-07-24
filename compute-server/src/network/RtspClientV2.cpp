@@ -47,18 +47,42 @@ RtspClientV2::~RtspClientV2() {
     keepRunning_ = false;
     if (keepaliveThread_.joinable())
         keepaliveThread_.join();
+    const bool wasOpen = (sock_ != -1);
+    closeSocket();
+    if (wasOpen)
+        logSuccess(kIface, "소켓 정상 종료");
+}
+
+void RtspClientV2::closeSocket() noexcept {
+    // close 전에 무효화: 이후 cancel() 이 들어와도 이미 닫힌(또는 번호가 재사용된) fd 에 shutdown 하지 않음
+    cancelFd_.store(-1, std::memory_order_release);
     if (sock_ != -1) {
         close(sock_);
-        logSuccess(kIface, "소켓 정상 종료");
+        sock_ = -1;
+    }
+}
+
+void RtspClientV2::cancel() noexcept {
+    cancelled_.store(true, std::memory_order_release);
+
+    // shutdown() 은 fd 를 닫지 않고 연결만 끊으므로, 블로킹 중인 recv() 가 즉시 0/-1 로 반환된다.
+    // (close() 를 쓰면 소유자 스레드가 같은 fd 번호를 다시 쓰는 순간 경합이 생김)
+    const int fd = cancelFd_.load(std::memory_order_acquire);
+    if (fd != -1) {
+        ::shutdown(fd, SHUT_RDWR);
     }
 }
 
 bool RtspClientV2::connect() {
     sock_ = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_ < 0) {
+        sock_ = -1;  // 불변식 유지: 실패 시 항상 -1
         logError(kIface, "소켓 생성 실패");
         return false;
     }
+
+    // cancel() 이 다른 스레드에서 이 fd 에 shutdown() 을 걸 수 있도록 공개 (원자적)
+    cancelFd_.store(sock_, std::memory_order_release);
 
     struct timeval tv {
         recvTimeoutSec_, 0
@@ -84,7 +108,7 @@ bool RtspClientV2::connect() {
     if (connectResult < 0 && errno != EINPROGRESS) {
         logError(kIface,
                  "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " + std::strerror(errno));
-        fcntl(sock_, F_SETFL, origFlags);
+        closeSocket();  // 소멸자에만 맡기지 않고 즉시 반납 (같은 인스턴스 재시도 시 fd 누수 방지)
         return false;
     }
 
@@ -100,7 +124,7 @@ bool RtspClientV2::connect() {
         if (selectResult <= 0) {
             logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
                                  std::to_string(connectTimeoutSec_) + "초)");
-            fcntl(sock_, F_SETFL, origFlags);
+            closeSocket();
             return false;
         }
 
@@ -110,7 +134,7 @@ bool RtspClientV2::connect() {
         if (sockErr != 0) {
             logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
                                  std::strerror(sockErr));
-            fcntl(sock_, F_SETFL, origFlags);
+            closeSocket();
             return false;
         }
     }
@@ -247,6 +271,7 @@ void RtspClientV2::play() {
 
     logSuccess(kIface, "PLAY 성공, 스트리밍 시작 - 응답: [" + status + "]");
 
+    playOk_ = true;  // 여기까지 와야 스트리밍이 실제로 시작됨 (workerLoop 가 run() 진입 판단에 사용)
     keepRunning_ = true;
     keepaliveThread_ = std::thread(&RtspClientV2::keepAliveLoop, this);
 }
@@ -255,7 +280,9 @@ void RtspClientV2::run() {
     std::string metadataBuffer;
     metadataBuffer.reserve(8192);
 
-    while (true) {
+    // 취소 플래그를 매 반복 확인한다. 스트림이 건강하면 recv() 가 계속 성공해 타임아웃이 나지
+    // 않으므로, 이 확인이 없으면 run() 은 영영 반환하지 않고 워커 join 이 무한 대기한다.
+    while (!cancelled_.load(std::memory_order_acquire)) {
         std::uint8_t sync = 0;
         if (!readByte(sync))
             break;
@@ -308,7 +335,12 @@ void RtspClientV2::run() {
     }
 
     keepRunning_ = false;
-    logError(kIface, "스트림 종료 또는 연결 끊김");
+    if (cancelled_.load(std::memory_order_acquire)) {
+        // 의도된 종료 -- 오류가 아니므로 error 로 남기지 않음 (종료 때마다 오탐 로그가 쌓이던 문제)
+        logSuccess(kIface, "취소 요청으로 스트림 루프 종료");
+    } else {
+        logError(kIface, "스트림 종료 또는 연결 끊김");
+    }
 }
 
 void RtspClientV2::reportMetricsIfDue() {

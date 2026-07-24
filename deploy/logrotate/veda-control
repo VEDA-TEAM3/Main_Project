@@ -1,0 +1,25 @@
+# /etc/logrotate.d/veda-control
+#
+# control-server 는 단일 인스턴스이고 로그량이 compute-server 보다 훨씬 적다(집계/상태 전이 위주).
+# 그래서 시간별이 아니라 '일별' 회전을 쓴다 -- 저volume 로그를 시간별로 돌리면 거의 빈 파일이
+# 하루 24개, 1년 8760개 쌓여 오히려 뒤져보기 어려워진다.
+#
+# 회전 방식(create + SIGHUP)과 그 이유는 veda-compute 설정의 주석 참고.
+
+/opt/veda/control/veda.csv {
+    daily
+    rotate 30                   # 30일 = 약 1개월 보존 (저volume 이라 압축 후 용량 부담이 작음)
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d
+    create 0640 vedateam3 vedateam3       # 실제 서비스 계정으로 교체할 것
+    su vedateam3 vedateam3
+    postrotate
+        systemctl kill -s HUP --kill-who=main control-server.service 2>/dev/null || true
+        # systemd 를 쓰지 않는다면 대안:
+        #   pkill -HUP -x control-server || true
+    endscript
+}

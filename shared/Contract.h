@@ -11,6 +11,7 @@
  * @note 의존성: nlohmann/json >= 3.11
  */
 
+#include <charconv>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -193,11 +194,15 @@ inline ObjectClass objectClassFromString(std::string_view s) {
 
 /**
  * @brief 위험 레벨
+ *
+ * @note [ 차량 중심 판정 — 차량 없으면 무조건 None ]
+ * 위험은 오직 "검출된 차량 기준 최근접 객체까지의 거리"로만 판정한다.
+ * 차량이 한 대도 없으면 (사람만 있어도) 레벨은 항상 None 이다.
  */
 enum class RiskLevel {
-    None = 0,  ///< 사람 감지 X
-    Warning,   ///< 사람 감지 or 객체 간 거리 warningDistance 이내
-    Danger,    ///< 객체 간 거리 dangerousDistance 이내
+    None = 0,  ///< 위험 없음 (차량 미검출 또는 차량-최근접객체 거리 > warningDistance)
+    Warning,   ///< 차량-최근접객체 거리 warningDistance 이내
+    Danger,    ///< 차량-최근접객체 거리 dangerousDistance 이내
 };
 
 /// @brief RiskLevel을 문자열로 변환
@@ -304,6 +309,63 @@ struct RiskFrame {
 };
 
 /**
+ * @struct  ChannelStatus
+ * @brief   메시지 4 : ChannelStatus (control-server -> client)
+ *
+ * @details
+ * - 통신: MQTT / TLS, topic::hwStatus(ch), QoS 1, retained
+ * - RiskFrame과 갱신 성격이 달라 별도 메시지로 분리함:
+ *   RiskFrame은 윈도우마다(예: 100ms) 계속 나가는 고빈도 스트림인 반면,
+ *   이 메시지는 상태가 실제로 바뀔 때만(가끔) 발행되는 이벤트임
+ * - retained로 발행하므로 클라이언트가 재접속해도 최신 상태를 즉시 받음
+ *   (compute-server -> control-server의 topic::alive(ch) LWT와 동일한 패턴)
+ *
+ * @note [ cameraAlive vs hardwareAlive 를 분리한 이유 ]
+ * 채널이 죽은 원인을 대시보드에서 구분할 수 있어야 함:
+ * - cameraAlive=false  : 그 채널의 compute-server/CCTV 연결이 끊김 (MQTT LWT 기준)
+ * - hardwareAlive=false: STM32가 그 채널의 HW(LED/siren/buzzer)에 대해 하트비트 응답 없음
+ * 카메라는 살아있는데 STM32만 죽었을 수도, 그 반대일 수도 있어서 하나의 bool로
+ * 뭉치면 현장에서 "뭘 고쳐야 하는지" 알 수 없게 됨
+ *
+ * @note [ v2: sirenOn/buzzerOn/led* 추가 ]
+ * 예전에는 hardwareAlive(STM32 응답 여부)만 있어서, 응답은 살아있어도 그 채널 하드웨어가
+ * 실제로 경광등/부저/LED 중 무엇을 켜고 있는지는 Qt 클라이언트가 전혀 알 수 없었음
+ * -> STM32가 상행(veda_uplink_packet_t, driver_protocol.h)으로 이미 올려보내던
+ *    siren_on/buzzer_on/led_red/led_yellow/led_green 을 그대로 실어 보냄.
+ *    hardwareAlive=false 인 동안의 값은 마지막으로 확인된 상태일 뿐 최신이 아님(신뢰 X)
+ *
+ * @warning [ 클라이언트 계약 (STRICT) — 표시 상태는 hardwareAlive 로 게이트할 것 ]
+ * sirenOn/buzzerOn/ledRed/ledYellow/ledGreen 은 "지금 이 하드웨어가 무엇을 켜고 있는가"의
+ * 무조건적 최신값이 아니다. 반드시 hardwareAlive 와 함께 해석해야 하며 계약은 다음과 같다:
+ *  - hardwareAlive=true  : 표시 상태 필드는 유효한 실시간 값 -> 그대로 렌더링 가능
+ *  - hardwareAlive=false : 표시 상태 필드는 보드가 죽기 직전 '마지막으로 확인된' 값(=stale)
+ *                          -> 절대 활성 상태(예: "사이렌 켜짐")로 렌더링하지 말 것
+ *
+ * 서버는 이 게이팅을 강제하지 않는다. 마지막 상태를 보존하기 위해(사후 진단용) 원시값을
+ * 그대로 싣기로 결정했기 때문이다 -- 따라서 게이팅 책임은 전적으로 클라이언트(Qt)에 있다.
+ * 소비자는 표시 상태를 그리기 전에 반드시 hardwareAlive 를 먼저 검사하고, false 이면 개별
+ * 표시 대신 '연결 끊김'을 나타내는 UI(예: 채널 타일에 빨간 테두리)를 그려야 한다.
+ * 이것은 권고가 아니라 강한 API 계약이다. (상류 계약: IHwEventDispatcher.h::HwIndicatorState)
+ */
+struct ChannelStatus {
+    int v = kSchemaVersion;      ///< 스키마 버전
+    ChannelId ch = 0;            ///< 채널 ID
+    TimestampMs ts = 0;          ///< 이 상태로 전환된 시각 (control-server 로컬 UTC epoch ms)
+    bool cameraAlive = false;    ///< compute-server MQTT LWT 기준 (topic::alive(ch))
+    bool hardwareAlive = false;  ///< STM32 UART 하트비트 기준
+
+    /// @name STM32 상행(veda_uplink_packet_t)의 실제 표시 상태 (v2)
+    /// @details hardwareAlive=false 인 동안은 마지막으로 확인된 값일 뿐이므로 신뢰하지 말 것
+    /// @{
+    bool sirenOn = false;
+    bool buzzerOn = false;
+    bool ledRed = false;
+    bool ledYellow = false;
+    bool ledGreen = false;
+    /** @} */
+};
+
+/**
  * @namespace   topic
  * @brief       MQTT topic 정의
  */
@@ -330,6 +392,16 @@ inline std::string alive(ChannelId ch) { return "veda/ch/" + std::to_string(ch) 
 /// @brief 모든 채널의 LWT 구독을 위한 와일드카드 토픽
 inline constexpr auto kAliveAll = "veda/ch/+/alive";
 
+/**
+ * @brief   [control-server -> client] 채널 하드웨어/연결 상태 통지 토픽 (QoS 1, retained)
+ * @details compute-server의 topView/alive와 이름이 겹치지 않도록 "veda/hw/ch/" 접두사를 씀
+ *          (veda/ch/N/... 는 compute-server -> control-server 방향으로 이미 쓰이고 있음)
+ */
+inline std::string hwStatus(ChannelId ch) { return "veda/hw/ch/" + std::to_string(ch) + "/status"; }
+
+/// @brief 모든 채널의 하드웨어 상태 구독을 위한 와일드카드 토픽
+inline constexpr auto kHwStatusAll = "veda/hw/ch/+/status";
+
 }  // namespace topic
 
 /**
@@ -337,9 +409,10 @@ inline constexpr auto kAliveAll = "veda/ch/+/alive";
  * @brief       MQTT QoS 설정값
  */
 namespace qos {
-inline constexpr int kTopView = 0;  ///< TopView 스트림용 QoS
-inline constexpr int kRisk = 1;     ///< Risk 이벤트용 QoS
-inline constexpr int kAlive = 1;    ///< LWT 용 QoS
+inline constexpr int kTopView = 0;   ///< TopView 스트림용 QoS
+inline constexpr int kRisk = 1;      ///< Risk 이벤트용 QoS
+inline constexpr int kAlive = 1;     ///< LWT 용 QoS
+inline constexpr int kHwStatus = 1;  ///< 채널 하드웨어 상태 통지용 QoS
 }  // namespace qos
 
 /** @cond INTERNAL_JSON_HELPERS */
@@ -451,6 +524,31 @@ inline void from_json(const nlohmann::json& j, RiskFrame& f) {
     f.objects = detail::get_or<std::vector<RiskObject>>(j, "objects", {});
 }
 
+inline void to_json(nlohmann::json& j, const ChannelStatus& s) {
+    j = nlohmann::json{{"v", s.v},
+                       {"ch", s.ch},
+                       {"ts", s.ts},
+                       {"cameraAlive", s.cameraAlive},
+                       {"hardwareAlive", s.hardwareAlive},
+                       {"sirenOn", s.sirenOn},
+                       {"buzzerOn", s.buzzerOn},
+                       {"ledRed", s.ledRed},
+                       {"ledYellow", s.ledYellow},
+                       {"ledGreen", s.ledGreen}};
+}
+inline void from_json(const nlohmann::json& j, ChannelStatus& s) {
+    s.v = detail::get_or<int>(j, "v", 0);
+    s.ch = detail::get_or<ChannelId>(j, "ch", 0);
+    s.ts = detail::get_or<TimestampMs>(j, "ts", 0);
+    s.cameraAlive = detail::get_or<bool>(j, "cameraAlive", false);
+    s.hardwareAlive = detail::get_or<bool>(j, "hardwareAlive", false);
+    s.sirenOn = detail::get_or<bool>(j, "sirenOn", false);
+    s.buzzerOn = detail::get_or<bool>(j, "buzzerOn", false);
+    s.ledRed = detail::get_or<bool>(j, "ledRed", false);
+    s.ledYellow = detail::get_or<bool>(j, "ledYellow", false);
+    s.ledGreen = detail::get_or<bool>(j, "ledGreen", false);
+}
+
 /// @}
 
 /**
@@ -479,6 +577,131 @@ T decode(std::string_view payload) {
         return T{.v = 0};
     }
 }
+
+/**
+ * @name    Zero-DOM 직렬화 (고빈도 텔레메트리 hot path 전용)
+ * @details
+ * nlohmann::json DOM 을 프레임마다 새로 만들어 dump() 하면, 객체 수 N 에 비례하는 노드/문자열
+ * 힙 할당이 매 프레임 발생한다(compute-server 발행 hot path 의 지배적 할당원). 대신 재사용
+ * std::string 버퍼에 필드를 직접 append 하여 DOM 을 완전히 우회한다 -- warmup 이후 힙 할당 0.
+ * 출력은 표준 JSON 이므로 수신 측(from_json / nlohmann)이 그대로 파싱한다.
+ *
+ * @warning wire 포맷(키 이름/구조)은 위의 to_json 과 반드시 일치시킬 것. 한쪽만 바꾸면 송신은
+ *          되지만 수신(from_json 의 get_or)이 조용히 기본값을 읽는다 -- 필드 추가 시 둘 다 갱신.
+ * @{
+ */
+namespace detail {
+
+/// @brief 정수를 out 에 append (std::to_chars, 로케일 무관, 힙 할당 없음)
+inline void appendInt(std::string& out, std::int64_t value) {
+    char buf[24];
+    const auto result = std::to_chars(buf, buf + sizeof(buf), value);
+    out.append(buf, result.ptr);
+}
+
+/// @brief double 을 out 에 append (std::to_chars 최단 왕복 표현, 로케일 무관, 힙 할당 없음)
+inline void appendDouble(std::string& out, double value) {
+    char buf[32];
+    const auto result = std::to_chars(buf, buf + sizeof(buf), value);
+    out.append(buf, result.ptr);
+}
+
+}  // namespace detail
+
+/// @brief TopViewFrame 을 재사용 버퍼 out 에 직접 직렬화 (DOM 없음). to_json(TopViewFrame) 과 동일 포맷.
+inline void encodeInto(const TopViewFrame& f, std::string& out) {
+    out.clear();
+    out += "{\"v\":";
+    detail::appendInt(out, f.v);
+    out += ",\"ts\":";
+    detail::appendInt(out, f.ts);
+    out += ",\"ch\":";
+    detail::appendInt(out, f.ch);
+    out += ",\"objects\":[";
+    for (std::size_t i = 0; i < f.objects.size(); ++i) {
+        const TopViewObject& o = f.objects[i];
+        if (i != 0)
+            out += ',';
+        out += "{\"id\":";
+        detail::appendInt(out, o.id);
+        out += ",\"cls\":\"";
+        out += toString(o.cls);  // string_view, 할당 없음
+        out += "\",\"pos\":{\"x\":";
+        detail::appendDouble(out, o.pos.x);
+        out += ",\"y\":";
+        detail::appendDouble(out, o.pos.y);
+        out += "},\"edge\":";
+        out += o.edge ? "true" : "false";
+        out += '}';
+    }
+    out += "]}";
+}
+
+/// @brief BlurFrame 을 재사용 버퍼 out 에 직접 직렬화 (DOM 없음). to_json(BlurFrame) 과 동일 포맷.
+inline void encodeInto(const BlurFrame& f, std::string& out) {
+    out.clear();
+    out += "{\"v\":";
+    detail::appendInt(out, f.v);
+    out += ",\"ts\":";
+    detail::appendInt(out, f.ts);
+    out += ",\"ch\":";
+    detail::appendInt(out, f.ch);
+    out += ",\"blurs\":[";
+    for (std::size_t i = 0; i < f.blurs.size(); ++i) {
+        const BlurTarget& b = f.blurs[i];
+        if (i != 0)
+            out += ',';
+        out += "{\"id\":";
+        detail::appendInt(out, b.id);
+        out += ",\"cls\":\"";
+        out += toString(b.cls);  // string_view, 할당 없음
+        out += "\",\"box\":{\"l\":";
+        detail::appendDouble(out, b.box.l);
+        out += ",\"t\":";
+        detail::appendDouble(out, b.box.t);
+        out += ",\"r\":";
+        detail::appendDouble(out, b.box.r);
+        out += ",\"b\":";
+        detail::appendDouble(out, b.box.b);
+        out += "}}";
+    }
+    out += "]}";
+}
+
+/// @brief RiskFrame 을 재사용 버퍼 out 에 직접 직렬화 (DOM 없음). to_json(RiskFrame) 과 동일 포맷.
+inline void encodeInto(const RiskFrame& f, std::string& out) {
+    out.clear();
+    out += "{\"v\":";
+    detail::appendInt(out, f.v);
+    out += ",\"ts\":";
+    detail::appendInt(out, f.ts);
+    out += ",\"level\":\"";
+    out += toString(f.level);  // string_view, 할당 없음
+    out += "\",\"objects\":[";
+    for (std::size_t i = 0; i < f.objects.size(); ++i) {
+        const RiskObject& o = f.objects[i];
+        if (i != 0)
+            out += ',';
+        out += "{\"gid\":";
+        detail::appendInt(out, o.gid);
+        out += ",\"cls\":\"";
+        out += toString(o.cls);
+        out += "\",\"pos\":{\"x\":";
+        detail::appendDouble(out, o.pos.x);
+        out += ",\"y\":";
+        detail::appendDouble(out, o.pos.y);
+        out += "},\"level\":\"";
+        out += toString(o.level);
+        out += "\",\"nearest\":";
+        detail::appendInt(out, o.nearest);
+        out += ",\"dist\":";
+        detail::appendDouble(out, o.dist);
+        out += '}';
+    }
+    out += "]}";
+}
+
+/** @} */
 
 }  // namespace veda
 

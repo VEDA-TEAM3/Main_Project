@@ -102,6 +102,10 @@ struct AppConfig {
     /// @brief 로그 큐 상한 (초과 시 drop-oldest, 라즈베리파이 OOM 방지)
     int logMaxPendingEntries = 10000;
 
+    /// @brief 로그 CSV 파일 이름 (작업 디렉터리 기준). 회전/압축/보존은 logrotate 가 담당하므로
+    ///        반드시 고정 이름이어야 함 (날짜별 이름을 쓰면 logrotate 와 이중 회전이 됨)
+    std::string logFileName = "veda.csv";
+
     /** @} */
 
     // Parser
@@ -319,6 +323,11 @@ struct AppConfig {
         cfg.logToFile = veda::detail::get_or<bool>(j, "logToFile", cfg.logToFile);
         cfg.logFlushIntervalMs = veda::detail::get_or<int>(j, "logFlushIntervalMs", cfg.logFlushIntervalMs);
         cfg.logMaxPendingEntries = veda::detail::get_or<int>(j, "logMaxPendingEntries", cfg.logMaxPendingEntries);
+        cfg.logFileName = veda::detail::get_or<std::string>(j, "logFileName", cfg.logFileName);
+        if (cfg.logFileName.empty()) {
+            std::cerr << "[Config] 경고: logFileName 이 비어 있습니다 — 기본값(veda.csv)을 사용합니다.\n";
+            cfg.logFileName = "veda.csv";
+        }
 
         cfg.edgeEpsilon = veda::detail::get_or<double>(j, "edgeEpsilon", cfg.edgeEpsilon);
 
