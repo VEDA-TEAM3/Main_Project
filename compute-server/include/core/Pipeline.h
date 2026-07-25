@@ -18,15 +18,14 @@
  * 이 파일은 구현체 클래스를 전혀 모름
  * -- 정책 및 구현은 수정될 수 있으나 역할은 바뀌지 않음
  *
- * @note [ ImageMapper 가 Router 뒤 blur 분기에 있는 이유 ]
- * 예전에는 Parser 바로 뒤(분기 이전)에 있어서 risk 경로까지 앱 표시 좌표계로 변환됐음
+ * @note [ ImageMapper가 Router 뒤 blur 분기에 있는 이유 ]
+ * 예전에는 Parser 바로 뒤에 있어서 risk 경로까지 앱 표시 좌표계로 변환됐음
  * 호모그래피는 Metadata 이미지 평면에서 캘리브레이션되므로, 이 매핑이 risk 경로에 섞이면
  * imageMapScale/Offset 을 blur 정합용으로 조정하는 순간 월드 좌표가 조용히 틀어짐
  * -- 기본값이 항등(scale=1, offset=0)이라 증상이 드러나지 않는 잠복 결함이었음
- * -- 자세한 배경은 IImageCoordinateMapper.h 참고
  *
  * @note [ risk 를 blur 보다 먼저 처리하는 이유 ]
- * risk 경로가 안전 크리티컬한 실시간 경로이므로 sink 로 나가는 시점을 앞당김 (비용 0)
+ * risk 경로가 안전 크리티컬한 실시간 경로이므로 sink로 나가는 시점을 앞당김 (비용 0)
  *
  * @note [ Network, Source 제외 ]
  * CCTV로부터 Metadata를 받아오는 단계는 pipeline에서 제외
@@ -48,8 +47,8 @@
 #include "interfaces/ISink.h"
 
 /**
- * @brief   bbox 가 잘린 risk 객체를 어떻게 처리할지 결정하는 정책
- * @details 문자열 ↔ 열거형 변환은 AppContext 가 담당 (AppConfig::riskEdgePolicy)
+ * @brief   bbox가 잘린 risk 객체를 어떻게 처리할지 결정하는 정책
+ * @details 문자열 ↔ 열거형 변환은 AppContext 가 담당
  */
 enum class RiskEdgePolicy {
     Keep,                 ///< 그대로 통과 (edge 플래그만 실어 보냄)
@@ -58,7 +57,7 @@ enum class RiskEdgePolicy {
 };
 
 /**
- * @brief   pipeline 이 참조하는 실행 정책 모음
+ * @brief   pipeline이 참조하는 실행 정책 모음
  * @details 정책이 늘어나도 Pipeline 생성자 시그니처가 흔들리지 않도록 구조체로 묶음
  */
 struct PipelineOptions {
