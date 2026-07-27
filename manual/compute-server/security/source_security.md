@@ -1,9 +1,3 @@
-| Date | Version | Writer | Summary |
-| :--- | :--- | :--- | :--- |
-| 2026-07-27 | 1.0.0 | System Architect | Source 계층(파이프라인 핸드오프 및 링버퍼) 스레드 안전성, OOM 방어 및 성능/보안 감사 명세 |
-
----
-
 # Source 계층 보안·성능 권고 (Security & Performance Advisory)
 
 > **대상 모듈**
@@ -11,6 +5,12 @@
 > - 구현체: `src/source/RtspOnvifSourceV2.h`, `.cpp`
 >
 > **관련 문서**: 모듈 상세 [../components/source_reference.md](../components/source_reference.md) · 하위 계층 감사 [network_security.md](network_security.md)
+
+---
+
+| Date | Version | Writer | Summary |
+| :--- | :--- | :--- | :--- |
+| 2026-07-27 | 1.0.0 | Mangjun | Source 계층(파이프라인 핸드오프 및 링버퍼) 스레드 안전성, OOM 방어 및 성능/보안 감사 명세 |
 
 ---
 
