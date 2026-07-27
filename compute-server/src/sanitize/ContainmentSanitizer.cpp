@@ -1,9 +1,9 @@
-
 #include "sanitize/ContainmentSanitizer.h"
 
 #include <algorithm>
 #include <bitset>
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -14,11 +14,17 @@ namespace {
 
 constexpr const char* kIface = "Sanitizer";
 
-/// @brief 한 프레임(단일 카메라)의 최대 객체 수 상한. drop 마스크를 스택 std::bitset 으로 두어
-///        hot path 에서 std::vector<bool> 힙 할당을 없애기 위한 컴파일타임 크기.
-///        compute-server 는 채널당 1개 프로세스이고, 엣지 AI(YOLO 등)의 NMS 출력은 보통
-///        프레임당 50~100개로 제한되므로 128 이면 충분한 여유가 있다. 넘으면 sanitize 스킵(fail-open).
-constexpr std::size_t kMaxObjectsPerFrame = 128;
+/// @brief 한 프레임(단일 카메라)의 최대 객체 수 상한 
+///        drop 마스크를 스택 std::bitset 으로 두어
+///        hot path에서 std::vector<bool> 힙 할당을 없애기 위한 컴파일타임 크기
+///        compute-server는 채널당 1개 프로세스이고, 엣지 AI의 NMS 출력은 보통
+///        프레임당 50~100개로 제한되므로 충분한 여유가 있다. 넘으면 sanitize 스킵 (fail-open)
+///
+/// @warning [W1] 이 값은 OnvifParser의 동명 상수(kMaxObjectsPerFrame)와 반드시 같아야 한다.
+///          파서가 256개까지 통과시키는데 여기가 128이면 129~256 구간이 'sanitize 가 항상 생략되는
+///          사각지대'가 되어, 객체를 129개만 실어보내면 팬텀 필터를 통째로 우회할 수 있었다.
+///          두 상한을 256으로 정렬해 그 우회 경로를 제거했다. 한쪽만 바꾸면 사각지대가 되살아난다.
+constexpr std::size_t kMaxObjectsPerFrame = 256;
 
 /**
  * @brief   bbox의 면적을 계산
@@ -83,7 +89,26 @@ double ioMin(const domain::NormBox& a, const domain::NormBox& b) {
 }  // namespace
 
 ContainmentSanitizer::ContainmentSanitizer(double iouThresh, double containThresh)
-    : iouThresh_(iouThresh), containThresh_(containThresh) {}
+    : iouThresh_(iouThresh), containThresh_(containThresh) {
+    // [W2] 임계값을 조립 시점에 검증한다. (설정 오류는 조용히 넘기지 않고 즉시 실패)
+    //
+    // iou()/ioMin() 은 항상 0 이상을 반환하므로, 임계값이 음수면 "0.0 > -0.1" 이 참이 되어
+    // 겹치지도 않은 객체에까지 규칙이 발동한다. -> 프레임에 Head/LicensePlate 가 하나만 있어도
+    // 모든 Human/Vehicle 이 삭제되고, 그 결과 위험 객체가 사라져 경보가 울리지 않는다.
+    // 즉 '과소 검출(위험 방향)'으로 조용히 실패하는 유일한 경로였다.
+    // 1.0 초과도 규칙이 절대 발동하지 않게 만들어 필터를 무력화하므로 함께 막는다.
+    //
+    // HomographyTransform / AffineImageCoordinateMapper 와 동일한 규약: 구조적으로 잘못된
+    // 설정은 생성자가 던지고 main 이 잡아 프로세스를 종료한다.
+    if (iouThresh_ < 0.0 || iouThresh_ > 1.0) {
+        throw std::invalid_argument("sanitizerIouThresh must be within [0.0, 1.0] (got " +
+                                    std::to_string(iouThresh_) + ") - check config.json");
+    }
+    if (containThresh_ < 0.0 || containThresh_ > 1.0) {
+        throw std::invalid_argument("sanitizerContainThresh must be within [0.0, 1.0] (got " +
+                                    std::to_string(containThresh_) + ") - check config.json");
+    }
+}
 
 domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) {
     const size_t n = frame.objects.size();
