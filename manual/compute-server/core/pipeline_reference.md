@@ -1,8 +1,13 @@
 # `Pipeline` 레퍼런스 매뉴얼 (compute-server)
 
-> **대상**: compute-server 의 패킷 처리 흐름을 이해·수정하려는 개발자
-> **원본**: Pipeline.h, Pipeline.cpp
-> **관련 스테이지**: OnvifParser, ContainmentSanitizer, ParentBasedRouter, BottomCenterExtractor, HomographyTransform, AffineImageCoordinateMapper, MqttTopViewSink, MqttBlurSink
+> **대상**: compute-server의 패킷 처리 흐름을 이해·수정하려는 개발자
+> **원본**: include/core/Pipeline.h, src/core/Pipeline.cpp
+
+---
+
+| Date | Version | Writer | Summary |
+| --- | --- | --- | ---|
+| 2026.07.27 | v1.0.0 | Mangjun | 단일 스레드 기반 메타데이터 처리 파이프라인 단계별 흐름 및 예외 방어막 설계 문서화 |
 
 ---
 

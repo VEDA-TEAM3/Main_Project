@@ -1,9 +1,13 @@
-# `AppConfig.h` 설정 레퍼런스 매뉴얼 (compute-server)
+# AppConfig 설정 레퍼런스 매뉴얼 (compute-server)
 
-> **대상**: compute-server `config.json` 을 작성·조정하는 현장/운영 엔지니어
-> **원본**: compute-server/include/core/AppConfig.h
-> **범위**: compute-server 는 **채널(카메라 방향)당 프로세스 1개**다. 이 문서의 모든 값은 그
-> 채널의 실행 디렉터리(예: `cctv_01/ch0/`)에 두는 `config.json`에 들어간다.
+> **대상**: compute-server `config.json`을 작성·조정하는 현장/운영 엔지니어
+> **원본**: include/core/AppConfig.h
+
+---
+
+| Date | Version | Writer | Summary |
+| --- | --- | --- | ---|
+| 2026.07.27 | v1.0.0 | Mangjun | 로컬 환경 설정(config.json) 로드/검증 프로세스 및 채널 종속적 설정 데이터 관리 정책 문서화 |
 
 ---
 

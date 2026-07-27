@@ -1,8 +1,13 @@
-# `AppContext` 레퍼런스 매뉴얼 (compute-server)
+# AppContext 레퍼런스 매뉴얼 (compute-server)
 
-> **대상**: compute-server 의 조립/생명주기 구조를 이해·수정하려는 개발자
-> **원본**: AppContext.h, AppContext.cpp
-> **관련 생명주기 파일**: main.cpp, RtspOnvifSourceV2, MqttTransport, MqttFrameSink
+> **대상**: compute-server의 조립/생명주기 구조를 이해·수정하려는 개발자
+> **원본**: include/core/AppContext.h, src/core/AppContext.cpp
+
+---
+
+| Date | Version | Writer | Summary |
+| --- | --- | --- | ---|
+| 2026.07.27 | v1.0.0 | Mangjun | 컴포넌트 의존성 주입(DI) 구조 및 RAII 기반의 안전한 역순 생명주기 관리(초기화/종료) 아키텍처 명세 |
 
 ---
 
