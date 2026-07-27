@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -260,6 +261,13 @@ struct AppConfig {
 
         config.windowSizeMs = veda::detail::get_or<uint64_t>(j, "windowSizeMs", config.windowSizeMs);
         config.channelCount = veda::detail::get_or<int>(j, "channelCount", config.channelCount);
+        constexpr int kMaxChannelCount = static_cast<int>(std::numeric_limits<uint8_t>::max()) + 1;
+        if (config.channelCount < 1 || config.channelCount > kMaxChannelCount) {
+            const int rawChannelCount = config.channelCount;
+            config.channelCount = (config.channelCount < 1) ? 1 : kMaxChannelCount;
+            std::cerr << "[Config] 경고: channelCount=" << rawChannelCount << " 는 하드웨어 채널 범위 [1, "
+                      << kMaxChannelCount << "] 밖입니다 — " << config.channelCount << " 로 보정합니다.\n";
+        }
 
         config.logLevel = veda::detail::get_or<std::string>(j, "logLevel", config.logLevel);
         if (config.logLevel != "debug" && config.logLevel != "info" && config.logLevel != "error" &&
@@ -282,6 +290,38 @@ struct AppConfig {
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
         config.worldBounds = veda::detail::get_or<WorldBounds>(j, "worldBounds", config.worldBounds);
+
+        // [zone 값 검증] zoneId == channelId 이므로 하드웨어 채널 범위를 벗어난 항목을 통과시키면
+        // 해당 구역은 위험도 집계에서 제외되어 알람이 울리지 않는다. 다른 채널로 clamp 하면
+        // 엉뚱한 액추에이터가 동작하므로, 잘못된 항목은 경고 후 제거한다.
+        std::vector<SpatialZone> validZones;
+        validZones.reserve(config.zones.size());
+        std::vector<bool> seenZoneIds(static_cast<std::size_t>(config.channelCount), false);
+        for (std::size_t i = 0; i < config.zones.size(); ++i) {
+            const SpatialZone& zone = config.zones[i];
+            if (zone.zoneId < 0 || zone.zoneId >= config.channelCount) {
+                std::cerr << "[Config] 경고: zones[" << i << "].zoneId=" << zone.zoneId << " 가 범위 [0, "
+                          << config.channelCount << ") 밖입니다 — 이 항목을 제거합니다.\n";
+                continue;
+            }
+            if (!std::isfinite(zone.minX) || !std::isfinite(zone.maxX) || !std::isfinite(zone.minY) ||
+                !std::isfinite(zone.maxY) || zone.minX > zone.maxX || zone.minY > zone.maxY) {
+                std::cerr << "[Config] 경고: zones[" << i
+                          << "] 의 좌표 범위가 유효하지 않습니다 — 이 항목을 제거합니다.\n";
+                continue;
+            }
+
+            const auto zoneIndex = static_cast<std::size_t>(zone.zoneId);
+            if (seenZoneIds[zoneIndex]) {
+                std::cerr << "[Config] 경고: zones 에 zoneId=" << zone.zoneId
+                          << " 항목이 중복되었습니다 — 첫 번째 항목만 사용합니다.\n";
+                continue;
+            }
+
+            seenZoneIds[zoneIndex] = true;
+            validZones.push_back(zone);
+        }
+        config.zones.swap(validZones);
 
         if (config.worldBounds.enabled &&
             (config.worldBounds.maxX <= config.worldBounds.minX || config.worldBounds.maxY <= config.worldBounds.minY)) {

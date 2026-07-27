@@ -4,11 +4,13 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "Logger.h"
+#include "dispatch/SerialEventEncoding.h"
 
 namespace {
 constexpr const char* kIface = "HwDispatcher";
@@ -117,6 +119,12 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     std::lock_guard<std::mutex> lock(sendStateMutex_);
 
     for (const auto& zone : eval.zoneLevels) {
+        if (!serial_event::isValidChannelId(zone.zoneId)) {
+            logError(kIface, "UART 통지 생략: zoneId=" + std::to_string(zone.zoneId) +
+                                 " 는 channel_id(uint8_t) 범위를 벗어남");
+            continue;
+        }
+
         auto it = lastSentLevel_.find(zone.zoneId);
         const bool changed = (it == lastSentLevel_.end()) || (it->second != zone.level);
         if (!changed) {
@@ -130,7 +138,15 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
         ev.channel_id = static_cast<uint8_t>(zone.zoneId);
         ev.risk_level = static_cast<uint8_t>(zone.level);
         ev.timestamp_ms = eval.timestamp;
-        ev.dist_mm = (zone.minDist >= 0.0) ? static_cast<uint16_t>(zone.minDist * 1000.0) : VEDA_DIST_MM_NONE;
+        ev.dist_mm = serial_event::encodeDistanceMm(zone.minDist);
+        if (!std::isfinite(zone.minDist)) {
+            logError(kIface, "채널 " + std::to_string(zone.zoneId) +
+                                 " 최소 거리가 유한수가 아님 — dist_mm=VEDA_DIST_MM_NONE");
+        } else if (zone.minDist >= serial_event::kFirstReservedDistanceMeters) {
+            logError(kIface, "채널 " + std::to_string(zone.zoneId) + " 최소 거리 " +
+                                 std::to_string(zone.minDist) + "m가 UART 표현 범위를 벗어남 — dist_mm=" +
+                                 std::to_string(serial_event::kMaxValidDistanceMm) + "로 포화");
+        }
 
         veda_downlink_frame_t frame;
         frame.start_byte = VEDA_START_BYTE;
