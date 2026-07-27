@@ -170,10 +170,51 @@ inline constexpr std::string_view toString(ObjectClass c) {
     return "Unknown";
 }
 
+namespace detail {
+
 /**
- * @brief 문자열을 ObjectClass로 변환
+ * @brief   ASCII 대소문자를 무시하고 두 문자열이 같은지 비교
+ * @details ONVIF 벤더마다 "Vehicle"/"vehicle"/"VEHICLE" 처럼 표기가 갈리므로 필요
+ */
+inline bool equalsIgnoreCaseAscii(std::string_view a, std::string_view b) {
+    if (a.size() != b.size())
+        return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const unsigned char ca = static_cast<unsigned char>(a[i]);
+        const unsigned char cb = static_cast<unsigned char>(b[i]);
+        const unsigned char la = (ca >= 'A' && ca <= 'Z') ? static_cast<unsigned char>(ca + 32) : ca;
+        const unsigned char lb = (cb >= 'A' && cb <= 'Z') ? static_cast<unsigned char>(cb + 32) : cb;
+        if (la != lb)
+            return false;
+    }
+    return true;
+}
+
+}  // namespace detail
+
+/**
+ * @brief   문자열을 ObjectClass로 변환 (벤더 별칭 및 대소문자 허용)
+ *
+ * @details
+ * 정식 이름("Human"/"Vehicle"/"Head"/"LicensePlate")을 먼저 정확 비교로 처리하고
+ * (compute-server 가 발행하는 값이라 가장 흔한 경로), 실패 시에만 대소문자 무시 별칭 표를 훑는다
+ *
+ * @note [ 별칭을 받아들이는 이유 — 조용한 미검출 방지 ]
+ * ONVIF 는 <tt:Type> 문자열을 표준화하지 않아 벤더마다 "Car"/"Truck"/"Person" 등을 보낸다
+ * 예전에는 정식 4개 문자열만 인식해 그 외는 전부 Unknown 이었는데, Human/Vehicle 은
+ * 최상위 객체라 Parent 속성이 없어 **cls 가 유일한 분류 근거**다
+ * -- 즉 문자열이 조금만 달라도 risk 경로에서 전량 탈락해 경보가 울리지 않았다
+ * -- blur 경로는 parentId 라는 두 번째 신호가 있어 구제되지만 risk 는 구제 수단이 없음
+ * 신규 카메라를 붙이는 일상적인 작업만으로 '차량이 하나도 감지되지 않는' 상태가 될 수 있었음
+ *
+ * @warning [ 공유 헤더 ]
+ * 이 함수는 compute-server 의 파싱 경로와 control-server 의 from_json 디코딩 경로가 함께 쓴다
+ * 별칭 추가는 '받아들이는 입력을 넓히는' 변경일 뿐 발행하는 문자열(toString)은 그대로이므로
+ * 와이어 포맷은 바뀌지 않는다 (kSchemaVersion 무관)
+ * -- 다만 shared/ 변경이므로 양 서버를 함께 재빌드할 것
  */
 inline ObjectClass objectClassFromString(std::string_view s) {
+    // 1) 정식 이름 (가장 흔한 경로 — 대소문자 비교 없이 즉시 판정)
     if (s == "Human")
         return ObjectClass::Human;
     if (s == "Vehicle")
@@ -182,6 +223,29 @@ inline ObjectClass objectClassFromString(std::string_view s) {
         return ObjectClass::Head;
     if (s == "LicensePlate")
         return ObjectClass::LicensePlate;
+
+    // 2) 벤더 별칭 (대소문자 무시) — 정식 이름의 다른 표기도 여기서 함께 걸린다
+    struct Alias {
+        std::string_view text;
+        ObjectClass cls;
+    };
+    static constexpr Alias kAliases[] = {
+        {"human", ObjectClass::Human},         {"person", ObjectClass::Human},
+        {"pedestrian", ObjectClass::Human},    {"people", ObjectClass::Human},
+        {"vehicle", ObjectClass::Vehicle},     {"car", ObjectClass::Vehicle},
+        {"truck", ObjectClass::Vehicle},       {"bus", ObjectClass::Vehicle},
+        {"motorcycle", ObjectClass::Vehicle},  {"bicycle", ObjectClass::Vehicle},
+        {"head", ObjectClass::Head},           {"face", ObjectClass::Head},
+        {"licenseplate", ObjectClass::LicensePlate},
+        {"license_plate", ObjectClass::LicensePlate},
+        {"plate", ObjectClass::LicensePlate},
+    };
+
+    for (const Alias& alias : kAliases) {
+        if (detail::equalsIgnoreCaseAscii(s, alias.text))
+            return alias.cls;
+    }
+
     return ObjectClass::Unknown;
 }
 

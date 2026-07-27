@@ -24,5 +24,5 @@
  */
 class ParentBasedRouter : public IObjectRouter {
 public:
-    RouteResult route(const domain::ChannelFrame& frame) override;
+    void route(const domain::ChannelFrame& frame, RouteResult& outResult) override;
 };
