@@ -34,8 +34,10 @@ constexpr std::size_t kMaxObjectsPerFrame = 256;
 double area(const domain::NormBox& box) {
     const double w = box.r - box.l;
     const double h = box.b - box.t;
-    if (w <= 0.0 || h <= 0.0)
+    if (w <= 0.0 || h <= 0.0) {
         return 0.0;
+    }
+        
     return w * h;
 }
 
@@ -50,8 +52,10 @@ double intersectionArea(const domain::NormBox& a, const domain::NormBox& b) {
     const double t = std::max(a.t, b.t);
     const double r = std::min(a.r, b.r);
     const double bt = std::min(a.b, b.b);
-    if (r <= l || bt <= t)
+    if (r <= l || bt <= t) {
         return 0.0;
+    }
+        
     return (r - l) * (bt - t);
 }
 
@@ -64,8 +68,10 @@ double intersectionArea(const domain::NormBox& a, const domain::NormBox& b) {
 double iou(const domain::NormBox& a, const domain::NormBox& b) {
     const double inter = intersectionArea(a, b);
     const double uni = area(a) + area(b) - inter;
-    if (uni <= 0.0)
+    if (uni <= 0.0) {
         return 0.0;
+    }
+    
     return inter / uni;
 }
 
@@ -81,8 +87,10 @@ double iou(const domain::NormBox& a, const domain::NormBox& b) {
 double ioMin(const domain::NormBox& a, const domain::NormBox& b) {
     const double inter = intersectionArea(a, b);
     const double minArea = std::min(area(a), area(b));
-    if (minArea <= 0.0)
+    if (minArea <= 0.0) {
         return 0.0;
+    }
+        
     return inter / minArea;
 }
 
@@ -127,12 +135,15 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
     // 이 단계가 끝나기 전에는 frame.objects를 절대 변형하면 안 됨)
     for (size_t i = 0; i < n; ++i) {
         const auto& x = frame.objects[i];
-        if (!veda::isRiskClass(x.cls))
+        if (!veda::isRiskClass(x.cls)) {
             continue;
+        }
 
         for (size_t j = 0; j < n; ++j) {
-            if (i == j)
+            if (i == j) {
                 continue;
+            }
+                
             const auto& y = frame.objects[j];
 
             // 규칙 A
@@ -163,10 +174,14 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
     // (별도 벡터를 새로 만들지 않음 -> resize()로 줄이는 건 재할당을 유발하지 않으므로 할당 없음)
     size_t writeIdx = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (drop[i])
+        if (drop[i]) {
             continue;
-        if (writeIdx != i)
+        }
+            
+        if (writeIdx != i) {
             frame.objects[writeIdx] = std::move(frame.objects[i]);
+        }
+            
         ++writeIdx;
     }
     frame.objects.resize(writeIdx);
