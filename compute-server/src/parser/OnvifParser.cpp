@@ -1,6 +1,9 @@
 #include "parser/OnvifParser.h"
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <optional>
@@ -17,6 +20,41 @@ constexpr const char* kIface = "Parser";
 /// @brief 인식 안 되는 <tt:Type> 문자열 진단 로그 rate-limit용 (파서는 채널당 단일 스레드에서만 호출됨)
 std::uint64_t g_unknownTypeCount = 0;
 
+/// @brief [W3] 프레임당 파싱할 객체 수 하드 상한. 악의적/손상된 페이로드가 아주 작은 <tt:Object>를
+///        대량으로 실어보내 result.objects 벡터를 부풀리는 메모리 증폭 DoS를 막는다. 상한에 닿으면
+///        루프를 조기 종료한다. 상류(RtspClientV2)의 1MiB 프레임 상한과 별개인 파서 자체의 방어선
+constexpr std::size_t kMaxObjectsPerFrame = 256;
+
+/// @brief [W1] 로그에 남길 신뢰할 수 없는 문자열의 최대 길이 (초과분은 "..."로 표시)
+constexpr std::size_t kMaxLoggedTextLen = 50;
+
+/**
+ * @brief   [W1] 카메라가 보낸 신뢰할 수 없는 문자열을 CSV 로그에 안전하게 넣도록 정화
+ *
+ * @details
+ * Logger는 고정 이름 CSV(veda.csv)에 append하므로, <tt:Type> 같은 카메라 제어 문자열이 그대로
+ * 로그에 들어가면 개행(\r\n)으로 가짜 로그 행을, 콤마/큰따옴표로 가짜 CSV 열을 주입할 수 있다
+ * (log/CSV injection). 로깅 '직전에' 무력화한다:
+ *  - 제어문자(0x00-0x1F, 0x7F), 콤마(,), 큰따옴표(")를 '_'로 치환
+ *  - kMaxLoggedTextLen 자로 잘라 로그 폭주 방지 (잘리면 말미에 "..." 부착)
+ *
+ * @param   text 정화할 원본 문자열 (카메라가 통제하는 신뢰 불가 입력)
+ * @return  로그에 안전한 std::string
+ */
+std::string sanitizeForLog(std::string_view text) {
+    const std::size_t n = std::min(text.size(), kMaxLoggedTextLen);
+    std::string out;
+    out.reserve(n + 3);
+    for (std::size_t i = 0; i < n; ++i) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        out.push_back((c < 0x20 || c == 0x7F || c == ',' || c == '"') ? '_' : static_cast<char>(c));
+    }
+    if (text.size() > kMaxLoggedTextLen) {
+        out += "...";
+    }
+    return out;
+}
+
 /**
  * @brief   안전한 숫자 파싱을 위한 std::from_chars 래퍼 함수
  * @tparam  T 파싱할 숫자의 타입
@@ -27,8 +65,11 @@ template <typename T>
 std::optional<T> parseNumber(std::string_view sv) {
     T value{};
     auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), value);
-    if (ec != std::errc{})
+
+    if (ec != std::errc{}) {
         return std::nullopt;
+    }
+
     return value;
 }
 
@@ -44,17 +85,23 @@ std::optional<T> parseNumber(std::string_view sv) {
  */
 std::optional<std::string_view> extractQuoted(std::string_view s, std::string_view key) {
     std::size_t searchFrom = 0;
-    for (;;) {
+
+    while (true) {
         const std::size_t keyPos = s.find(key, searchFrom);
-        if (keyPos == std::string_view::npos)
+
+        if (keyPos == std::string_view::npos) {
             return std::nullopt;
+        }
 
         const std::size_t afterKey = keyPos + key.size();
         if (afterKey + 1 < s.size() && s[afterKey] == '=' && s[afterKey + 1] == '"') {
             const std::size_t valueStart = afterKey + 2;
             const std::size_t valueEnd = s.find('"', valueStart);
-            if (valueEnd == std::string_view::npos)
+
+            if (valueEnd == std::string_view::npos) {
                 return std::nullopt;
+            }
+
             return s.substr(valueStart, valueEnd - valueStart);
         }
 
@@ -69,8 +116,9 @@ std::optional<std::string_view> extractQuoted(std::string_view s, std::string_vi
  * @return      std::optional<veda::TimestampMs> epoch 기준 밀리초 단위 시간, 실패 시 nullopt
  */
 std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
-    if (utc.size() < 23)
+    if (utc.size() < 23) {
         return std::nullopt;
+    }
 
     auto year = parseNumber<int>(utc.substr(0, 4));
     auto mon = parseNumber<int>(utc.substr(5, 2));
@@ -80,8 +128,9 @@ std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
     auto sec = parseNumber<int>(utc.substr(17, 2));
     auto ms = utc.size() >= 23 ? parseNumber<int>(utc.substr(20, 3)) : std::optional<int>(0);
 
-    if (!year || !mon || !day || !hour || !min || !sec || !ms)
+    if (!year || !mon || !day || !hour || !min || !sec || !ms) {
         return std::nullopt;
+    }
 
     std::tm tm{};
     tm.tm_year = *year - 1900;
@@ -92,8 +141,9 @@ std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
     tm.tm_sec = *sec;
 
     const std::time_t epochSec = timegm(&tm);
-    if (epochSec == static_cast<std::time_t>(-1))
+    if (epochSec == static_cast<std::time_t>(-1)) {
         return std::nullopt;
+    }
 
     return static_cast<veda::TimestampMs>(epochSec) * 1000 + *ms;
 }
@@ -114,18 +164,22 @@ struct Transformation {
  */
 std::optional<Transformation> parseTransformation(std::string_view frame) {
     const size_t transPos = frame.find("<tt:Transformation");
-    if (transPos == std::string_view::npos)
+
+    if (transPos == std::string_view::npos) {
         return std::nullopt;
+    }
 
     const size_t translatePos = frame.find("<tt:Translate", transPos);
     const size_t scalePos = frame.find("<tt:Scale", transPos);
-    if (translatePos == std::string_view::npos || scalePos == std::string_view::npos)
+    if (translatePos == std::string_view::npos || scalePos == std::string_view::npos) {
         return std::nullopt;
+    }
 
     const size_t translateEnd = frame.find('>', translatePos);
     const size_t scaleEnd = frame.find('>', scalePos);
-    if (translateEnd == std::string_view::npos || scaleEnd == std::string_view::npos)
+    if (translateEnd == std::string_view::npos || scaleEnd == std::string_view::npos) {
         return std::nullopt;
+    }
 
     const auto translateTag = frame.substr(translatePos, translateEnd - translatePos);
     const auto scaleTag = frame.substr(scalePos, scaleEnd - scalePos);
@@ -134,15 +188,17 @@ std::optional<Transformation> parseTransformation(std::string_view frame) {
     auto ty = extractQuoted(translateTag, "y");
     auto sx = extractQuoted(scaleTag, "x");
     auto sy = extractQuoted(scaleTag, "y");
-    if (!tx || !ty || !sx || !sy)
+    if (!tx || !ty || !sx || !sy) {
         return std::nullopt;
+    }
 
     auto txv = parseNumber<double>(*tx);
     auto tyv = parseNumber<double>(*ty);
     auto sxv = parseNumber<double>(*sx);
     auto syv = parseNumber<double>(*sy);
-    if (!txv || !tyv || !sxv || !syv)
+    if (!txv || !tyv || !sxv || !syv) {
         return std::nullopt;
+    }
 
     return Transformation{*txv, *tyv, *sxv, *syv};
 }
@@ -158,7 +214,7 @@ double normX(double px, const Transformation& t) { return (t.scaleX * px + t.tra
 /**
  * @brief   ONVIF 정규화 좌표를 domain::NormBox Y 좌표계로 변환
  * @note    y축이 반전되어 보이는 건 CCTV 설치 방향과 무관한 ONVIF 표준 좌표계
- *          Scale_y 가 음수인 게 정상이며, 손으로 부호를 뒤집지 않고 스트림 값을 그대로 적용
+ *          Scale_y가 음수인 게 정상이며, 손으로 부호를 뒤집지 않고 스트림 값을 그대로 적용
  * @param   py ONVIF 정규화 좌표 Y ([-1,1], y 위쪽)
  * @param   t 프레임별 Transformation 정보
  * @return  좌상단 원점 기준 정규화 좌표 [0,1]
@@ -170,10 +226,10 @@ double normY(double py, const Transformation& t) { return (1.0 - (t.scaleY * py 
 OnvifParser::OnvifParser(double edgeEpsilon) : edgeEpsilon_(edgeEpsilon) {}
 
 /**
- * @brief   메타데이터 RawPacket을 파싱하여 시스템 처리 단위인 ChannelFrame 으로 변환
+ * @brief   메타데이터 RawPacket을 파싱하여 시스템 처리 단위인 ChannelFrame으로 변환
  *
  * @details
- * - 페이로드당 <tt:Frame> 이 하나라고 가정하며, 여러 개가 온다면 첫 번째만 처리함
+ * - 페이로드당 <tt:Frame>이 하나라고 가정하며, 여러 개가 온다면 첫 번째만 처리함
  * - Transformation 파라미터 없이는 좌표를 신뢰할 수 없으므로 파싱을 중단하고 빈 프레임을 반환
  * - ID 없는 객체, 위치(BBox)를 알 수 없는 객체, 분류(Type)가 없는 객체는 라우팅이 불가능하므로 스킵
  * - 신뢰할 수 없는 데이터는 완전히 건너뛴 뒤 실제 Type 속성을 찾음
@@ -222,9 +278,17 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
     size_t pos = 0;
     while ((pos = frame.find("<tt:Object", pos)) != std::string_view::npos) {
-        const size_t objEnd = frame.find("</tt:Object>", pos);
-        if (objEnd == std::string_view::npos)
+        // [W3] 파싱된 객체 수가 상한에 닿으면 조기 종료 -> 증폭된 페이로드로 인한 메모리 고갈 방지
+        if (result.objects.size() >= kMaxObjectsPerFrame) {
+            logError(kIface, "ch=" + std::to_string(raw.channelId) + " 파싱 객체 수가 상한(" +
+                                 std::to_string(kMaxObjectsPerFrame) + ")에 도달 - 나머지 객체 무시");
             break;
+        }
+
+        const size_t objEnd = frame.find("</tt:Object>", pos);
+        if (objEnd == std::string_view::npos) {
+            break;
+        }
 
         const std::string_view obj = frame.substr(pos, objEnd - pos);
         pos = objEnd + 12;  // strlen("</tt:Object>")
@@ -233,11 +297,14 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         const std::string_view openTag = openTagEnd == std::string_view::npos ? obj : obj.substr(0, openTagEnd);
 
         auto idAttr = extractQuoted(openTag, "ObjectId");
-        if (!idAttr)
+        if (!idAttr) {
             continue;
+        }
+
         auto id = parseNumber<veda::ObjectId>(*idAttr);
-        if (!id)
+        if (!id) {
             continue;
+        }
 
         domain::DetectedObject det;
         det.id = *id;
@@ -249,8 +316,10 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         }
 
         const size_t bboxPos = obj.find("<tt:BoundingBox");
-        if (bboxPos == std::string_view::npos)
+        if (bboxPos == std::string_view::npos) {
             continue;
+        }
+
         const size_t bboxEnd = obj.find('>', bboxPos);
         const std::string_view bboxTag =
             bboxEnd == std::string_view::npos ? obj.substr(bboxPos) : obj.substr(bboxPos, bboxEnd - bboxPos);
@@ -259,20 +328,30 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         auto top = extractQuoted(bboxTag, "top");
         auto right = extractQuoted(bboxTag, "right");
         auto bottom = extractQuoted(bboxTag, "bottom");
-        if (!left || !top || !right || !bottom)
+        if (!left || !top || !right || !bottom) {
             continue;
+        }
 
         auto l = parseNumber<double>(*left);
         auto t = parseNumber<double>(*top);
         auto r = parseNumber<double>(*right);
         auto b = parseNumber<double>(*bottom);
-        if (!l || !t || !r || !b)
+        if (!l || !t || !r || !b) {
             continue;
+        }
 
         det.box.l = normX(*l, *transform);
         det.box.r = normX(*r, *transform);
         det.box.t = normY(*t, *transform);
         det.box.b = normY(*b, *transform);
+
+        // [W2] NaN/Inf 방어: std::from_chars 는 "inf"/"nan" 문자열을 그대로 파싱하고, 거대한
+        // scale/translate 는 곱셈 오버플로로 ±Inf 를 낳는다. 하류(HomographyTransform/매퍼)에
+        // isfinite 검사가 있긴 하나, 파서에서 먼저 좌표가 유한하지 않은 객체를 폐기해 방어 심층화
+        if (!std::isfinite(det.box.l) || !std::isfinite(det.box.r) || !std::isfinite(det.box.t) ||
+            !std::isfinite(det.box.b)) {
+            continue;
+        }
 
         // 아래변 잘림은 지면점을 직접 망가뜨리므로 따로 표시 (DetectedObject::bottomTruncated 참고)
         det.bottomTruncated = det.box.b >= 1.0 - edgeEpsilon_;
@@ -285,15 +364,19 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         }
 
         const size_t typePos = obj.find("<tt:Type", searchFrom);
-        if (typePos == std::string_view::npos)
+        if (typePos == std::string_view::npos) {
             continue;
+        }
 
         const size_t typeTextStart = obj.find('>', typePos);
-        if (typeTextStart == std::string_view::npos)
+        if (typeTextStart == std::string_view::npos) {
             continue;
+        }
+
         const size_t typeTextEnd = obj.find('<', typeTextStart);
-        if (typeTextEnd == std::string_view::npos)
+        if (typeTextEnd == std::string_view::npos) {
             continue;
+        }
 
         const std::string_view typeText = obj.substr(typeTextStart + 1, typeTextEnd - typeTextStart - 1);
         det.cls = veda::objectClassFromString(typeText);
@@ -305,7 +388,7 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
             ++g_unknownTypeCount;
             if (g_unknownTypeCount == 1 || g_unknownTypeCount % 100 == 0) {
                 logError(kIface, "ch=" + std::to_string(raw.channelId) + " id=" + std::to_string(det.id) +
-                                     " 인식 안 되는 Type=\"" + std::string(typeText) + "\" -> Unknown 처리 (누적 " +
+                                     " 인식 안 되는 Type=\"" + sanitizeForLog(typeText) + "\" -> Unknown 처리 (누적 " +
                                      std::to_string(g_unknownTypeCount) + "건)");
             }
         }
