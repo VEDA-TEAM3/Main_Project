@@ -319,4 +319,116 @@ void SerialHwEventDispatcher::checkChannelMismatch(const veda_uplink_packet_t& p
 }
 
 /**
- * @detail...
+ * @details lastSentLevel_에 저장된 값을 그대로 새 타임스탬프로 재전송한다.
+ *          원본 dist_mm은 알 수 없으므로 VEDA_DIST_MM_NONE으로 보낸다 -- 재전송의
+ *          목적은 "이 채널이 어떤 risk_level을 표시해야 하는지"를 다시 알리는 것이지
+ *          원래 프레임의 거리 측정값을 복원하는 게 아니기 때문이다.
+ * @note 호출자(checkChannelMismatch)가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
+ */
+void SerialHwEventDispatcher::resendLastCommand(veda::ChannelId ch, veda::RiskLevel level) {
+    if (fd_ < 0) {
+        return;
+    }
+
+    veda_risk_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.channel_id = static_cast<uint8_t>(ch);
+    ev.risk_level = static_cast<uint8_t>(level);
+    ev.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+    ev.dist_mm = VEDA_DIST_MM_NONE;
+
+    veda_downlink_frame_t frame;
+    frame.start_byte = VEDA_START_BYTE;
+    frame.payload = ev;
+    frame.checksum = veda_downlink_checksum(&ev);
+    frame.end_byte = VEDA_END_BYTE;
+
+    ssize_t written = write(fd_, &frame, sizeof(frame));
+    if (written != static_cast<ssize_t>(sizeof(frame))) {
+        logError(kIface, "재전송 실패: 채널 " + std::to_string(ch) + " (" + strerror(errno) + ")");
+        return;
+    }
+
+    logSuccess(kIface, "채널 " + std::to_string(ch) + " 명령 재전송 (" + std::string(veda::toString(level)) + ")");
+}
+
+/// @note 호출자가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
+void SerialHwEventDispatcher::raiseFault(veda::ChannelId ch) {
+    auto it = faultState_.find(ch);
+    const bool wasFaulted = (it != faultState_.end()) && it->second;
+    faultState_[ch] = true;
+
+    if (!wasFaulted) {
+        logError(kIface, "채널 " + std::to_string(ch) + " 재시도 소진 -> fault 에스컬레이션");
+        if (faultCallback_) {
+            faultCallback_(ch, true);
+        }
+    }
+}
+
+/// @note 호출자가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
+void SerialHwEventDispatcher::clearFault(veda::ChannelId ch) {
+    auto it = faultState_.find(ch);
+    const bool wasFaulted = (it != faultState_.end()) && it->second;
+    faultState_[ch] = false;
+
+    if (wasFaulted) {
+        logSuccess(kIface, "채널 " + std::to_string(ch) + " fault 해소");
+        if (faultCallback_) {
+            faultCallback_(ch, false);
+        }
+    }
+}
+
+/**
+ * @details setStatusCallback과 동일한 이유로, 등록 즉시 현재 파악된 채널별 fault 상태를
+ *          스냅샷으로 한 번 통지해 등록 이전 상태 공백을 없앤다.
+ */
+void SerialHwEventDispatcher::setFaultCallback(FaultCallback callback) {
+    std::lock_guard<std::mutex> lock(sendStateMutex_);
+    faultCallback_ = std::move(callback);
+
+    if (faultCallback_) {
+        for (const auto& [ch, faulted] : faultState_) {
+            faultCallback_(ch, faulted);
+        }
+    }
+}
+
+/**
+ * @details alive 상태를 갱신하고, 실제로 바뀐 경우에만 콜백을 통지한다. HEARTBEAT를 받을
+ *          때마다(alive=true) lastHeartbeatAt_는 전이 여부와 무관하게 항상 갱신해야
+ *          watchdogLoop()가 타임아웃을 정확히 판단할 수 있다.
+ */
+void SerialHwEventDispatcher::reportAlive(veda::ChannelId ch, bool alive) {
+    std::lock_guard<std::mutex> lock(heartbeatMutex_);
+    if (alive) {
+        lastHeartbeatAt_[ch] = std::chrono::steady_clock::now();
+    }
+
+    ReportedState& state = reportedState_[ch];
+    if (state.alive == alive) {
+        return;
+    }
+    state.alive = alive;
+
+    if (statusCallback_) {
+        statusCallback_(ch, state.alive, state.indicators);
+    }
+}
+
+/// @details 표시 상태(led/siren/buzzer)가 실제로 바뀐 경우에만 콜백을 통지한다.
+void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndicatorState& indicators) {
+    std::lock_guard<std::mutex> lock(heartbeatMutex_);
+    ReportedState& state = reportedState_[ch];
+    if (state.indicators == indicators) {
+        return;
+    }
+    state.indicators = indicators;
+
+    if (statusCallback_) {
+        statusCallback_(ch, state.alive, state.indicators);
+    }
+}
