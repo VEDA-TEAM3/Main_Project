@@ -10,7 +10,7 @@
 
 | Date | Version | Writer | Summary |
 | --- | --- | --- | ---|
-| 2026.07.27 | v1.0.0 | Mangjun |  |
+| 2026.07.27 | v1.0.0 | Mangjun | ISanitizer 인터페이스 및 ContainmentSanitizer 구현체 동작 원리 문서화 |
 
 ---
 
