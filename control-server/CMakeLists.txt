@@ -61,3 +61,29 @@ target_include_directories(verify-pipeline PRIVATE
 target_compile_options(verify-pipeline PRIVATE -O2)
 
 target_link_libraries(verify-pipeline PRIVATE Threads::Threads)
+
+# AppConfig 의 하드웨어 채널/zone 범위 검증 하네스.
+add_executable(verify-config
+    test/verify_config.cpp
+)
+
+target_include_directories(verify-config PRIVATE
+    include
+    src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_compile_options(verify-config PRIVATE -O2)
+target_link_libraries(verify-config PRIVATE nlohmann_json::nlohmann_json)
+
+# UART 이벤트 채널/거리 인코딩 경계값 검증 하네스.
+add_executable(verify-serial-encoding
+    test/verify_serial_encoding.cpp
+)
+
+target_include_directories(verify-serial-encoding PRIVATE
+    src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_compile_options(verify-serial-encoding PRIVATE -O2)
