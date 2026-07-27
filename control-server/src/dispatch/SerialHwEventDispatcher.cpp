@@ -432,36 +432,3 @@ void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndic
         statusCallback_(ch, state.alive, state.indicators);
     }
 }
-
-/**
- * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
- *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
- */
-void SerialHwEventDispatcher::watchdogLoop() {
-    const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
-                                                           static_cast<uint64_t>(missedBeatsForTimeout_));
-
-    while (running_) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(heartbeatIntervalMs_));
-
-        std::vector<veda::ChannelId> timedOutChannels;
-        {
-            std::lock_guard<std::mutex> lock(heartbeatMutex_);
-            const auto now = std::chrono::steady_clock::now();
-            for (const auto& [ch, state] : reportedState_) {
-                if (!state.alive) {
-                    continue;
-                }
-                auto lastIt = lastHeartbeatAt_.find(ch);
-                const bool timedOut = (lastIt == lastHeartbeatAt_.end()) || (now - lastIt->second > timeoutDuration);
-                if (timedOut) {
-                    timedOutChannels.push_back(ch);
-                }
-            }
-        }
-
-        for (veda::ChannelId ch : timedOutChannels) {
-            reportAlive(ch, false);
-        }
-    }
-}
