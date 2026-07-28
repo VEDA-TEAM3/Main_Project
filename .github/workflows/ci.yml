@@ -1,0 +1,86 @@
+name: CI
+
+# 보안 방어선의 자동 집행자.
+# 감사에서 적용한 방어들(파서 상한/NaN 거부, 새니타이저 임계값 throw, 라우터 무할당 계약,
+# 매퍼 특이행렬 거부, Source lost-wakeup 수정 등)이 조용히 회귀하지 않도록
+# 모든 push/PR 에서 빌드 + 테스트를 강제한다.
+#
+# [ 빌드 범위와 테스트 범위가 다르다 ]
+# - 빌드: 저장소 '전체'(compute-server + control-server). 한쪽 서버의 컴파일이 깨지는 것을
+#         CI 가 놓치지 않기 위해서다 -- 테스트가 닿지 않는 코드도 '빌드되는지'는 보장해야 한다
+# - 테스트: 현재 compute-server 만. control-server 테스트는 아직 완성 전이라
+#           tests/CMakeLists.txt 가 등록하지 않는다 (ctest 에 아예 나타나지 않음)
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# 같은 브랜치에서 새 커밋이 올라오면 진행 중이던 실행을 취소 (러너 낭비 방지)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (Ubuntu / GCC)
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 프로덕션 빌드에 필요한 것만 설치한다.
+      # GTest/GMock 은 여기 없다 -- 루트 CMakeLists 의 FetchContent 가 가져오므로
+      # 러너의 패키지 버전에 테스트가 좌우되지 않는다
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            g++ \
+            pkg-config \
+            libmosquitto-dev \
+            libssl-dev \
+            nlohmann-json3-dev
+
+      # FetchContent 가 내려받은 googletest 를 커밋 간에 재사용한다.
+      # 키에 루트 CMakeLists.txt 해시를 넣어, GIT_TAG 를 바꾸면 캐시가 자동 무효화된다
+      - name: Cache googletest (FetchContent)
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-deps-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: ${{ runner.os }}-deps-
+
+      # 범위를 좁히는 플래그를 주지 않는다 -> VEDA_BUILD_CONTROL_SERVER 기본값(ON)으로
+      # 두 서버가 모두 빌드된다
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+
+      # 저장소 전체를 빌드한다: compute-server + control-server + 모든 테스트 타깃.
+      # 테스트가 compute-server 범위여도 '빌드'는 전체를 도는 것이 핵심이다
+      # -- 그래야 control-server 쪽 컴파일 깨짐이 CI 에서 즉시 드러난다
+      - name: Build
+        run: cmake --build build --parallel
+
+      # 현재 등록되는 것은 compute-server 단위 테스트뿐이다 (tests/CMakeLists.txt).
+      # GTest 케이스는 gtest_discover_tests 로 개별 등록되므로
+      # 실패 시 어느 TEST() 가 깨졌는지 ctest 출력만으로 알 수 있다
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure --parallel 2
+
+      # 실패한 실행을 사후 분석할 수 있도록 CTest 로그를 남긴다
+      - name: Upload CTest logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs
+          path: build/Testing/
+          if-no-files-found: ignore
+          retention-days: 7
