@@ -26,8 +26,9 @@ RtspOnvifSourceV2::RtspOnvifSourceV2(const AppConfig& config)
 
 RtspOnvifSourceV2::~RtspOnvifSourceV2() {
     stop();
-    if (worker_.joinable())
+    if (worker_.joinable()) {
         worker_.join();
+    }
 }
 
 void RtspOnvifSourceV2::stop() noexcept {
@@ -38,10 +39,19 @@ void RtspOnvifSourceV2::stop() noexcept {
     // (= 프로세스가 SIGINT/SIGTERM 에 응답하지 못하고 MQTT 종료 신호도 못 보냄)
     {
         std::lock_guard<std::mutex> lk(clientMutex_);
-        if (activeClient_ != nullptr)
+        if (activeClient_ != nullptr) {
             activeClient_->cancel();
+        }
     }
 
+    // [W1] notify 전에 mtx_ 를 잡는다: 그냥 notify 만 하면 컨슈머가 "술어를 false 로 평가한 뒤
+    // 조건변수 대기열에 등록되기 전" 구간에 알림이 끼어들어 유실된다 (lost wakeup).
+    // 술어가 보는 stopping_ 은 mtx_ 밖의 atomic 이라, stop() 이 mtx_ 를 전혀 잡지 않으면
+    // 컨슈머가 mtx_ 를 쥔 채로도 stop() 이 끝까지 진행할 수 있어 그 창이 실제로 열린다.
+    // 알림을 놓치면 워커도 곧 종료해 다시 notify 할 주체가 없으므로 next() 가 영구 블로킹되고,
+    // main 루프가 빠져나오지 못해 MQTT 종료 신호("0")를 발행하지 못한 채 SIGKILL 된다.
+    // (MqttFrameSink::start / MqttTransport::stop 이 쓰는 것과 같은 방어 패턴)
+    std::lock_guard<std::mutex> lock(mtx_);
     cv_.notify_all();
 }
 
@@ -85,8 +95,10 @@ void RtspOnvifSourceV2::workerLoop() {
         // stop() 이 이 세션을 취소할 수 있도록 등록 (파괴 전에 반드시 해제해야 UAF 가 없음)
         {
             std::lock_guard<std::mutex> lk(clientMutex_);
-            if (stopping_)
+            if (stopping_) {
                 break;
+            }
+
             activeClient_ = &client;
         }
 
@@ -94,8 +106,9 @@ void RtspOnvifSourceV2::workerLoop() {
         // (예전에는 실패해도 run() 을 불렀고, 그 직전에 백오프를 무조건 1로 리셋하고 있었음)
         if (client.connect() && client.setup()) {
             client.play();
-            if (client.playSucceeded())
+            if (client.playSucceeded()) {
                 client.run();
+            }
         }
 
         {
@@ -103,15 +116,17 @@ void RtspOnvifSourceV2::workerLoop() {
             activeClient_ = nullptr;
         }
 
-        if (stopping_)
+        if (stopping_) {
             break;
+        }
 
         // [백오프 정책] 실제로 데이터를 받은 세션이었을 때만 초기값으로 되돌린다.
-        // connect/setup 은 되는데 PLAY 가 계속 실패하는 설정 오류(잘못된 rtspPlayUri 등)에서도
+        // connect/setup은 되는데 PLAY 가 계속 실패하는 설정 오류(잘못된 rtspPlayUri 등)에서도
         // 지수 백오프가 제대로 커지도록 하기 위함 -- 예전에는 매 시도마다 1초로 리셋되어
         // 카메라를 1초 간격으로 두드리는 재접속 폭풍이 발생했음
-        if (sessionProductive)
+        if (sessionProductive) {
             backoffSec = backoffInitialSec_;
+        }
 
         logError(kIface, "ch=" + std::to_string(config_.channelId) + " 연결 끊김 - " + std::to_string(backoffSec) +
                              "초 후 재시도");
@@ -120,8 +135,10 @@ void RtspOnvifSourceV2::workerLoop() {
             std::unique_lock<std::mutex> lk(mtx_);
             cv_.wait_for(lk, std::chrono::seconds(backoffSec), [this] { return stopping_.load(); });
         }
-        if (stopping_)
+
+        if (stopping_) {
             break;
+        }
 
         // 다음 실패에 대비해 증가 (backoffMaxSec_ 에서 포화)
         backoffSec = std::min(backoffSec * 2, backoffMaxSec_);
@@ -134,15 +151,16 @@ bool RtspOnvifSourceV2::next(domain::RawPacket& out) {
         std::unique_lock<std::mutex> lk(mtx_);
         cv_.wait(lk, [this] { return count_ > 0 || stopping_.load(); });
 
-        if (count_ == 0)
+        if (count_ == 0) {
             return false;
+        }
 
         domain::RawPacket& slot = ring_[head_];
 
         out.channelId = slot.channelId;
         // 복사 대신 버퍼 소유권 교환(O(1) 포인터 스왑): out 이 들고 있던(이미 소비된) 버퍼가
-        // 슬롯으로 넘어가 다음 write 의 capacity 로 재사용됨 -> per-frame memcpy 제거 + capacity 보존.
-        // 슬롯/파이프라인 모두 mtx_ 안에서만 bytes 를 만지므로 스왑은 스레드 안전함.
+        // 슬롯으로 넘어가 다음 write 의 capacity 로 재사용됨 -> per-frame memcpy 제거 + capacity 보존
+        // 슬롯/파이프라인 모두 mtx_ 안에서만 bytes 를 만지므로 스왑은 스레드 안전함
         std::swap(out.bytes, slot.bytes);
         out.recvTime = slot.recvTime;
 
@@ -156,8 +174,11 @@ bool RtspOnvifSourceV2::next(domain::RawPacket& out) {
 
         report = buildMetricsReportIfDue();
     }
-    if (!report.empty())
+
+    if (!report.empty()) {
         logSuccess(kIface, report);
+    }
+
     return true;
 }
 
@@ -166,8 +187,9 @@ std::string RtspOnvifSourceV2::buildMetricsReportIfDue() {
 
     const auto now = steady_clock::now();
     const auto elapsed = duration_cast<milliseconds>(now - metrics_.windowStart);
-    if (elapsed < metricsReportInterval_ || metrics_.consumedCount == 0)
+    if (elapsed < metricsReportInterval_ || metrics_.consumedCount == 0) {
         return {};
+    }
 
     const double avgLatencyUs = duration_cast<duration<double, std::micro>>(metrics_.totalQueueLatency).count() /
                                 static_cast<double>(metrics_.consumedCount);

@@ -13,7 +13,7 @@
 
 namespace {
 
-/// @brief AppConfig 의 문자열 정책을 pipeline 열거형으로 변환 (값 검증은 AppConfig::load 가 이미 수행)
+/// @brief AppConfig 의 문자열 정책을 pipeline 열거형으로 변환
 RiskEdgePolicy toRiskEdgePolicy(const std::string& value) {
     if (value == "keep")
         return RiskEdgePolicy::Keep;
@@ -48,9 +48,6 @@ AppContext::AppContext(const AppConfig& config) {
     auto ground = std::make_shared<BottomCenterExtractor>();
     auto transform = std::make_shared<HomographyTransform>(config.homography, toHomographyOptions(config));
 
-    // 두 sink가 공유하는 단일 MQTT 커넥션.
-    // 순서가 중요함: transport 생성 -> sink 생성 및 start()(연결 리스너 등록) -> transport 시작
-    // 그래야 최초 연결 이벤트를 어느 sink도 놓치지 않음
     transport_ = std::make_shared<MqttTransport>(config);
 
     auto riskSink = std::make_shared<MqttTopViewSink>(transport_, config);

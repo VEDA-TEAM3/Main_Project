@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
+#include <random>
 #include <sstream>
 
 #include "Logger.h"
@@ -41,20 +42,30 @@ RtspClientV2::RtspClientV2(const AppConfig& config)
       cfg_(config) {
     sockBuf_.resize(readBufBytes_);
     rtpPacket_.resize(kMaxRtpPayloadSize);
+
+    // client nonce 를 세션마다 무작위로 생성 (하드코딩된 고정 cnonce는 Digest 재전송 공격에 취약)
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<std::uint32_t> dist;
+    char cnonceBuf[9];
+    snprintf(cnonceBuf, sizeof(cnonceBuf), "%08x", dist(gen));
+    cnonce_ = cnonceBuf;
 }
 
 RtspClientV2::~RtspClientV2() {
     keepRunning_ = false;
-    if (keepaliveThread_.joinable())
+    if (keepaliveThread_.joinable()) {
         keepaliveThread_.join();
+    }
     const bool wasOpen = (sock_ != -1);
     closeSocket();
-    if (wasOpen)
+    if (wasOpen) {
         logSuccess(kIface, "소켓 정상 종료");
+    }
 }
 
 void RtspClientV2::closeSocket() noexcept {
-    // close 전에 무효화: 이후 cancel() 이 들어와도 이미 닫힌(또는 번호가 재사용된) fd 에 shutdown 하지 않음
+    // close 전에 무효화: 이후 cancel()이 들어와도 이미 닫힌(또는 번호가 재사용된) fd에 shutdown 하지 않음
     cancelFd_.store(-1, std::memory_order_release);
     if (sock_ != -1) {
         close(sock_);
@@ -65,8 +76,8 @@ void RtspClientV2::closeSocket() noexcept {
 void RtspClientV2::cancel() noexcept {
     cancelled_.store(true, std::memory_order_release);
 
-    // shutdown() 은 fd 를 닫지 않고 연결만 끊으므로, 블로킹 중인 recv() 가 즉시 0/-1 로 반환된다.
-    // (close() 를 쓰면 소유자 스레드가 같은 fd 번호를 다시 쓰는 순간 경합이 생김)
+    // shutdown() 은 fd를 닫지 않고 연결만 끊으므로, 블로킹 중인 recv()가 즉시 0/-1로 반환된다.
+    // (close()를 쓰면 소유자 스레드가 같은 fd 번호를 다시 쓰는 순간 경합이 생김)
     const int fd = cancelFd_.load(std::memory_order_acquire);
     if (fd != -1) {
         ::shutdown(fd, SHUT_RDWR);
@@ -97,7 +108,13 @@ bool RtspClientV2::connect() {
     struct sockaddr_in serverAddr {};
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(static_cast<uint16_t>(cfg_.rtspPort));
-    inet_pton(AF_INET, cfg_.rtspIp.c_str(), &serverAddr.sin_addr);
+    // inet_pton 은 점 표기 IPv4 만 처리한다. 실패(호스트명/오타)를 확인하지 않으면 sin_addr 가
+    // 0 인 채로 0.0.0.0 에 접속을 시도해 원인 모를 실패로 이어진다
+    if (inet_pton(AF_INET, cfg_.rtspIp.c_str(), &serverAddr.sin_addr) != 1) {
+        logError(kIface, "잘못된 rtspIp=\"" + cfg_.rtspIp + "\" - 점 표기 IPv4 주소여야 합니다 (호스트명 미지원)");
+        closeSocket();
+        return false;
+    }
 
     // connect() 자체는 SO_RCVTIMEO의 영향을 받지 않으므로, 논블로킹으로 전환한 뒤
     // select()로 명시적 타임아웃을 건다 (카메라 무응답/방화벽 SYN drop 시 무한 대기 방지)
@@ -188,11 +205,14 @@ bool RtspClientV2::recvHeaders(std::string& out) {
     char buf[4096];
     while (out.find("\r\n\r\n") == std::string::npos) {
         const int n = recv(sock_, buf, sizeof(buf), 0);
-        if (n <= 0)
+        if (n <= 0) {
             return false;
+        }
+
         out.append(buf, static_cast<size_t>(n));
-        if (out.size() > 65536)
+        if (out.size() > 65536) { // 하드 코딩..?
             return false;
+        }
     }
     return true;
 }
@@ -201,7 +221,11 @@ bool RtspClientV2::setup() {
     std::string req1 = "SETUP " + cfg_.rtspSetupUri +
                        " RTSP/1.0\r\nCSeq: 1\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
-    send(sock_, req1.c_str(), req1.length(), 0);
+    // MSG_NOSIGNAL: 카메라가 이미 연결을 끊었으면 send() 가 SIGPIPE 를 내며 프로세스를 죽일 수 있음
+    if (send(sock_, req1.c_str(), req1.length(), MSG_NOSIGNAL) < 0) {
+        logError(kIface, std::string("SETUP 1차 요청 전송 실패 - ") + std::strerror(errno));
+        return false;
+    }
 
     std::string res1;
     if (!recvHeaders(res1)) {
@@ -211,10 +235,12 @@ bool RtspClientV2::setup() {
 
     const size_t realmPos = res1.find("realm=\"");
     const size_t noncePos = res1.find("nonce=\"");
-    if (realmPos != std::string::npos)
+    if (realmPos != std::string::npos) {
         realm_ = res1.substr(realmPos + 7, res1.find('"', realmPos + 7) - (realmPos + 7));
-    if (noncePos != std::string::npos)
+    }
+    if (noncePos != std::string::npos) {
         nonce_ = res1.substr(noncePos + 7, res1.find('"', noncePos + 7) - (noncePos + 7));
+    }
     if (nonce_.empty()) {
         logError(kIface, "인증 파라미터(nonce) 파싱 실패 - SETUP 1차 응답: [" + statusLine(res1) + "]");
         return false;
@@ -225,7 +251,10 @@ bool RtspClientV2::setup() {
                        " RTSP/1.0\r\nCSeq: 2\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n" +
                        auth + "\r\n";
-    send(sock_, req2.c_str(), req2.length(), 0);
+    if (send(sock_, req2.c_str(), req2.length(), MSG_NOSIGNAL) < 0) {
+        logError(kIface, std::string("SETUP 2차(인증) 요청 전송 실패 - ") + std::strerror(errno));
+        return false;
+    }
 
     std::string res2;
     if (!recvHeaders(res2)) {
@@ -252,7 +281,10 @@ void RtspClientV2::play() {
     std::string auth = buildDigestHeader("PLAY", cfg_.rtspPlayUri);
     std::string req =
         "PLAY " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: 3\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
-    send(sock_, req.c_str(), req.length(), 0);
+    if (send(sock_, req.c_str(), req.length(), MSG_NOSIGNAL) < 0) {
+        logError(kIface, std::string("PLAY 요청 전송 실패 - ") + std::strerror(errno));
+        return;
+    }
 
     std::string res;
     if (!recvHeaders(res)) {
@@ -284,30 +316,42 @@ void RtspClientV2::run() {
     // 않으므로, 이 확인이 없으면 run() 은 영영 반환하지 않고 워커 join 이 무한 대기한다.
     while (!cancelled_.load(std::memory_order_acquire)) {
         std::uint8_t sync = 0;
-        if (!readByte(sync))
+        if (!readByte(sync)) {
             break;
-        if (sync != '$')
+        }
+            
+        if (sync != '$') {
             continue;
+        }            
 
         std::uint8_t header[3];
-        if (!readBytes(header, 3))
+        if (!readBytes(header, 3)) {
             break;
+        }
+            
         const int channel = header[0];
         const int payloadLen = (header[1] << 8) | header[2];
 
-        if (static_cast<std::size_t>(payloadLen) > kMaxRtpPayloadSize)
+        if (static_cast<std::size_t>(payloadLen) > kMaxRtpPayloadSize) {
             break;
-
-        if (!readBytes(rtpPacket_.data(), static_cast<std::size_t>(payloadLen)))
+        }
+            
+        if (!readBytes(rtpPacket_.data(), static_cast<std::size_t>(payloadLen))) {
             break;
-        if (channel != 0)
+        }
+            
+        if (channel != 0) {
             continue;
-        if (payloadLen < kRtpHeaderSize)
+        }
+            
+        if (payloadLen < kRtpHeaderSize) {
             continue;
+        }
 
-        if (metadataBuffer.empty())
+        if (metadataBuffer.empty()) {
             frameAssembleStart_ = std::chrono::steady_clock::now();
-
+        }
+            
         const bool marker = (rtpPacket_[1] & 0x80) != 0;
         metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
                               static_cast<size_t>(payloadLen - kRtpHeaderSize));
@@ -326,8 +370,10 @@ void RtspClientV2::run() {
             metrics_.totalBytes += metadataBuffer.size();
             ++metrics_.payloadCount;
 
-            if (onPayloadReceived)
+            if (onPayloadReceived) {
                 onPayloadReceived(std::string_view(metadataBuffer));
+            }
+                
             metadataBuffer.clear();
 
             reportMetricsIfDue();
@@ -348,8 +394,9 @@ void RtspClientV2::reportMetricsIfDue() {
 
     const auto now = steady_clock::now();
     const auto elapsed = duration_cast<milliseconds>(now - metrics_.windowStart);
-    if (elapsed < metricsReportInterval_ || metrics_.payloadCount == 0)
+    if (elapsed < metricsReportInterval_ || metrics_.payloadCount == 0) {
         return;
+    }
 
     const double avgAssembleUs = duration_cast<duration<double, std::micro>>(metrics_.totalAssembleTime).count() /
                                  static_cast<double>(metrics_.payloadCount);
@@ -377,8 +424,10 @@ std::string RtspClientV2::md5Hex(const std::string& input) {
     // NOLINTNEXTLINE
     MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
     char output[33];
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         snprintf(output + i * 2, 3, "%02x", hash[i]);
+    }
+        
     return std::string(output);
 }
 
@@ -386,7 +435,7 @@ std::string RtspClientV2::buildDigestHeader(const std::string& method, const std
     char ncBuf[9];
     snprintf(ncBuf, sizeof(ncBuf), "%08x", nonceCount_++);
     const std::string nc(ncBuf);
-    const std::string cnonce = "0a4f113b";
+    const std::string& cnonce = cnonce_;
     const std::string qop = "auth";
 
     const std::string ha1 = md5Hex(cfg_.rtspUser + ":" + realm_ + ":" + cfg_.rtspPass);
@@ -408,8 +457,9 @@ void RtspClientV2::keepAliveLoop() {
         for (int i = 0; i < keepAliveIntervalSec_ && keepRunning_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
-        if (!keepRunning_)
+        if (!keepRunning_) {
             break;
+        }
 
         std::string auth = buildDigestHeader("GET_PARAMETER", cfg_.rtspPlayUri);
         std::string req = "GET_PARAMETER " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: " + std::to_string(cseq_++) +

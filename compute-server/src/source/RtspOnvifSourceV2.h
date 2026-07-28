@@ -6,11 +6,11 @@
  *
  * @details
  * 원본 RtspOnvifSource와 동일한 재연결/백오프 정책을 쓰지만 다음을 최적화함:
- *  1) std::queue<RawPacket>(deque) -> 고정 크기 링버퍼(kRingCapacity)
+ *  1) std::queue<RawPacket>(deque) → 고정 크기 링버퍼(kRingCapacity)
  *     : 청크 단위 할당/해제가 없고, 큐가 무제한으로 자라지 않음
  *  2) drop-oldest 정책: 컨슈머(Pipeline)가 못 따라가 링이 가득 차면
- *     가장 오래된 프레임을 버리고 새 프레임을 씀 -> 지연이 무한정 누적되지 않음
- *  3) 콜백마다 새 RawPacket을 만들어 assign()하던 것을 링 슬롯에 직접 assign() ->
+ *     가장 오래된 프레임을 버리고 새 프레임을 씀 → 지연이 무한정 누적되지 않음
+ *  3) 콜백마다 새 RawPacket을 만들어 assign()하던 것을 링 슬롯에 직접 assign() →
  *     슬롯의 vector capacity를 재사용해 콜백당 힙 할당을 없앰
  *  4) next()는 move가 아니라 copy(assign)로 꺼냄
  *     : move를 쓰면 꺼내진 슬롯의 capacity가 함께 빠져나가 다음 write에서
@@ -37,7 +37,7 @@ class RtspClientV2;
  * @brief   RtspClientV2의 push 콜백을 pull 인터페이스로 변환하는 어댑터 (최적화 버전)
  *
  * @details
- * 재연결/백오프 정책(1s -> 2s -> ... 최대 30s)은 원본과 동일
+ * 재연결/백오프 정책(1s → 2s → ... 최대 30s)은 원본과 동일
  * next()는 재연결 시도 중에도 블로킹 대기할 뿐 false를 반환하지 않음
  */
 class RtspOnvifSourceV2 : public IMetadataSource {
@@ -60,7 +60,7 @@ public:
      *
      * @details
      * 진행 중인 클라이언트에 cancel() 을 걸어 소켓에 shutdown(SHUT_RDWR) 을 하므로 블로킹 중인
-     * recv() 가 즉시 풀린다 -> 소멸자의 join 이 recv 타임아웃만큼 지연되지 않는다
+     * recv() 가 즉시 풀린다 → 소멸자의 join 이 recv 타임아웃만큼 지연되지 않는다.
      *
      * @warning 취소 '플래그'만으로는 부족하다: 스트림이 건강한 동안에는 recv() 가 계속 성공해
      *          타임아웃이 나지 않으므로 run() 이 반환하지 않고 join 이 무한 대기한다
@@ -70,12 +70,13 @@ public:
 
 private:
     /**
-     * @brief   [connect->setup->play->run]을 재연결 백오프와 함께 반복하는 워커 루프
+     * @brief   [connect → setup → play → run]을 재연결 백오프와 함께 반복하는 워커 루프
      */
     void workerLoop();
 
     /**
-     * @brief   mtx_를 이미 잡은 상태에서 호출. 보고 주기(kMetricsReportInterval)가 되면
+     * @brief   mtx_를 이미 잡은 상태에서 호출
+     *          보고 주기(kMetricsReportInterval)가 되면
      *          누적 지표를 리셋하고 로그 문자열을 반환, 아니면 빈 문자열을 반환
      * @details 실제 로그 출력(logSuccess)은 락을 푼 뒤 호출자가 수행
      */
@@ -84,11 +85,12 @@ private:
     /**
      * @name 설정으로 빠진 튜닝 값들 (AppConfig)
      * @details
-     * 예전엔 static constexpr 였음. 기본값은 performance/compute-server.md 에 측정된 값 그대로
+     * 예전엔 static constexpr 였음
+     * 기본값은 performance/compute-server.md에 측정된 값 그대로
      *
-     * @note ringCapacity_ 가 런타임 값이 되면서 인덱스 계산의 % 가 컴파일 타임에
-     *       비트마스크로 접히지 않게 됨. 콜백/next() 당 각 1회씩이고 실측 처리율이
-     *       5fps 수준이라 무시 가능한 수준 (측정 지표에 변화 없음)
+     * @note ringCapacity_가 런타임 값이 되면서 인덱스 계산의 % 가 컴파일 타임에
+     *       비트마스크로 접히지 않게 됨
+     *       콜백/next() 당 각 1회씩이고 실측 처리율이 5fps 수준이라 무시 가능한 수준 (측정 지표에 변화 없음)
      * @{
      */
     std::size_t ringCapacity_;
@@ -102,9 +104,9 @@ private:
     std::thread worker_;
 
     /// @name 진행 중인 RTSP 세션 취소 경로
-    /// @details stop() 이 워커가 붙들고 있는 클라이언트에 cancel() 을 걸 수 있도록 포인터를 공유한다.
-    ///          activeClient_ 는 clientMutex_ 로 보호되며, 워커는 클라이언트가 파괴되기 '전에' 반드시
-    ///          이 포인터를 nullptr 로 지운다 -> stop() 이 이미 죽은 객체를 만지는 UAF 를 막음
+    /// @details stop()이 워커가 붙들고 있는 클라이언트에 cancel()을 걸 수 있도록 포인터를 공유한다.
+    ///          activeClient_는 clientMutex_로 보호되며, 워커는 클라이언트가 파괴되기 '전에' 반드시
+    ///          이 포인터를 nullptr 로 지운다 → stop()이 이미 죽은 객체를 만지는 UAF를 막음
     /// @{
     std::mutex clientMutex_;
     RtspClientV2* activeClient_ = nullptr;
@@ -113,7 +115,7 @@ private:
     std::mutex mtx_;
     std::condition_variable cv_;
 
-    /// @brief 고정 크기 링버퍼. 저장소이자 RawPacket 버퍼 풀 역할을 겸함
+    /// @brief 고정 크기 링버퍼 (저장소이자 RawPacket 버퍼 풀 역할을 겸함)
     std::vector<domain::RawPacket> ring_;
     std::size_t head_ = 0;   ///< 다음에 next()로 꺼낼 위치
     std::size_t count_ = 0;  ///< 현재 채워진 개수 (kRingCapacity 이하)

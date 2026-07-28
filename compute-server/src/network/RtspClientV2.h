@@ -47,25 +47,25 @@ public:
      * @brief   다른 스레드에서 진행 중인 세션을 즉시 취소 (멱등, 스레드 안전)
      *
      * @details
-     * cancelled_ 를 세우고 소켓에 shutdown(SHUT_RDWR) 을 걸어 blocking recv() 를 그 자리에서
+     * cancelled_를 세우고 소켓에 shutdown(SHUT_RDWR)을 걸어 blocking recv()를 그 자리에서
      * 깨운다 -> run() 이 recv 타임아웃(recvTimeoutSec_, 기본 5초)을 기다리지 않고 즉시 빠져나오므로
      * 워커 join 이 지연되지 않는다. 취소 플래그만 있으면 '스트림이 살아있는 동안' recv 가 계속
-     * 성공해 run() 이 영영 반환하지 않으므로, shutdown() 이 반드시 함께 필요하다
+     * 성공해 run() 이 영영 반환하지 않으므로, shutdown()이 반드시 함께 필요하다
      *
-     * @warning close() 가 아니라 shutdown() 이어야 한다. fd 의 소유와 close 는 소유자 스레드
+     * @warning close()가 아니라 shutdown()이어야 한다. fd의 소유와 close는 소유자 스레드
      *          (소멸자)의 몫이며, 다른 스레드가 close 하면 fd 번호 재사용 경합이 생긴다
      */
     void cancel() noexcept;
 
-    /// @brief PLAY 가 200 OK 로 성공해 스트리밍이 시작되었는가 (run() 진입 여부 판단용)
+    /// @brief PLAY가 200 OK로 성공해 스트리밍이 시작되었는가 (run() 진입 여부 판단용)
     bool playSucceeded() const noexcept { return playOk_; }
 
 private:
     /**
      * @brief   소켓을 닫고 sock_/cancelFd_ 를 무효화 (멱등)
-     * @details connect() 의 모든 실패 경로에서 호출해 fd 를 즉시 반납한다. 소멸자에만 의존하면
-     *          같은 인스턴스로 connect() 를 재시도하는 순간 이전 fd 가 새어나감
-     * @warning cancelFd_ 를 먼저 -1 로 만들어야 cancel() 이 이미 닫힌 fd 에 shutdown 하지 않음
+     * @details connect()의 모든 실패 경로에서 호출해 fd를 즉시 반납한다. 소멸자에만 의존하면
+     *          같은 인스턴스로 connect()를 재시도하는 순간 이전 fd가 새어나감
+     * @warning cancelFd_를 먼저 -1 로 만들어야 cancel()이 이미 닫힌 fd에 shutdown 하지 않음
      */
     void closeSocket() noexcept;
 
@@ -128,7 +128,8 @@ private:
     /**
      * @name 설정으로 빠진 튜닝 값들 (AppConfig)
      * @details
-     * 예전엔 static constexpr 로 여기 박혀 있었음. 기본값은 performance/compute-server.md 에
+     * 예전엔 static constexpr 로 여기 박혀 있었음
+     * 기본값은 performance/compute-server.md에
      * 측정된 값 그대로이므로, config 에서 건드리지 않으면 문서의 지표가 그대로 유효함
      *
      * - readBufBytes_        : 이 크기 단위로 recv() 호출 -> 프레임당 syscall 수를 좌우 (측정값 65536)
@@ -151,14 +152,15 @@ private:
     AppConfig cfg_;
     int sock_ = -1;  ///< 워커 스레드 전용 (생성/사용/close 모두 워커에서)
 
-    /// @brief cancel() 이 다른 스레드에서 안전하게 읽기 위한 sock_ 사본. 소멸자에서 -1 로 무효화
+    /// @brief cancel()이 다른 스레드에서 안전하게 읽기 위한 sock_ 사본 (소멸자에서 -1 로 무효화)
     std::atomic<int> cancelFd_{-1};
     /// @brief 취소 요청 여부 -- run() 루프가 매 반복 확인
     std::atomic<bool> cancelled_{false};
-    /// @brief PLAY 가 200 OK 였는가 (play() 가 설정, workerLoop 가 run() 진입 판단에 사용)
+    /// @brief PLAY가 200 OK 였는가 (play()가 설정, workerLoop 가 run() 진입 판단에 사용)
     bool playOk_ = false;
     std::string realm_;
     std::string nonce_;
+    std::string cnonce_;  ///< 세션마다 무작위로 생성하는 client nonce (Digest 재전송 공격 방어)
     std::string sessionId_;
     int cseq_ = 4;
     int nonceCount_ = 1;

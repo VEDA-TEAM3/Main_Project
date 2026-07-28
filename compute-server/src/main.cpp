@@ -73,6 +73,11 @@ int main() {
         logError(kIface, "시그널 마스크 설정 실패 - 정상 종료를 보장할 수 없습니다");
     }
 
+    // SIGPIPE 무시: 카메라가 SETUP/PLAY 도중 연결을 리셋하면 그 소켓에 대한 send() 가 SIGPIPE 를
+    // 동기적으로 발생시키는데, 기본 처리 동작이 '프로세스 종료'다. 무시로 두면 send() 가 -1/EPIPE 를
+    // 반환하고 정상 재연결 경로로 흘러간다 (블록이 아니라 무시여야 함 -- 동기 발생 시그널이므로)
+    std::signal(SIGPIPE, SIG_IGN);
+
     const AppConfig config = AppConfig::load("config.json");
 
     // 설정을 읽자마자 로거부터 구성 (이 줄 이전의 로그는 기본값 Info/콘솔+파일로 나감)
@@ -116,7 +121,15 @@ int main() {
     std::uint64_t packetCount = 0;
     while (context->source().next(raw)) {
         ++packetCount;
-        context->pipeline().onPacket(raw);
+        // 한 패킷 처리 중의 예외가 루프(=프로세스)를 죽이지 않도록 방어. 파서는 이미 예외를
+        // 던지지 않지만, 예상 못한 throw(예: 메모리 부족)에도 그 패킷만 버리고 계속 돌게 한다
+        try {
+            context->pipeline().onPacket(raw);
+        } catch (const std::exception& error) {
+            logError(kIface, std::string("패킷 처리 중 예외 - 이 패킷을 건너뜁니다: ") + error.what());
+        } catch (...) {
+            logError(kIface, "패킷 처리 중 알 수 없는 예외 - 이 패킷을 건너뜁니다");
+        }
     }
 
     // 4) 스트림이 시그널 없이 먼저 끝났을 수도 있으므로 감시 스레드를 깨워서 회수
