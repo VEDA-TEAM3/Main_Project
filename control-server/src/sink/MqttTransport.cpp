@@ -304,14 +304,41 @@ void MqttTransport::sendChannelStatus(const veda::ChannelStatus& status) {
 
         const std::string topic = veda::topic::hwStatus(status.ch);
         const std::string payload = veda::encode(status);
+
+        // 기존 Qt 계약:
+        //   topic     = veda/hw/status
+        //   channelId = 1..4 (서버 내부 ChannelId는 0..3)
+        //   state     = 표시 장치 상태를 중첩 객체로 전달
+        //
+        // TP-181에서 새 토픽/평탄 payload로 전환하면서 기존 Qt가 메시지를 전혀 받지 못하는
+        // 회귀가 생겼다. Qt가 새 계약으로 이관될 때까지 두 형식을 함께 발행한다.
+        const nlohmann::json legacyMessage{
+            {"v", status.v},
+            {"ts", status.ts},
+            {"channelId", status.ch + 1},
+            {"ok", status.hardwareAlive},
+            {"detail", status.hardwareAlive ? "ok" : "heartbeat_timeout"},
+            {"state",
+             {{"siren", status.sirenOn},
+              {"buzzer", status.buzzerOn},
+              {"ledRed", status.ledRed},
+              {"ledYellow", status.ledYellow},
+              {"ledGreen", status.ledGreen}}},
+        };
+        const std::string legacyPayload = legacyMessage.dump();
+
         // retain=true: 클라이언트가 재접속했을 때 마지막 상태를 즉시 받도록
         // (compute-server의 topic::alive(ch) LWT와 동일한 패턴)
-        if (publish(topic, payload, veda::qos::kHwStatus, /*retain=*/true)) {
+        const bool currentPublished = publish(topic, payload, veda::qos::kHwStatus, /*retain=*/true);
+        const bool legacyPublished =
+            publish(veda::topic::kLegacyHwStatus, legacyPayload, veda::qos::kHwStatus, /*retain=*/true);
+        if (currentPublished && legacyPublished) {
             logSuccess(kIface, "ChannelStatus 발행 성공 topic=" + topic + " (" + label + ")");
         } else {
             // publish() 내부의 실제 mosquitto_publish() 실패는 publish()가 자체적으로 로그를 남김
             // 여기서는 그 앞단(연결 상태 재확인 등)에서 조용히 실패한 경우까지 잡기 위한 안전망
-            logError(kIface, "ChannelStatus 발행 실패 topic=" + topic + " (" + label + ")");
+            logError(kIface, "ChannelStatus 발행 일부 또는 전체 실패 topic=" + topic +
+                                 ", legacy=" + std::string(veda::topic::kLegacyHwStatus) + " (" + label + ")");
         }
     } catch (const std::exception& error) {
         logError(kIface, std::string("ChannelStatus 발행 실패: ") + error.what());
