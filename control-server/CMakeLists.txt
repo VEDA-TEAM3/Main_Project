@@ -76,6 +76,21 @@ target_include_directories(verify-config PRIVATE
 target_compile_options(verify-config PRIVATE -O2)
 target_link_libraries(verify-config PRIVATE nlohmann_json::nlohmann_json)
 
+# MQTT/UART 없이 Controller의 채널 상태 콜백과 Qt wire contract를 검증한다.
+add_executable(verify-channel-status
+    test/verify_channel_status.cpp
+    src/core/Controller.cpp
+)
+
+target_include_directories(verify-channel-status PRIVATE
+    include
+    src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+target_compile_options(verify-channel-status PRIVATE -O2)
+target_link_libraries(verify-channel-status PRIVATE Threads::Threads)
+
 # UART 이벤트 채널/거리 인코딩 경계값 검증 하네스.
 add_executable(verify-serial-encoding
     test/verify_serial_encoding.cpp
