@@ -29,8 +29,9 @@ void clampToOutput(domain::NormBox& box) {
 AffineImageCoordinateMapper::AffineImageCoordinateMapper(double scaleX, double scaleY, double offsetX, double offsetY)
     : scaleX_(scaleX), scaleY_(scaleY), offsetX_(offsetX), offsetY_(offsetY) {
     if (!isFinite(scaleX_) || !isFinite(scaleY_) || !isFinite(offsetX_) || !isFinite(offsetY_) || scaleX_ <= 0.0 ||
-        scaleY_ <= 0.0)
+        scaleY_ <= 0.0) {
         throw std::invalid_argument("image coordinate mapper requires finite positive scales");
+    }
 }
 
 void AffineImageCoordinateMapper::map(std::vector<domain::DetectedObject>& objects, veda::ChannelId channelId) const {
@@ -50,20 +51,23 @@ void AffineImageCoordinateMapper::map(std::vector<domain::DetectedObject>& objec
         mapped.b = object.box.b * scaleY_ + offsetY_;
 
         if (!isFinite(mapped.l) || !isFinite(mapped.r) || !isFinite(mapped.t) || !isFinite(mapped.b) ||
-            !isVisible(mapped))
+            !isVisible(mapped)) {
             continue;
+        }
 
         clampToOutput(mapped);
-        if (mapped.r <= mapped.l || mapped.b <= mapped.t)
+        if (mapped.r <= mapped.l || mapped.b <= mapped.t) {
             continue;
+        }
 
         object.box = mapped;
         // touchesBorder/bottomTruncated 는 건드리지 않음: 이 단계는 blur 경로 전용이고
         // 경계 판정은 Metadata 좌표계 기준으로 파서가 이미 한 번만 수행함
         // (여기서 clamp 후 재판정하면 '앱 화면 기준 경계'라는 다른 의미가 섞임)
 
-        if (writeIdx != readIdx)
+        if (writeIdx != readIdx) {
             objects[writeIdx] = std::move(object);
+        }
         ++writeIdx;
     }
     objects.resize(writeIdx);
