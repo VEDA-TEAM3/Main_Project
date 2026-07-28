@@ -466,6 +466,12 @@ inline std::string hwStatus(ChannelId ch) { return "veda/hw/ch/" + std::to_strin
 /// @brief 모든 채널의 하드웨어 상태 구독을 위한 와일드카드 토픽
 inline constexpr auto kHwStatusAll = "veda/hw/ch/+/status";
 
+/**
+ * @brief 기존 Qt 클라이언트용 하드웨어 상태 토픽
+ * @details Qt 마이그레이션이 끝날 때까지 hwStatus(ch)와 함께 이 토픽에도 호환 payload를 발행한다.
+ */
+inline constexpr auto kLegacyHwStatus = "veda/hw/status";
+
 }  // namespace topic
 
 /**

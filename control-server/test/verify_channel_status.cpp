@@ -249,6 +249,8 @@ int main() {
               "  └ siren/buzzer/led 필드도 JSON 왕복 후 그대로 보존됨");
 
         check(veda::topic::hwStatus(2) == "veda/hw/ch/2/status", "토픽 형식이 veda/hw/ch/{ch}/status");
+        check(std::string(veda::topic::kLegacyHwStatus) == "veda/hw/status",
+              "기존 Qt 호환 토픽 형식이 veda/hw/status");
         check(std::string(veda::topic::kHwStatusAll) == "veda/hw/ch/+/status", "와일드카드 토픽 형식");
         check(veda::qos::kHwStatus == 1, "QoS는 retained 메시지에 맞게 1");
 
