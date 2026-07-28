@@ -56,7 +56,9 @@ Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IIma
 void Pipeline::onPacket(const domain::RawPacket& raw) {
     domain::ChannelFrame frame = parser_->parse(raw);
     frame = sanitizer_->sanitize(std::move(frame));
-    RouteResult routed = router_->route(frame);
+    // 멤버 버퍼를 재사용 -> 프레임마다 RouteResult 를 새로 만들지 않음 (힙 할당 0)
+    router_->route(frame, routeResult_);
+    RouteResult& routed = routeResult_;
 
     // ==== risk 경로 ====
     veda::TopViewFrame riskFrame;

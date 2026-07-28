@@ -112,6 +112,19 @@ private:
 
     PipelineOptions options_;  ///< 실행 정책
 
+    /**
+     * @brief   라우터 출력 버퍼 (프레임마다 재사용)
+     *
+     * @details
+     * 라우터가 값 반환 대신 이 버퍼를 out-parameter 로 채운다. clear() 는 capacity 를
+     * 유지하므로 warmup 이후에는 blur/risk 벡터의 힙 할당이 0이 된다
+     * -- 예전에는 프레임마다 RouteResult 를 새로 만들어 reserve 했고, 그것이 per-frame
+     *    경로에 남아 있던 유일한 힙 할당 지점이었음
+     *
+     * @note onPacket() 은 단일 스레드에서만 호출되므로 락이 필요 없음
+     */
+    RouteResult routeResult_;
+
     /// @name 폐기 사유별 누적 카운터 (로그 rate-limit 용, onPacket 은 단일 스레드 호출 전제)
     /// @{
     std::uint64_t edgeDropCount_ = 0;       ///< 잘림 정책으로 버린 risk 객체 수

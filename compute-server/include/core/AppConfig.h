@@ -100,11 +100,21 @@ struct AppConfig {
 
     // ==== MQTT Policy Config ====
     int mqttKeepAliveSeconds = 30;
-    int mqttRetryIntervalMs = 2000;     // MqttTransport가 최초 연결에 실패했을 때 재시도하는 간격 (ms)
-    int mqttReconnectDelaySec = 1;      // mosquitto 자동 재접속 시작 대기 시간 (초, 지수 백오프)
+    int mqttRetryIntervalMs = 2000;  // MqttTransport가 최초 연결에 실패했을 때 재시도하는 간격 (ms)
+    int mqttReconnectDelaySec = 1;   // mosquitto 자동 재접속 시작 대기 시간 (초, 지수 백오프)
     int mqttReconnectDelayMaxSec = 10;  // mosquitto 자동 재접속 최대 대기 시간 (초, 지수 백오프)
-    int mqttBlurMaxQueueSize = 8;       // blur Queue 크기
-    int mqttTopViewMaxQueueSize = 8;    // Risk Queue 크기
+    int mqttBlurMaxQueueSize = 8;       // blur Queue 크기 (1..kMaxMqttQueueSize 로 clamp)
+    int mqttTopViewMaxQueueSize = 8;    // Risk Queue 크기 (1..kMaxMqttQueueSize 로 clamp)
+
+    /**
+     * @brief   Sink 전송 큐 길이의 절대 상한
+     *
+     * @details
+     * 큐 하나가 붙잡을 수 있는 최악 상주 메모리는 (길이 × 프레임당 객체 상한 × 객체 크기) 다.
+     * 1000 × 256 × 약 40B ≈ 10MB/Sink -- 라즈베리파이에서 두 Sink 를 합쳐도 감당 가능한 선.
+     * 상한이 없으면 '프레임을 덜 버리려고' 큐를 키우는 자연스러운 대응이 그대로 OOM 이 된다
+     */
+    static constexpr int kMaxMqttQueueSize = 1000;
 
     /**
      * @brief   0 이하의 값이 들어오면 기본값으로 되돌리고 경고 (버퍼 크기/주기 등에 사용)
@@ -118,6 +128,33 @@ struct AppConfig {
             std::cerr << "[Config] 경고: " << name << "=" << value << " 는 1 이상이어야 합니다 — 기본값(" << fallback
                       << ")을 사용합니다.\n";
             value = fallback;
+        }
+    }
+
+    /**
+     * @brief   값을 [minValue, maxValue] 로 잘라내고 경고 (상한이 있어야 하는 큐/버퍼 길이에 사용)
+     *
+     * @details
+     * clampPositive 는 하한만 본다. 그러나 '메모리를 직접 차지하는 길이' 설정은 상한도 필요하다
+     * -- Sink 큐는 (길이 × 프레임당 객체 상한 256 × 객체 크기) 만큼 상주할 수 있으므로,
+     *    상한이 없으면 config.json 한 줄로 프로세스가 OOM 에 도달한다
+     * 기본값으로 되돌리지 않고 '경계값으로 자르는' 이유: 운영자가 큐를 키우려던 의도 자체는
+     * 살려주는 편이 낫고, 기본값(8)으로 되돌리면 의도와 정반대로 더 많이 버리게 되기 때문
+     *
+     * @param   value    검사할 값
+     * @param   minValue 허용 하한
+     * @param   maxValue 허용 상한
+     * @param   name     경고 메시지에 쓸 설정 키 이름
+     */
+    static inline void clampRange(int& value, int minValue, int maxValue, const char* name) {
+        if (value < minValue) {
+            std::cerr << "[Config] 경고: " << name << "=" << value << " 는 " << minValue << " 이상이어야 합니다 — "
+                      << minValue << " 로 조정합니다.\n";
+            value = minValue;
+        } else if (value > maxValue) {
+            std::cerr << "[Config] 경고: " << name << "=" << value << " 는 " << maxValue << " 이하여야 합니다 — "
+                      << maxValue << " 로 조정합니다.\n";
+            value = maxValue;
         }
     }
 
@@ -280,6 +317,13 @@ struct AppConfig {
         cfg.mqttBlurMaxQueueSize = veda::detail::get_or<int>(j, "mqttBlurMaxQueueSize", cfg.mqttBlurMaxQueueSize);
         cfg.mqttTopViewMaxQueueSize =
             veda::detail::get_or<int>(j, "mqttTopViewMaxQueueSize", cfg.mqttTopViewMaxQueueSize);
+
+        // [S1] 큐 길이는 상주 메모리를 직접 결정하므로 하한뿐 아니라 상한도 강제한다.
+        // 상한 kMaxMqttQueueSize=1000 기준 최악 상주 = 1000 × 256(프레임당 객체 상한) × 약 40B ≈ 10MB/Sink.
+        // 예전에는 이 두 개만 clamp 를 거치지 않아, 하한은 Sink 가 std::max(1, ...) 로 '경고 없이' 보정하고
+        // 상한은 아예 없어서 mqttTopViewMaxQueueSize=100000 한 줄로 OOM 에 도달할 수 있었다
+        clampRange(cfg.mqttBlurMaxQueueSize, 1, kMaxMqttQueueSize, "mqttBlurMaxQueueSize");
+        clampRange(cfg.mqttTopViewMaxQueueSize, 1, kMaxMqttQueueSize, "mqttTopViewMaxQueueSize");
 
         return cfg;
     }

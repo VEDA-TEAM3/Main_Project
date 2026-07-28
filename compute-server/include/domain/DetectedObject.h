@@ -22,7 +22,7 @@ struct DetectedObject {
     std::optional<ObjectId> parentId;                    ///< ParentId (Head/LicensePlate만 값을 가짐)
     veda::ObjectClass cls = veda::ObjectClass::Unknown;  ///< ObjectType
     NormBox box;                                         ///< 정규화 이미지 좌표
-    bool touchesBorder = false;                          ///< bbox가 프레임 경계(어느 변이든)에 닿음 여부
+    bool touchesBorder = false;  ///< bbox가 프레임 경계(어느 변이든)에 닿음 여부
 
     /**
      * @brief   bbox 아래변이 프레임 하단 경계에 닿음 여부
