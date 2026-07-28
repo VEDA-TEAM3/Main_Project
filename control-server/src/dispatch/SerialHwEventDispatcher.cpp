@@ -31,7 +31,7 @@ veda::RiskLevel decodeRiskLevel(const veda_uplink_packet_t& pkt) {
     return veda::RiskLevel::None;
 }
 
-/// @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
+///   @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
 HwIndicatorState decodeIndicators(const veda_uplink_packet_t& pkt) {
     return HwIndicatorState{static_cast<bool>(pkt.siren_on), static_cast<bool>(pkt.buzzer_on),
                             static_cast<bool>(pkt.led_red), static_cast<bool>(pkt.led_yellow),
