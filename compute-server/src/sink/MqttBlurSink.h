@@ -24,7 +24,7 @@ public:
     ~MqttBlurSink() override;
 
 protected:
-    bool prepare(const veda::BlurFrame& in, veda::BlurFrame& out) noexcept override;
+    bool prepare(const veda::BlurFrame& in, veda::BlurFrame& out) override;
     std::string describe(const veda::BlurFrame& frame) const override;
 
 private:
@@ -40,5 +40,5 @@ private:
     /// @brief 개별 blur 대상 하나의 유효성 검사 (클래스가 Head/LicensePlate인지, box 좌표가 정상인지)
     bool isValidBlurTarget(const veda::BlurTarget& blur) const noexcept;
 
-    int channelCount_;  ///< AppConfig::channelCount, frame.ch 유효성 검사 범위 [0, channelCount)
+    veda::ChannelId channelId_;  ///< 이 프로세스의 채널. frame.ch 는 반드시 이 값과 같아야 함(엣지 워커 불변식)
 };

@@ -88,9 +88,35 @@ public:
      */
     virtual bool publish(std::string_view topic, std::string_view payload, int qos, bool retain = false) noexcept = 0;
 
-    /// @brief 클라이언트가 만들어지고 루프가 도는 중인가 (브로커 접속 여부와는 별개)
+    /**
+     * @brief   클라이언트가 만들어지고 루프가 도는 중인가 (브로커 접속 여부와는 별개)
+     * @warning isConnected() 와 동일한 락 프리 요구가 적용됨 (아래 참고)
+     */
     virtual bool isReady() const noexcept = 0;
 
-    /// @brief 브로커와 실제로 연결되어 있는가
+    /**
+     * @brief   브로커와 실제로 연결되어 있는가
+     *
+     * @warning [ 구현체는 반드시 락 프리여야 함 — 뮤텍스를 획득하면 교착한다 ]
+     * 이 함수는 Sink 워커의 조건변수 술어 안에서, 즉 **워커가 자신의 queueMutex_ 를 잡은 채**
+     * 호출된다:
+     * @code
+     * queueChanged_.wait(lock, [this] {
+     *     return stopping_ || (transport_->isConnected() && !queue_.empty());
+     * });                      // ^^^ queueMutex_ 를 보유한 상태
+     * @endcode
+     *
+     * 한편 연결 상태가 바뀌면 구현체는 (자신의 리스너 락을 잡은 채) 리스너 콜백을 부르고,
+     * 그 콜백은 다시 queueMutex_ 를 잡는다. 따라서 이 함수가 구현체 내부 락을 잡는 순간
+     * 다음 순환이 성립한다:
+     *
+     *   워커     : queueMutex_ -> (구현체 내부 락)
+     *   네트워크 : (구현체 내부 락) -> listenerMutex_ -> queueMutex_
+     *   => 교착
+     *
+     * MqttTransport 는 std::atomic_bool 의 단순 load 로 구현하여 이 제약을 지킨다.
+     * 새 구현체도 원자적 읽기(또는 그에 준하는 무경합 접근)만 사용할 것
+     * -- 컴파일러가 잡아주지 않으며, 증상은 '채널이 조용히 멈추는' 형태로만 나타난다
+     */
     virtual bool isConnected() const noexcept = 0;
 };

@@ -6,12 +6,13 @@
 
 namespace {
 constexpr const char* kIface = "MqttBlur";
+constexpr std::size_t kMaxBlurTargetsPerFrame = 256;
 }  // namespace
 
 MqttBlurSink::MqttBlurSink(std::shared_ptr<IMqttTransport> transport, const AppConfig& config)
     : MqttFrameSink<veda::BlurFrame>(std::move(transport), veda::topic::blur(config.channelId), veda::qos::kBlur,
                                      static_cast<std::size_t>(std::max(1, config.mqttBlurMaxQueueSize)), kIface),
-      channelCount_(config.channelCount) {}
+      channelId_(config.channelId) {}
 
 MqttBlurSink::~MqttBlurSink() { shutdown(); }
 
@@ -22,7 +23,10 @@ bool MqttBlurSink::isValidFrame(const veda::BlurFrame& frame) const noexcept {
     if (frame.ts <= 0)
         return false;
 
-    if (frame.ch < 0 || frame.ch >= channelCount_)
+    if (frame.ch != channelId_)
+        return false;
+
+    if (frame.blurs.size() > kMaxBlurTargetsPerFrame)
         return false;
 
     return true;
@@ -46,7 +50,7 @@ bool MqttBlurSink::isValidBlurTarget(const veda::BlurTarget& blur) const noexcep
     return true;
 }
 
-bool MqttBlurSink::prepare(const veda::BlurFrame& in, veda::BlurFrame& out) noexcept {
+bool MqttBlurSink::prepare(const veda::BlurFrame& in, veda::BlurFrame& out) {
     if (!isValidFrame(in))
         return false;
 
@@ -57,7 +61,10 @@ bool MqttBlurSink::prepare(const veda::BlurFrame& in, veda::BlurFrame& out) noex
     // 개별 blur 대상 중 클래스/좌표가 이상한 것만 걸러내고 나머지는 그대로 발행한다.
     // (얼굴 하나가 인식 안 되는 클래스라고 같은 프레임의 다른 blur까지 통째로 버리지 않기 위함
     // -- blurs가 비어 있는 프레임도 정상: 이전 프레임의 blur 영역을 지우려면 빈 프레임도 필요)
-    out.blurs.clear();  // clear()는 capacity를 유지하므로 재할당이 없음
+    // out 은 직전 send() 에서 큐로 move 된 상태라 capacity 가 0 이다 -- clear() 가 유지할 capacity 자체가
+    // 없으므로 이어지는 reserve 가 매번 새로 할당한다.
+    // 의도된 트레이드오프이며 근거는 MqttFrameSink::prepare 의 @warning 참고
+    out.blurs.clear();
     out.blurs.reserve(in.blurs.size());
     for (const auto& blur : in.blurs) {
         if (isValidBlurTarget(blur)) {
