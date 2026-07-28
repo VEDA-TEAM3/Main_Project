@@ -31,7 +31,7 @@ veda::RiskLevel decodeRiskLevel(const veda_uplink_packet_t& pkt) {
     return veda::RiskLevel::None;
 }
 
-/// @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
+///   @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
 HwIndicatorState decodeIndicators(const veda_uplink_packet_t& pkt) {
     return HwIndicatorState{static_cast<bool>(pkt.siren_on), static_cast<bool>(pkt.buzzer_on),
                             static_cast<bool>(pkt.led_red), static_cast<bool>(pkt.led_yellow),
@@ -430,5 +430,40 @@ void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndic
 
     if (statusCallback_) {
         statusCallback_(ch, state.alive, state.indicators);
+    }
+}
+
+/**
+ * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
+ *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
+ * @note    타임아웃 채널을 락 안에서 모아두고 락을 푼 뒤에 reportAlive()를 호출한다.
+ *          reportAlive()가 같은 heartbeatMutex_(비재귀)를 다시 잠그므로 이 순서를 지켜야 한다.
+ */
+void SerialHwEventDispatcher::watchdogLoop() {
+    const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
+                                                           static_cast<uint64_t>(missedBeatsForTimeout_));
+
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(heartbeatIntervalMs_));
+
+        std::vector<veda::ChannelId> timedOutChannels;
+        {
+            std::lock_guard<std::mutex> lock(heartbeatMutex_);
+            const auto now = std::chrono::steady_clock::now();
+            for (const auto& [ch, state] : reportedState_) {
+                if (!state.alive) {
+                    continue;
+                }
+                auto lastIt = lastHeartbeatAt_.find(ch);
+                const bool timedOut = (lastIt == lastHeartbeatAt_.end()) || (now - lastIt->second > timeoutDuration);
+                if (timedOut) {
+                    timedOutChannels.push_back(ch);
+                }
+            }
+        }
+
+        for (veda::ChannelId ch : timedOutChannels) {
+            reportAlive(ch, false);
+        }
     }
 }
