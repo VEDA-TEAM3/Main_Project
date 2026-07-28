@@ -6,13 +6,14 @@
 
 namespace {
 constexpr const char* kIface = "MqttTopView";
+constexpr std::size_t kMaxObjectsPerFrame = 256;
 }  // namespace
 
 MqttTopViewSink::MqttTopViewSink(std::shared_ptr<IMqttTransport> transport, const AppConfig& config)
     : MqttFrameSink<veda::TopViewFrame>(std::move(transport), veda::topic::topView(config.channelId),
                                         veda::qos::kTopView,
                                         static_cast<std::size_t>(std::max(1, config.mqttTopViewMaxQueueSize)), kIface),
-      channelCount_(config.channelCount) {}
+      channelId_(config.channelId) {}
 
 MqttTopViewSink::~MqttTopViewSink() { shutdown(); }
 
@@ -23,7 +24,10 @@ bool MqttTopViewSink::isValidFrame(const veda::TopViewFrame& frame) const noexce
     if (frame.ts <= 0)
         return false;
 
-    if (frame.ch < 0 || frame.ch >= channelCount_)
+    if (frame.ch != channelId_)
+        return false;
+
+    if (frame.objects.size() > kMaxObjectsPerFrame)
         return false;
 
     for (const auto& object : frame.objects) {
@@ -38,14 +42,15 @@ bool MqttTopViewSink::isValidFrame(const veda::TopViewFrame& frame) const noexce
     return true;
 }
 
-bool MqttTopViewSink::prepare(const veda::TopViewFrame& in, veda::TopViewFrame& out) noexcept {
+bool MqttTopViewSink::prepare(const veda::TopViewFrame& in, veda::TopViewFrame& out) {
     if (!isValidFrame(in))
         return false;
 
     out.v = in.v;
     out.ts = in.ts;
     out.ch = in.ch;
-    // assign 으로 덮어써서 out 의 기존 capacity 를 재사용 (직전 발행에서 move 된 상태일 수 있음)
+    // out 은 직전 send() 에서 큐로 move 된 상태라 capacity 가 0 이다 -- assign 은 매번 새로 할당한다.
+    // 의도된 트레이드오프이며 근거는 MqttFrameSink::prepare 의 @warning 참고
     out.objects.assign(in.objects.begin(), in.objects.end());
     return true;
 }

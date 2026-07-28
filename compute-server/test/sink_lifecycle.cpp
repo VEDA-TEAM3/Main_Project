@@ -130,7 +130,6 @@ private:
 AppConfig makeConfig() {
     AppConfig config;
     config.channelId = 2;
-    config.channelCount = 4;
     config.mqttTopViewMaxQueueSize = 4;
     config.mqttBlurMaxQueueSize = 4;
     return config;
@@ -279,13 +278,39 @@ int main() {
         check(sink->droppedCount() == 1,
               "Human 클래스 대상 1개만 걸러짐 (dropped=" + std::to_string(sink->droppedCount()) + ")");
 
-        // 채널 범위를 벗어난 프레임은 통째로 폐기
+        // 현재 edge worker와 다른 채널의 프레임은 통째로 폐기
         veda::BlurFrame badChannel = frame;
-        badChannel.ch = 99;
+        badChannel.ch = 1;
         const std::size_t before = transport->publishedCount();
         sink->send(badChannel);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        check(transport->publishedCount() == before, "channelCount 밖 채널의 프레임은 발행되지 않음");
+        check(transport->publishedCount() == before, "다른 유효 채널의 프레임은 발행되지 않음");
+    }
+
+    // -----------------------------------------------------------------------
+    section("5) 보안 상한 / 중복 start");
+    // -----------------------------------------------------------------------
+    {
+        auto transport = std::make_shared<FakeTransport>();
+        transport->start();
+        auto sink = std::make_shared<MqttTopViewSink>(transport, config);
+        sink->start();
+        transport->simulateConnection(true);
+
+        veda::TopViewFrame oversized = makeTopViewFrame(5000);
+        oversized.objects.assign(257, oversized.objects.front());
+        sink->send(oversized);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        check(transport->publishedCount() == 0, "객체 257개 프레임은 상한에서 거부됨");
+
+        veda::TopViewFrame boundary = makeTopViewFrame(5001);
+        boundary.objects.assign(256, boundary.objects.front());
+        sink->send(boundary);
+        check(waitFor([&transport] { return transport->publishedCount() == 1; }),
+              "객체 256개 프레임은 정상 발행됨");
+
+        sink->start();
+        check(transport->listenerCount() == 1, "중복 start가 listener를 추가하지 않음");
     }
 
     section("결과");

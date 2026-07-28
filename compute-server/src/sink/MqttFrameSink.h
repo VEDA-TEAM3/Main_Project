@@ -45,6 +45,8 @@
 template <typename T>
 class MqttFrameSink : public ISink<T> {
 public:
+    static constexpr std::size_t kMaxPayloadBytes = 1024U * 1024U;
+
     /**
      * @param   transport     공유 MQTT 전송 계층
      * @param   topic         이 Sink 가 발행할 토픽 (채널이 프로세스당 고정이라 생성 시 1회만 계산)
@@ -71,29 +73,46 @@ public:
      *          파생 클래스가 아직 완성되지 않은 상태에서 콜백이 들어올 수 있음
      */
     void start() {
-        listenerId_ = transport_->addConnectionListener([this](bool) {
-            // queueMutex_ 를 한 번 잡았다 놓은 뒤 notify 하는 것이 핵심.
-            // 그냥 notify 만 하면 "워커가 술어를 false 로 평가한 뒤 wait 에 진입하기 전"
-            // 구간에 알림이 끼어들어 영영 깨어나지 못하는 lost wakeup 이 생김
-            // (술어가 보는 isConnected() 는 queueMutex_ 밖의 atomic 이라 더더욱)
-            { std::lock_guard<std::mutex> lock(queueMutex_); }
-            queueChanged_.notify_all();
-        });
-        worker_ = std::thread(&MqttFrameSink::workerLoop, this);
-    }
-
-    void send(const T& frame) noexcept override {
-        if (!prepare(frame, staging_)) {
-            recordDrop("invalid frame");
+        bool expected = false;
+        if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             return;
-        }
 
-        if (!transport_->isReady()) {
-            recordDrop("MQTT transport not ready");
+        if (stopped_.load(std::memory_order_acquire)) {
+            started_.store(false, std::memory_order_release);
             return;
         }
 
         try {
+            listenerId_ = transport_->addConnectionListener([this](bool) {
+                // queueMutex_ 를 한 번 잡았다 놓은 뒤 notify 하는 것이 핵심.
+                // 그냥 notify 만 하면 "워커가 술어를 false 로 평가한 뒤 wait 에 진입하기 전"
+                // 구간에 알림이 끼어들어 영영 깨어나지 못하는 lost wakeup 이 생김
+                // (술어가 보는 isConnected() 는 queueMutex_ 밖의 atomic 이라 더더욱)
+                { std::lock_guard<std::mutex> lock(queueMutex_); }
+                queueChanged_.notify_all();
+            });
+            worker_ = std::thread(&MqttFrameSink::workerLoop, this);
+        } catch (...) {
+            if (listenerId_ != IMqttTransport::kInvalidListener)
+                transport_->removeConnectionListener(listenerId_);
+            listenerId_ = IMqttTransport::kInvalidListener;
+            started_.store(false, std::memory_order_release);
+            throw;
+        }
+    }
+
+    void send(const T& frame) noexcept override {
+        try {
+            if (!prepare(frame, staging_)) {
+                recordDrop("invalid frame");
+                return;
+            }
+
+            if (!transport_->isReady()) {
+                recordDrop("MQTT transport not ready");
+                return;
+            }
+
             {
                 std::lock_guard<std::mutex> lock(queueMutex_);
                 if (stopping_) {
@@ -122,12 +141,28 @@ protected:
      * @brief   입력 프레임을 검증하고 발행할 형태로 out 에 채움
      *
      * @param   in  파이프라인이 넘긴 원본 프레임
-     * @param   out 큐에 넣을 프레임 (직전 호출에서 move 된 상태일 수 있으므로 전부 덮어쓸 것)
+     * @param   out 큐에 넣을 프레임 (직전 호출에서 move 된 상태이므로 전부 덮어쓸 것)
      * @return  발행 대상이면 true, 통째로 버릴 프레임이면 false
      *
      * @note    파이프라인 스레드에서만 호출됨
+     *
+     * @warning [ out 의 capacity 는 재사용되지 않는다 — 프레임당 힙 할당 1회가 발생한다 ]
+     * send() 가 staging_ 를 큐로 move 하므로(`queue_.push_back(std::move(staging_))`), 다음 호출에서
+     * out 은 언제나 capacity 0 인 상태로 들어온다. 즉 여기서 assign/reserve 를 어떻게 쓰든
+     * 벡터 버퍼는 매번 새로 할당된다 (실측 약 1.1회/프레임).
+     *
+     * 버퍼는 파이프라인 -> 큐 -> 워커 -> 소멸의 '단방향'으로만 흐른다. RtspOnvifSourceV2::next() 가
+     * std::swap 으로 빈 버퍼를 링 슬롯에 돌려주는 것과 달리, 여기에는 되돌리는 경로가 없다
+     *
+     * 이는 의도된 트레이드오프다 -- 버퍼를 순환시키려면 워커가 발행을 마친 프레임을 send() 쪽으로
+     * 돌려주는 '락으로 보호되는 핸드오프'가 하나 더 필요해진다. 발행 빈도가 5fps × 2 Sink 라
+     * 절약되는 것은 초당 10여 회의 할당뿐인데, 그 대가로 이 계층에서 가장 중요한 자산인
+     * 동시성 구조의 단순함을 잃는다. 작은 할당 비용을 내고 동시성을 단순하게 유지하는 쪽을 택했다
+     *
+     * @note 반대로 publishFrame() 의 payloadBuf_ 는 워커 밖으로 소유권이 나가지 않으므로
+     *       clear() 의 capacity 유지가 실제로 성립한다 (zero-DOM 직렬화의 무할당은 진짜다)
      */
-    virtual bool prepare(const T& in, T& out) noexcept = 0;
+    virtual bool prepare(const T& in, T& out) = 0;
 
     /// @brief 발행 성공 로그에 덧붙일 요약 (예: "objects=3")
     virtual std::string describe(const T& frame) const = 0;
@@ -135,8 +170,12 @@ protected:
     void recordDrop(const char* reason) noexcept {
         const std::uint64_t count = droppedCount_.fetch_add(1, std::memory_order_relaxed) + 1;
         if (count == 1 || count % 100 == 0) {
-            logError(iface_, "드랍 누적 " + std::to_string(count) +
-                                 "건, 사유=" + std::string(reason != nullptr ? reason : "unknown"));
+            try {
+                logError(iface_, "드랍 누적 " + std::to_string(count) +
+                                     "건, 사유=" + std::string(reason != nullptr ? reason : "unknown"));
+            } catch (...) {
+                // Drop accounting must remain available even under memory pressure.
+            }
         }
     }
 
@@ -176,7 +215,10 @@ protected:
 
 private:
     void workerLoop() noexcept {
-        T frame;  // 루프 밖에 두어 벡터 capacity 를 재사용 (매 반복 재할당 방지)
+        // 루프 밖에 두는 것은 '객체 재구축'을 아끼기 위함이지 capacity 재사용이 아니다.
+        // frame = std::move(queue_.front()) 은 frame 의 기존 버퍼를 '해제하고' 큐 원소의 버퍼를
+        // 넘겨받으므로, 반복마다 이전 capacity 는 버려진다 (prepare() 의 @warning 참고)
+        T frame;
         while (true) {
             {
                 std::unique_lock<std::mutex> lock(queueMutex_);
@@ -198,6 +240,10 @@ private:
             // Zero-DOM 직렬화: nlohmann DOM 트리를 프레임마다 새로 만들지 않고 재사용 버퍼에 직접
             // append 한다. payloadBuf_ 는 clear() 로 capacity 를 유지하므로 warmup 이후 힙 할당이 없음.
             veda::encodeInto(frame, payloadBuf_);
+            if (payloadBuf_.size() > kMaxPayloadBytes) {
+                recordDrop("serialized payload too large");
+                return;
+            }
 
             if (!transport_->publish(topic_, payloadBuf_, qos_, false)) {
                 recordDrop("transport publish failed");
@@ -239,6 +285,7 @@ private:
 
     /// @brief shutdown() 멱등 보장 (파생 소멸자 + 기반 소멸자에서 각각 호출됨)
     std::atomic_bool stopped_{false};
+    std::atomic_bool started_{false};
 
     IMqttTransport::ListenerId listenerId_ = IMqttTransport::kInvalidListener;
 
