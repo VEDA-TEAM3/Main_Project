@@ -89,6 +89,14 @@ void MqttTransport::removeConnectionListener(ListenerId id) noexcept {
 }
 
 bool MqttTransport::start() noexcept {
+    std::lock_guard<std::mutex> startLock(retryMutex_);
+    if (stopping_.load(std::memory_order_acquire))
+        return false;
+    if (ready_.load(std::memory_order_acquire))
+        return true;
+    if (retryThread_.joinable())
+        return false;
+
     if (initializeClient())
         return true;
 
@@ -249,15 +257,23 @@ void MqttTransport::stop() noexcept {
 }
 
 bool MqttTransport::publish(std::string_view topic, std::string_view payload, int qos, bool retain) noexcept {
-    if (payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    if (topic.empty() || topic.size() > 65535U || qos < 0 || qos > 2 ||
+        payload.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        mosquitto_pub_topic_check2(topic.data(), topic.size()) != MOSQ_ERR_SUCCESS)
         return false;
+
+    std::string topicString;
+    try {
+        // Keep allocation outside clientMutex_ so allocator latency cannot block other publishers.
+        topicString.assign(topic);
+    } catch (...) {
+        return false;
+    }
 
     std::lock_guard<std::mutex> lock(clientMutex_);
     if (client_ == nullptr)
         return false;
 
-    // topic 은 C 문자열이 필요하므로 여기서만 std::string 으로 만듦
-    const std::string topicString(topic);
     const int result = mosquitto_publish(client_, nullptr, topicString.c_str(), static_cast<int>(payload.size()),
                                          payload.data(), qos, retain);
     return result == MOSQ_ERR_SUCCESS;
