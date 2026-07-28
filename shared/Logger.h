@@ -307,11 +307,9 @@ private:
             std::deque<LogEntry> batch;
             {
                 std::unique_lock<std::mutex> lk(mtx_);
-                cv_.wait_for(lk, std::chrono::milliseconds(flushIntervalMs_.load(std::memory_order_relaxed)),
-                             [this] {
-                                 return stopping_.load() || !pending_.empty() ||
-                                        reopenRequested_.load(std::memory_order_acquire);
-                             });
+                cv_.wait_for(lk, std::chrono::milliseconds(flushIntervalMs_.load(std::memory_order_relaxed)), [this] {
+                    return stopping_.load() || !pending_.empty() || reopenRequested_.load(std::memory_order_acquire);
+                });
                 batch.swap(pending_);
             }
             writeBatch(batch);
