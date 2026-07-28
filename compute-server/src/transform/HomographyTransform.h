@@ -2,7 +2,7 @@
 
 /**
  * @file    HomographyTransform.h
- * @brief   정규화 이미지 좌표 → 월드 좌표 (Homography)
+ * @brief   정규화 이미지 좌표 → 카메라 로컬 지면 좌표(m) (Homography)
  */
 
 #include <array>
@@ -44,7 +44,7 @@ public:
         double imageWidth = 0.0;
         double imageHeight = 0.0;
 
-        /// @brief 월드 좌표 유효 범위 검사 (주차장 도면 밖으로 발산한 값을 버림)
+        /// @brief 카메라 로컬 좌표 유효 범위 검사 (물리적으로 불가능한 발산값을 버림)
         bool boundsEnabled = false;
         double minX = 0.0;
         double maxX = 0.0;
@@ -56,8 +56,8 @@ public:
      * @param   matrix  row-major 3x3 호모그래피 (h0..h2 / h3..h5 / h6..h8)
      * @param   options 입력 좌표계 및 검증 설정
      *
-     * @throws  std::invalid_argument 유한하지 않은 값, pixelSpace 인데 해상도가 0 이하,
-     *                                또는 행렬이 특이(가역이 아님)한 경우
+     * @throws  std::invalid_argument 유한하지 않은 값, 잘못된 해상도/범위,
+     *                                특이 행렬, 지평선 기준점 오류 또는 단위행렬인 경우
      */
     HomographyTransform(std::array<double, 9> matrix, const Options& options);
 
@@ -67,16 +67,32 @@ public:
     std::optional<veda::LocalPoint> toLocal(const domain::ImagePoint& p) override;
 
 private:
-    /// @brief 변환 실패 사유를 rate-limit 해서 남김 (지평선 근처 객체는 매 프레임 실패하므로)
-    void logFailure(const std::string& message);
+    /**
+     * @brief   이번 변환 실패를 실제로 기록할 차례인지 판정 (rate-limit)
+     * @details 실패 카운터를 올리고, 로그를 남길 차례(첫 건 또는 100건마다)일 때만 true
+     *
+     * @warning [ 문자열 조립은 반드시 이 함수가 true 일 때만 할 것 ]
+     * 예전에는 호출부가 logFailure("u=" + std::to_string(...) + ...) 형태였는데,
+     * 인자는 함수 진입 '이전'에 평가되므로 rate-limit 으로 억제될 99% 의 로그까지
+     * 매번 문자열을 조립(= 힙 할당)했음
+     * 지평선 근처 객체는 프레임마다 연속으로 실패하므로 이 비용이 객체당/프레임당 반복됨
+     * -- compute-server 의 per-frame zero-allocation 원칙에 어긋남
+     * -> 판정(이 함수)과 기록(logFailure)을 분리해, 억제될 로그는 조립조차 하지 않음
+     *    (ContainmentSanitizer / ParentBasedRouter 의 isLogEnabled() 가드와 같은 패턴)
+     */
+    bool shouldLogFailure() noexcept;
 
-    /// @brief 분모가 이 값보다 작으면 지평선에 너무 가까워 좌표가 발산한다고 판단
+    /// @brief rate-limit 을 통과한 실패 사유를 누적 건수와 함께 기록
+    void logFailure(const std::string& message) const;
+
+    /**
+     * @brief   크기 정규화된 행렬에서 분모가 이 값 이하면 지평선에 너무 가깝다고 판단
+     * @details 생성자가 max(|h_i|)=1 로 정규화하므로 H의 임의 스칼라배에 영향받지 않음
+     */
     static constexpr double kMinDenominator = 1e-9;
 
+    /// @brief max(|h_i|)=1 이고 화면 하단 중앙의 분모가 양수가 되도록 정규화된 행렬
     std::array<double, 9> matrix_;
-
-    /// @brief 부호 정규화에 성공했는가 (실패 시 분모 부호 검사를 생략하고 크기만 검사)
-    bool horizonCheckEnabled_ = true;
 
     Options options_;
 
