@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(ControlServer LANGUAGES CXX)
+# C 는 verify-downlink 의 디코더(test/downlink_decoder.c)용 -- STM32 와 동일한 컴파일러
+# 계열로 구조체 레이아웃을 교차 검증하기 위해 C 를 함께 활성화한다.
+project(ControlServer LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -87,3 +89,25 @@ target_include_directories(verify-serial-encoding PRIVATE
 )
 
 target_compile_options(verify-serial-encoding PRIVATE -O2)
+
+# 하행(dispatch) 프레임 검증 하네스.
+# pty 를 가짜 시리얼 포트로 물려 실제 write() 바이트를 캡처하고, C 컴파일러로 빌드한
+# 디코더로 되읽어 STM32(C)/RPi(C++) 구조체 레이아웃 일치까지 함께 검증한다.
+# Logger 가 헤더 온리라 mosquitto/OpenSSL 의존 없이 dispatcher 만 링크하면 된다.
+#   cmake --build build --target verify-downlink && ./build/control-server/verify-downlink
+add_executable(verify-downlink
+    test/verify_downlink.cpp
+    test/downlink_decoder.c
+    src/dispatch/SerialHwEventDispatcher.cpp
+)
+
+target_include_directories(verify-downlink PRIVATE
+    include
+    src
+    test
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared
+)
+
+set_target_properties(verify-downlink PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+target_compile_options(verify-downlink PRIVATE -O2)
+target_link_libraries(verify-downlink PRIVATE Threads::Threads)
