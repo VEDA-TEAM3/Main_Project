@@ -219,7 +219,7 @@ struct AppConfig {
     SimulationConfig simulation;
 
     // [네트워크 설정]
-    std::string mqttBrokerUrl = "tcp://localhost:1883";
+    std::string mqttBrokerUrl;  ///< config.json에서 주입 (예: tcp://host:1883, mqtts://host:8883)
     /**
      * @brief   RiskFrame 발행 토픽
      * @warning 기본값이 계약(veda::topic::kRisk = "veda/risk")과 달라서, 이대로 두면
@@ -227,7 +227,7 @@ struct AppConfig {
      *          다른 값을 넣으면 Contract.h 를 어기는 것이므로 클라이언트도 함께 바꿔야 함
      */
     std::string mqttSendTopic = veda::topic::kRisk;
-    std::string mqttCaFile = "/etc/veda/certs/ca.crt";  ///< mqttBrokerUrl이 ssl/mqtts일 때 사용하는 TLS CA 인증서 경로
+    std::string mqttCaFile;  ///< mqttBrokerUrl이 ssl/mqtts일 때 config.json에서 주입하는 TLS CA 경로
     std::string mqttClientId;                           ///< 비어있으면 MqttTransport가 자동 생성
     int mqttKeepAliveSeconds = 60;
     int mqttReconnectDelaySeconds = 1;      ///< 재연결 대기 시간 초기값 (초)

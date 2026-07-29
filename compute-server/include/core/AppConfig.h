@@ -94,7 +94,7 @@ struct AppConfig {
 
     // ==== MQTT Broker Config ====
     std::string mqttHost;
-    int mqttPort = 8883;
+    int mqttPort = 0;
     std::string mqttCaFile;
     std::string mqttClientId;  // MQTT clientId (채널 간에는 반드시 달라야 함)
 

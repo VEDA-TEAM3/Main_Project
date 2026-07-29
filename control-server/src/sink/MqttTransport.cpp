@@ -49,9 +49,9 @@ bool isValidQos(int qos) noexcept { return qos >= 0 && qos <= 2; }
 
 /// @brief AppConfig::mqttBrokerUrl 파싱 결과 (host/port/TLS 여부)
 struct ParsedBroker {
-    std::string host = "172.20.27.174";
-    int port = 8883;
-    bool useTls = true;
+    std::string host;
+    int port = 0;
+    bool useTls = false;
 };
 
 ParsedBroker parseBrokerUrl(const std::string& brokerUrl) {
@@ -75,6 +75,9 @@ ParsedBroker parseBrokerUrl(const std::string& brokerUrl) {
     } else if (address.starts_with(mqttsPrefix)) {
         address.erase(0, mqttsPrefix.size());
         parsed.useTls = true;
+    } else {
+        // TLS 사용 여부를 암묵적으로 정하지 않는다. config.json에서 스킴까지 명시해야 한다.
+        return parsed;
     }
 
     const std::size_t separator = address.rfind(':');
@@ -88,7 +91,7 @@ ParsedBroker parseBrokerUrl(const std::string& brokerUrl) {
             address.resize(separator);
         }
     }
-    if (!address.empty()) {
+    if (!address.empty() && parsed.port != 0) {
         parsed.host = std::move(address);
     }
     return parsed;
