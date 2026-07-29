@@ -19,7 +19,12 @@
  * 커넥션은 공유하되 큐는 분리함. blur 발행이 밀린다고 risk(안전 크리티컬) 발행까지
  * 함께 지연되면 안 되기 때문
  *
- * @warning 큐가 가득 차면 drop-oldest. 실시간 좌표라 오래된 프레임보다 최신이 항상 유용함
+ * @warning [ 최신 프레임 우선 — 두 지점에서 강제된다 ]
+ * 실시간 좌표라 오래된 프레임보다 최신이 항상 유용하므로,
+ *  1) send()       : 큐가 가득 차면 drop-oldest (메모리 상한)
+ *  2) workerLoop() : 발행 직전 백로그를 합류시켜 '가장 최신' 한 장만 발행 (지연 상한)
+ * 1)만 있으면 메모리는 잡히지만 지연은 잡히지 않는다 -- 큐 깊이가 maxQueueSize_ 에 고정된 채
+ * FIFO 로 빠지면서 소비자가 영구히 그만큼 과거를 보게 된다
  */
 
 #include <atomic>
@@ -121,7 +126,20 @@ public:
                 }
                 if (queue_.size() >= maxQueueSize_) {
                     queue_.pop_front();
-                    recordDrop("queue full; oldest frame removed");
+
+                    // 큐가 가득 찬 '이유'를 구분해서 남긴다.
+                    // 워커는 (isConnected() && !queue_.empty()) 술어에서 대기하므로,
+                    // 브로커에 연결되지 않은 동안에는 큐를 단 한 프레임도 비우지 않는다.
+                    // 이때 "queue full" 만 남기면 소비자 루프가 고장난 것처럼 읽히지만
+                    // 실제 원인은 '연결'이며, 두 원인은 조치가 완전히 다르다
+                    //   - 미연결  : 브로커 주소/포트/TLS/도달성을 확인해야 함 (코드 문제 아님)
+                    //   - 백로그  : 발행이 유입 속도를 못 따라감 -> 큐 길이/QoS/대역폭 검토
+                    //
+                    // isConnected() 를 queueMutex_ 안에서 부르는 것은 안전하다.
+                    // IMqttTransport 계약이 이 함수를 '락 프리'로 못박고 있기 때문
+                    // (조건변수 술어 안에서도 같은 방식으로 호출됨)
+                    recordDrop(transport_->isConnected() ? "queue full; publish backlog (broker/network slow)"
+                                                         : "queue full; broker NOT connected (worker parked)");
                 }
                 queue_.push_back(std::move(staging_));
             }
@@ -220,6 +238,7 @@ private:
         // 넘겨받으므로, 반복마다 이전 capacity 는 버려진다 (prepare() 의 @warning 참고)
         T frame;
         while (true) {
+            std::size_t superseded = 0;
             {
                 std::unique_lock<std::mutex> lock(queueMutex_);
                 queueChanged_.wait(lock,
@@ -228,9 +247,40 @@ private:
                 if (stopping_)
                     return;
 
-                frame = std::move(queue_.front());
-                queue_.pop_front();
+                // [지연 합류] 백로그가 있으면 '가장 최신' 프레임만 발행하고 나머지는 버린다.
+                //
+                // TopViewFrame/BlurFrame 은 델타가 아니라 '그 시각의 전체 상태 스냅샷'이다.
+                // 프레임 N+1 은 프레임 N 을 완전히 대체하므로, 밀린 프레임을 FIFO 로 순서대로
+                // 내보내면 정보는 하나도 더 주지 못하면서 (백로그 깊이 x 프레임 간격) 만큼
+                // 지연만 그대로 쌓인다
+                //
+                // 특히 drop-oldest 와 만나면 지연이 '고정'된다: 큐가 한 번 포화되면 send() 가
+                // 앞에서 하나 버리고 뒤에 하나 넣으므로 깊이가 maxQueueSize_ 에 고정되고,
+                // FIFO 로 빼는 한 소비자는 영영 maxQueueSize_ 프레임만큼 과거를 본다
+                // (5fps + 큐 8 => 1.6초 고정 지연). 생산 속도가 소비 속도 이상인 동안
+                // 이 지연은 저절로 회복되지 않는다
+                //
+                // blur 경로에서는 이게 지연을 넘어 정확성 문제다 -- 1.6초 지난 블러 박스는
+                // 현재 영상의 엉뚱한 곳을 가리므로 얼굴이 그대로 노출된다
+                //
+                // 버리는 '개수'는 FIFO 와 같다(생산-소비 속도 차이가 결정). 어느 프레임을
+                // 버리느냐만 달라지며, 항상 최신을 남긴다
+                superseded = queue_.size() - 1;
+                if (superseded > 0) {
+                    frame = std::move(queue_.back());
+                    queue_.clear();
+                } else {
+                    frame = std::move(queue_.front());
+                    queue_.pop_front();
+                }
             }
+
+            // 락 밖에서 계상 (recordDrop 은 atomic + rate-limit 이라 락이 필요 없음).
+            // superseded 는 maxQueueSize_ 로 유계이며, 정상 운영에서는 0 이다
+            for (std::size_t i = 0; i < superseded; ++i) {
+                recordDrop("superseded by newer frame (latency coalescing)");
+            }
+
             publishFrame(frame);
         }
     }

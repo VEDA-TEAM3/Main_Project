@@ -17,43 +17,51 @@ MqttBlurSink::MqttBlurSink(std::shared_ptr<IMqttTransport> transport, const AppC
 MqttBlurSink::~MqttBlurSink() { shutdown(); }
 
 bool MqttBlurSink::isValidFrame(const veda::BlurFrame& frame) const noexcept {
-    if (frame.v != veda::kSchemaVersion)
+    if (frame.v != veda::kSchemaVersion) {
         return false;
+    }
 
-    if (frame.ts <= 0)
+    if (frame.ts <= 0) {
         return false;
+    }
 
-    if (frame.ch != channelId_)
+    if (frame.ch != channelId_) {
         return false;
+    }
 
-    if (frame.blurs.size() > kMaxBlurTargetsPerFrame)
+    if (frame.blurs.size() > kMaxBlurTargetsPerFrame) {
         return false;
+    }
 
     return true;
 }
 
 bool MqttBlurSink::isValidBlurTarget(const veda::BlurTarget& blur) const noexcept {
-    if (!veda::isBlurClass(blur.cls))
+    if (!veda::isBlurClass(blur.cls)) {
         return false;
+    }
 
     const auto& box = blur.box;
-    if (!std::isfinite(box.l) || !std::isfinite(box.t) || !std::isfinite(box.r) || !std::isfinite(box.b))
+    if (!std::isfinite(box.l) || !std::isfinite(box.t) || !std::isfinite(box.r) || !std::isfinite(box.b)) {
         return false;
+    }
 
     if (box.l < 0.0 || box.l > 1.0 || box.t < 0.0 || box.t > 1.0 || box.r < 0.0 || box.r > 1.0 || box.b < 0.0 ||
-        box.b > 1.0)
+        box.b > 1.0) {
         return false;
+    }
 
-    if (box.l > box.r || box.t > box.b)
+    if (box.l > box.r || box.t > box.b) {
         return false;
+    }
 
     return true;
 }
 
 bool MqttBlurSink::prepare(const veda::BlurFrame& in, veda::BlurFrame& out) {
-    if (!isValidFrame(in))
+    if (!isValidFrame(in)) {
         return false;
-
+    }
     out.v = in.v;
     out.ts = in.ts;
     out.ch = in.ch;

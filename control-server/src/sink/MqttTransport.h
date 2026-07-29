@@ -65,15 +65,15 @@ private:
     void destroyClient() noexcept;
     void notifyConnection(bool connected, int resultCode) noexcept;
 
-    std::string host_ = "172.20.27.174";  ///< AppConfig::mqttBrokerUrl 에서 파싱
-    int port_ = 8883;                     ///< AppConfig::mqttBrokerUrl 에서 파싱
+    std::string host_;                    ///< AppConfig::mqttBrokerUrl 에서 파싱
+    int port_ = 0;                        ///< AppConfig::mqttBrokerUrl 에서 파싱
     std::string clientId_;                ///< AppConfig::mqttClientId, 비어있으면 자동 생성
-    int keepAliveSeconds_ = 60;           ///< AppConfig::mqttKeepAliveSeconds
-    int reconnectDelaySeconds_ = 1;       ///< AppConfig::mqttReconnectDelaySeconds
-    int reconnectDelayMaxSeconds_ = 10;   ///< AppConfig::mqttReconnectDelayMaxSeconds
+    int keepAliveSeconds_;                ///< AppConfig::mqttKeepAliveSeconds
+    int reconnectDelaySeconds_;           ///< AppConfig::mqttReconnectDelaySeconds
+    int reconnectDelayMaxSeconds_;        ///< AppConfig::mqttReconnectDelayMaxSeconds
 
     bool useTls_ = true;  ///< AppConfig::mqttBrokerUrl 스킴(tcp/mqtt vs ssl/mqtts)에서 파싱
-    std::string caFile_ = "/etc/veda/certs/ca.crt";  ///< AppConfig::mqttCaFile
+    std::string caFile_;   ///< AppConfig::mqttCaFile
     std::string clientCertificateFile_;
     std::string clientKeyFile_;
     bool tlsInsecure_ = false;
