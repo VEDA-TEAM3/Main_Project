@@ -384,7 +384,4 @@ stopping_ CAS
 | Broker disconnect/reconnect | alive `"0"`/`"1"` 상태 정상화 |
 | Listener 제거와 callback 경합 | 제거 후 callback 재호출 없음 |
 
-권장 추가 테스트는 allocation failure injection, concurrent `start()`, TSAN
-publish/stop/listener stress 및 장시간 재접속 시험이다.
-
 ---

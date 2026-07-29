@@ -72,7 +72,7 @@ private:
     int reconnectDelaySeconds_;           ///< AppConfig::mqttReconnectDelaySeconds
     int reconnectDelayMaxSeconds_;        ///< AppConfig::mqttReconnectDelayMaxSeconds
 
-    bool useTls_ = false;  ///< AppConfig::mqttBrokerUrl 스킴(tcp/mqtt vs ssl/mqtts)에서 파싱
+    bool useTls_ = true;  ///< AppConfig::mqttBrokerUrl 스킴(tcp/mqtt vs ssl/mqtts)에서 파싱
     std::string caFile_;   ///< AppConfig::mqttCaFile
     std::string clientCertificateFile_;
     std::string clientKeyFile_;

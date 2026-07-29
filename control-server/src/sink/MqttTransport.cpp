@@ -51,7 +51,7 @@ bool isValidQos(int qos) noexcept { return qos >= 0 && qos <= 2; }
 struct ParsedBroker {
     std::string host;
     int port = 0;
-    bool useTls = false;
+    bool useTls = true;
 };
 
 ParsedBroker parseBrokerUrl(const std::string& brokerUrl) {
