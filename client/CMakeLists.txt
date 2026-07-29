@@ -18,9 +18,8 @@ option(QTCCTV_ENABLE_UNITY_BUILD "Enable unity build for faster full rebuilds" O
 qt_standard_project_setup()
 
 qt_add_executable(Qtcctvclient
-    .clang-format
-    .clang-tidy
-    C_CppCodingConvention.md
+    "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-format"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-tidy"
 
     src/main.cpp
 
