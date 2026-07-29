@@ -1,0 +1,50 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "debug-ninja",
+            "displayName": "Debug Ninja",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/debug-ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
+                "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.11.1/mingw_64",
+                "QTCCTV_ENABLE_PCH": "ON",
+                "QTCCTV_ENABLE_UNITY_BUILD": "OFF"
+            }
+        },
+        {
+            "name": "fast-debug-ninja",
+            "displayName": "Fast Debug Ninja",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/fast-debug-ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
+                "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
+                "CMAKE_PREFIX_PATH": "C:/Qt/6.11.1/mingw_64",
+                "QTCCTV_ENABLE_PCH": "ON",
+                "QTCCTV_ENABLE_UNITY_BUILD": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug-ninja",
+            "configurePreset": "debug-ninja",
+            "jobs": 8
+        },
+        {
+            "name": "fast-debug-ninja",
+            "configurePreset": "fast-debug-ninja",
+            "jobs": 8
+        }
+    ]
+}

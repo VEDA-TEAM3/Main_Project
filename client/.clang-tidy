@@ -1,0 +1,26 @@
+---
+Checks: >
+  -*,
+  readability-identifier-naming,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-macro-usage,
+  modernize-make-shared,
+  bugprone-*
+
+HeaderFilterRegex: '.*Qtcctvclient[\\/](include|src)[\\/].*'
+
+CheckOptions:
+  - key:             readability-identifier-naming.VariableCase
+    value:           camelBack
+  - key:             readability-identifier-naming.FunctionCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ClassCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.StructCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.MacroDefinitionCase
+    value:           UPPER_CASE
+  - key:             readability-identifier-naming.PrivateMemberSuffix
+    value:           _
+  - key:             readability-identifier-naming.ProtectedMemberSuffix
+    value:           _

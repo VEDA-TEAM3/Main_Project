@@ -1,0 +1,603 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1680</width>
+    <height>945</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>1280</width>
+    <height>720</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Wise AI Parking Safety Control</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QHBoxLayout" name="rootLayout">
+    <property name="spacing">
+     <number>0</number>
+    </property>
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <layout class="QVBoxLayout" name="mainContentLayout">
+      <property name="spacing">
+       <number>14</number>
+      </property>
+      <property name="leftMargin">
+       <number>18</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>26</number>
+      </property>
+      <property name="bottomMargin">
+       <number>14</number>
+      </property>
+      <item>
+       <widget class="QFrame" name="topBarFrame">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>62</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>62</height>
+         </size>
+        </property>
+        <layout class="QHBoxLayout" name="topBarLayout">
+         <property name="spacing">
+          <number>18</number>
+         </property>
+         <property name="leftMargin">
+          <number>10</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QLabel" name="titleLabel">
+           <property name="text">
+            <string>Wise AI 기반 주차장 디지털 트윈 관제 시스템</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="topSpacer">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QLabel" name="dateLabel">
+           <property name="text">
+            <string>2026-07-06 14:21:08</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="systemStatusLabel">
+           <property name="text">
+            <string>통신 상태</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="connectionStatusLabel">
+           <property name="text">
+            <string>CCTV 상태</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="settingsLabel">
+           <property name="cursor">
+            <cursorShape>PointingHandCursor</cursorShape>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QFrame" name="topSectionFrame">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <layout class="QHBoxLayout" name="topSectionLayout">
+         <property name="spacing">
+          <number>12</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QFrame" name="cctvCard">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+           <layout class="QVBoxLayout" name="cctvCardLayout">
+            <property name="spacing">
+             <number>10</number>
+            </property>
+            <property name="leftMargin">
+             <number>12</number>
+            </property>
+            <property name="topMargin">
+             <number>10</number>
+            </property>
+            <property name="rightMargin">
+             <number>12</number>
+            </property>
+            <property name="bottomMargin">
+             <number>12</number>
+            </property>
+            <item>
+             <layout class="QHBoxLayout" name="cctvHeaderLayout">
+              <item>
+               <widget class="QLabel" name="monitorTitleLabel">
+                <property name="text">
+                 <string>CCTV 실시간 모니터링</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="monitorHeaderSpacer">
+                <property name="orientation">
+                 <enum>Qt::Orientation::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>40</width>
+                  <height>20</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+               <item>
+                <layout class="QHBoxLayout" name="reportButtonLayout">
+                 <property name="spacing">
+                  <number>6</number>
+                 </property>
+                 <property name="leftMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="topMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="rightMargin">
+                  <number>0</number>
+                 </property>
+                 <property name="bottomMargin">
+                  <number>0</number>
+                 </property>
+                 <item>
+                  <widget class="QFrame" name="reportActionCard">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="reportActionCardLayout">
+                    <property name="spacing">
+                     <number>1</number>
+                    </property>
+                    <property name="leftMargin">
+                     <number>8</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="rightMargin">
+                     <number>9</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>0</number>
+                    </property>
+                    <item>
+                     <widget class="QLabel" name="reportActionIconLabel">
+                      <property name="minimumSize">
+                       <size>
+                        <width>26</width>
+                        <height>26</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>26</width>
+                        <height>26</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="reportActionTitleLabel">
+                      <property name="text">
+                       <string>신고</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="reportChannelButton1">
+                   <property name="cursor">
+                    <cursorShape>PointingHandCursor</cursorShape>
+                   </property>
+                   <property name="toolTip">
+                    <string>CH 01 신고</string>
+                   </property>
+                   <property name="text">
+                    <string>CH 01</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="reportChannelButton2">
+                   <property name="cursor">
+                    <cursorShape>PointingHandCursor</cursorShape>
+                   </property>
+                   <property name="toolTip">
+                    <string>CH 02 신고</string>
+                   </property>
+                   <property name="text">
+                    <string>CH 02</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="reportChannelButton3">
+                   <property name="cursor">
+                    <cursorShape>PointingHandCursor</cursorShape>
+                   </property>
+                   <property name="toolTip">
+                    <string>CH 03 신고</string>
+                   </property>
+                   <property name="text">
+                    <string>CH 03</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="reportChannelButton4">
+                   <property name="cursor">
+                    <cursorShape>PointingHandCursor</cursorShape>
+                   </property>
+                   <property name="toolTip">
+                    <string>CH 04 신고</string>
+                   </property>
+                   <property name="text">
+                    <string>CH 04</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QGridLayout" name="videoGridLayout">
+              <property name="spacing">
+               <number>8</number>
+              </property>
+              <item row="0" column="0">
+               <widget class="ClickableVideoWidget" name="camView1" native="true"/>
+              </item>
+              <item row="0" column="1">
+               <widget class="ClickableVideoWidget" name="camView2" native="true"/>
+              </item>
+              <item row="1" column="0">
+               <widget class="ClickableVideoWidget" name="camView3" native="true"/>
+              </item>
+              <item row="1" column="1">
+               <widget class="ClickableVideoWidget" name="camView4" native="true"/>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QFrame" name="mapCard">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+           <layout class="QVBoxLayout" name="mapCardLayout">
+            <property name="spacing">
+             <number>10</number>
+            </property>
+            <property name="leftMargin">
+             <number>12</number>
+            </property>
+            <property name="topMargin">
+             <number>10</number>
+            </property>
+            <property name="rightMargin">
+             <number>12</number>
+            </property>
+            <property name="bottomMargin">
+             <number>12</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="mapTitleLabel">
+              <property name="text">
+               <string>디지털 트윈 주차장 맵 (B1F)</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="DigitalTwinMapWidget" name="digitalTwinMapWidget"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QFrame" name="bottomSectionFrame">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <layout class="QHBoxLayout" name="bottomSectionLayout">
+         <property name="spacing">
+          <number>12</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QFrame" name="objectListCard">
+           <property name="minimumSize">
+            <size>
+             <width>380</width>
+             <height>0</height>
+            </size>
+           </property>
+           <layout class="QVBoxLayout" name="objectListLayout">
+            <item>
+             <widget class="QLabel" name="objectListTitleLabel">
+              <property name="text">
+               <string>실시간 객체 목록</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="objectListBodyFrame"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QFrame" name="eventLogCard">
+           <property name="minimumSize">
+            <size>
+             <width>380</width>
+             <height>0</height>
+            </size>
+           </property>
+           <layout class="QVBoxLayout" name="eventLogLayout">
+            <item>
+             <widget class="QLabel" name="eventLogTitleLabel">
+              <property name="text">
+               <string>이벤트 로그</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="eventLogBodyFrame"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QFrame" name="deviceStatusCard">
+           <property name="minimumSize">
+            <size>
+             <width>250</width>
+             <height>0</height>
+            </size>
+           </property>
+           <layout class="QVBoxLayout" name="deviceStatusLayout">
+            <item>
+             <widget class="QLabel" name="deviceStatusTitleLabel">
+              <property name="text">
+               <string>장비 제어 / 상태</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="deviceStatusBodyFrame"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QFrame" name="legendFrame">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>46</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>46</height>
+         </size>
+        </property>
+        <layout class="QHBoxLayout" name="legendLayout">
+         <property name="leftMargin">
+          <number>16</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>16</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QLabel" name="legendLabel">
+           <property name="text">
+            <string>상태 색상 범례  </string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="separateLabel_1">
+           <property name="text">
+            <string>|</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="safeLabel">
+           <property name="text">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 정상 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 안전 상태&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="separateLabel_2">
+           <property name="text">
+            <string>|</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="warnLabel">
+           <property name="text">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 주의 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 유의 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="separateLabel_3">
+           <property name="text">
+            <string>|</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="dangerLabel">
+           <property name="text">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 위험 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 즉시 대응 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="legendSpacer">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ClickableVideoWidget</class>
+   <extends>QWidget</extends>
+   <header>ui/ClickableVideoWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>DigitalTwinMapWidget</class>
+   <extends>QGraphicsView</extends>
+   <header>ui/DigitalTwinMapWidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

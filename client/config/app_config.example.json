@@ -1,0 +1,111 @@
+{
+    "application": {
+        "windowWidth": 1680,
+        "windowHeight": 945
+    },
+    "video": {
+        "initialStartDelayMs": 1000,
+        "receiverStartSpacingMs": 3000,
+        "streams": [
+            {
+                "cameraId": "cam-01",
+                "name": "CH - 01",
+                "url": "rtsp://admin:PASSWORD@192.168.0.6:554/0/profile4/media.smp",
+                "channelIndex": 0,
+                "enabled": true
+            },
+            {
+                "cameraId": "cam-02",
+                "name": "CH - 02",
+                "url": "rtsp://admin:PASSWORD@192.168.0.6:554/1/profile4/media.smp",
+                "channelIndex": 1,
+                "enabled": true
+            },
+            {
+                "cameraId": "cam-03",
+                "name": "CH - 03",
+                "url": "rtsp://admin:PASSWORD@192.168.0.6:554/2/profile4/media.smp",
+                "channelIndex": 2,
+                "enabled": true
+            },
+            {
+                "cameraId": "cam-04",
+                "name": "CH - 04",
+                "url": "rtsp://admin:PASSWORD@192.168.0.6:554/3/profile4/media.smp",
+                "channelIndex": 3,
+                "enabled": true
+            }
+        ],
+        "receiver": {
+            "decoderMode": "auto",
+            "busPollIntervalMs": 200,
+            "latencyMs": 200,
+            "dropOnLatency": true,
+            "initialPacketTimeoutMs": 10000,
+            "initialFrameTimeoutMs": 10000,
+            "maximumReconnectDelayMs": 5000,
+            "authenticationFailureReconnectDelayMs": 120000,
+            "stallTimeoutMs": 8000,
+            "udpBufferSizeBytes": 4194304,
+            "tcpTimeoutUs": 20000000,
+            "udpTimeoutUs": 5000000,
+            "probationPackets": 2,
+            "rtspKeepAlive": true,
+            "udpReconnect": true,
+            "addReferenceTimestampMeta": true,
+            "decodeQueueMaximumBuffers": 8,
+            "decodeQueueMaximumTimeMs": 100,
+            "renderQueueMaximumBuffers": 1,
+            "renderQueueMaximumTimeMs": 200,
+            "sinkQos": false,
+            "sinkSync": false,
+            "sinkAsync": false,
+            "minimumLoadingMs": 700,
+            "reconnectSpreadMs": 3000,
+            "blur": {
+                "syncOffsetMs": 300,
+                "historyMs": 10000,
+                "matchToleranceMs": 250,
+                "holdLastMetadataMs": 1000,
+                "maximumHistorySize": 300,
+                "sourceRestartGapMs": 5000,
+                "sourceTimestampRestartThresholdMs": 2000,
+                "paddingRatio": 0.18,
+                "maximumCornerRadius": 28,
+                "radiusDivisor": 8,
+                "minimumRadius": 4,
+                "maximumRadius": 18,
+                "debugLogIntervalMs": 1000
+            }
+        }
+    },
+    "mqtt": {
+        "host": "192.168.0.13",
+        "port": 8883,
+        "caCertificatePath": "/etc/veda/certs/ca.crt",
+        "clientIdPrefix": "qt-device-status",
+        "keepAliveSeconds": 60,
+        "reconnectIntervalMs": 3000,
+        "debugLogging": true,
+        "blurDebugLogIntervalMs": 1000,
+        "riskDebugLogIntervalMs": 1000,
+        "maximumDebugPayloadLength": 512,
+        "topics": {
+            "controllerStatus": { "filter": "veda/hw/ch/+/status", "qos": 1 },
+            "centralStatus": { "filter": "veda/hw/status", "qos": 1 },
+            "sensorAlive": { "filter": "veda/ch/+/alive", "qos": 1 },
+            "centralEvent": { "filter": "veda/qt/event", "qos": 1 },
+            "risk": { "filter": "veda/risk", "qos": 1 },
+            "blur": { "filter": "veda/ch/+/blur", "qos": 0 }
+        },
+        "dispatcher": {
+            "blurFlushIntervalMs": 10,
+            "blurMaximumPendingFramesPerChannel": 32,
+            "blurSourceRestartGapMs": 5000,
+            "blurTimestampRestartThresholdMs": 2000,
+            "riskFlushIntervalMs": 50,
+            "riskSourceRestartGapMs": 5000,
+            "riskTimestampRollbackResetMs": 1000
+        }
+    }
+}
