@@ -39,7 +39,7 @@
         "receiver": {
             "decoderMode": "auto",
             "busPollIntervalMs": 200,
-            "latencyMs": 300,
+            "latencyMs": 100,
             "dropOnLatency": true,
             "initialPacketTimeoutMs": 10000,
             "initialFrameTimeoutMs": 10000,
