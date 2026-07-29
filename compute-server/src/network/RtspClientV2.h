@@ -102,9 +102,31 @@ private:
     std::string md5Hex(const std::string& input);
 
     /**
-     * @brief   30초 주기로 GET_PARAMETER를 보내 RTSP 세션을 유지하는 루프
+     * @brief   effectiveKeepAliveSec_ 주기로 GET_PARAMETER를 보내 RTSP 세션을 유지하는 루프
+     *
+     * @warning 주기는 설정값이 아니라 '카메라가 통보한 세션 타임아웃'에서 유도된다.
+     *          자세한 이유는 deriveKeepAliveInterval() 참고
      */
     void keepAliveLoop();
+
+    /**
+     * @brief   SETUP 응답의 Session 헤더에서 timeout= 을 읽어 keep-alive 주기를 정한다
+     *
+     * @details
+     * RTSP Session 헤더는 `Session: <id>[;timeout=<초>]` 형식이고, timeout 은
+     * **"이 시간 안에 요청이 없으면 세션을 끊겠다"는 카메라의 통보**다 (RFC 2326 §12.37).
+     *
+     * 예전에는 이 값을 통째로 버리고 rtspKeepAliveIntervalSec(기본 30초) 고정 주기로만
+     * GET_PARAMETER 를 보냈다. 카메라가 `timeout=10` 을 통보하면 30초짜리 keep-alive 는
+     * 영원히 늦어서, 스트림이 10초마다 끊기고 재연결되는 루프에 빠진다
+     * -- PLAY 는 매번 성공하므로 인증/URI 문제처럼 보이지 않아 원인을 찾기 어렵다
+     *
+     * 통보된 타임아웃의 절반을 주기로 삼는다(최소 1초). 절반인 이유는 한 번 유실돼도
+     * 다음 keep-alive 가 만료 전에 도달하기 때문이다. 설정값이 더 짧으면 설정값을 쓴다
+     *
+     * @param   sessionLine SETUP 응답의 Session 헤더 한 줄
+     */
+    void deriveKeepAliveInterval(const std::string& sessionLine);
 
     /**
      * @brief   일정 주기(kMetricsReportIntervalMs)마다 누적된 성능 지표를 로그로 출력
@@ -118,7 +140,23 @@ private:
     ///          (튜닝 대상이 아니고, 바꾸면 파싱이 깨짐)
     /// @{
 
+    /**
+     * @brief RTP 고정 헤더 길이 (V/P/X/CC, M/PT, seq, timestamp, SSRC)
+     * @warning 이것은 '최소' 길이다. 실제 헤더는 CSRC 개수와 확장 헤더에 따라 더 길어진다
+     *          -- rtpHeaderLength() 로 계산할 것 (고정 12로 자르면 페이로드 앞에 이진 쓰레기가 붙는다)
+     */
     static constexpr int kRtpHeaderSize = 12;
+
+    /// @brief RTP 버전 (RFC 3550). 첫 바이트 상위 2비트가 이 값이 아니면 RTP 패킷이 아니다
+    static constexpr std::uint8_t kRtpVersion = 2;
+
+    /**
+     * @brief   실제 RTP 헤더 길이를 계산 (고정 12 + CSRC + 확장 헤더)
+     * @param   packet    RTP 패킷 선두
+     * @param   packetLen 패킷 전체 길이
+     * @return  헤더 길이. RTP 가 아니거나 길이가 모순이면 0
+     */
+    static std::size_t rtpHeaderLength(const std::uint8_t* packet, std::size_t packetLen);
 
     /// @brief RTP 인터리브 프레임의 2바이트 length 필드가 표현 가능한 최댓값
     static constexpr std::size_t kMaxRtpPayloadSize = 65535;
@@ -148,6 +186,20 @@ private:
     int keepAliveIntervalSec_;
     std::chrono::milliseconds metricsReportInterval_;
     /** @} */
+
+    /// @brief 카메라가 Session 헤더로 통보한 세션 타임아웃(초). 0 = 통보 없음
+    int sessionTimeoutSec_ = 0;
+
+    /// @brief 실제 keep-alive 주기 = min(설정값, 통보 타임아웃/2), 최소 1초
+    int effectiveKeepAliveSec_ = 0;
+
+    /**
+     * @brief   메타데이터 RTP 가 실려오는 인터리브 채널 번호
+     * @details SETUP 에서 `interleaved=0-1` 을 요청하지만, 서버가 다른 채널을 배정할 수 있다
+     *          (RFC 2326 §12.39 -- 요청은 '희망'이고 응답이 확정이다).
+     *          응답의 Transport 헤더를 파싱해 채워지며, 없으면 요청값 0 을 유지한다
+     */
+    int rtpChannel_ = 0;
 
     AppConfig cfg_;
     int sock_ = -1;  ///< 워커 스레드 전용 (생성/사용/close 모두 워커에서)

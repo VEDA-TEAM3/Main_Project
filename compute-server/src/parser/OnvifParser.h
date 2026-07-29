@@ -35,4 +35,14 @@ public:
 
 private:
     double edgeEpsilon_;
+
+    /**
+     * @brief `<tt:Frame>` 을 못 찾은 누적 횟수 (rate-limit 및 진단용)
+     *
+     * @details
+     * 이 실패는 '한 프레임이 깨졌다'보다 '엉뚱한 스트림을 먹고 있다'는 신호일 때가 많다
+     * (예: 메타데이터가 아닌 트랙의 RTP, RTP 헤더 길이 오산으로 어긋난 페이로드).
+     * 그런 상황에서는 패킷마다 실패하므로 rate-limit 없이 찍으면 로그가 도배된다
+     */
+    std::uint64_t noFrameTagCount_ = 0;
 };

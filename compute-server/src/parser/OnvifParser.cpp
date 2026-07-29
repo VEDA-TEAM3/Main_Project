@@ -245,7 +245,16 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
     const size_t framePos = payload.find("<tt:Frame");
     if (framePos == std::string_view::npos) {
-        logError(kIface, "ch=" + std::to_string(raw.channelId) + " <tt:Frame> 태그 없음 - 프레임 스킵");
+        // 이 실패는 보통 한 프레임의 문제가 아니라 '입력 스트림 자체가 메타데이터가 아니다'라는
+        // 신호다. 그래서 (1) 패킷마다 찍히지 않도록 rate-limit 하고,
+        // (2) 무엇이 들어왔는지 알 수 있게 페이로드 선두를 함께 남긴다
+        // -- "태그 없음"만으로는 H.264 NAL 인지, RTCP 인지, 잘린 XML 인지 구분할 수 없다
+        ++noFrameTagCount_;
+        if ((noFrameTagCount_ == 1 || noFrameTagCount_ % 100 == 0) && isLogEnabled(LogLevel::Error)) {
+            logError(kIface, "ch=" + std::to_string(raw.channelId) + " <tt:Frame> 태그 없음 - 프레임 스킵 (누적 " +
+                                 std::to_string(noFrameTagCount_) + "건, " + std::to_string(payload.size()) +
+                                 "B, 선두=\"" + sanitizeForLog(payload) + "\")");
+        }
         return result;
     }
 
