@@ -32,12 +32,25 @@ public:
     void transform(const std::vector<veda::TopViewFrame>& in, std::vector<domain::ObservationFrame>& out) override;
 
 private:
+    struct CompiledCalibration {
+        double cameraPosX = 0.0;
+        double cameraPosY = 0.0;
+        double forwardX = 0.0;
+        double forwardY = 0.0;
+        double perpendicularX = 0.0;
+        double perpendicularY = 0.0;
+        double facingAngleDeg = 0.0;
+        int lateralSign = -1;
+        bool rotationPrecomputed = false;
+    };
+
     /**
-     * @brief channelId 로 바로 색인하는 O(1) 조회표 (해당 채널 캘리브레이션이 없으면 nullopt)
+     * @brief channelId 로 바로 색인하는 O(1) 변환계수 조회표 (캘리브레이션이 없으면 nullopt)
      * @details 예전에는 프레임마다 벡터를 선형 탐색해서 윈도우당 O(채널수^2) 이었음 --
-     *          수백 채널 규모에서는 무시할 수 없어 색인으로 바꿈
+     *          수백 채널 규모에서는 무시할 수 없어 색인으로 바꿈.
+     *          회전계수도 생성자에서 한 번 계산해 프레임마다 반복되던 sin/cos 를 제거한다.
      */
-    std::vector<std::optional<CameraCalibration>> byChannel_;
+    std::vector<std::optional<CompiledCalibration>> byChannel_;
 
     WorldBounds bounds_;
     bool dropUncalibrated_;

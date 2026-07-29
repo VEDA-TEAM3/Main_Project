@@ -32,27 +32,44 @@ AffineLocalToWorldTransform::AffineLocalToWorldTransform(std::vector<CameraCalib
         if (c.channelId < 0)
             continue;
         auto& slot = byChannel_[static_cast<std::size_t>(c.channelId)];
-        if (!slot.has_value())  // 중복 항목은 첫 번째를 사용 (기존 선형 탐색의 first-match 동작 보존)
-            slot = c;
+        if (!slot.has_value()) {  // 중복 항목은 첫 번째를 사용 (기존 선형 탐색의 first-match 동작 보존)
+            CompiledCalibration compiled;
+            compiled.cameraPosX = c.cameraPosX;
+            compiled.cameraPosY = c.cameraPosY;
+            compiled.facingAngleDeg = c.facingAngleDeg;
+            compiled.lateralSign = c.lateralSign;
+            compiled.rotationPrecomputed = std::isfinite(c.facingAngleDeg);
+            if (compiled.rotationPrecomputed) {
+                const double thetaRad = (90.0 - c.facingAngleDeg) * kPi / 180.0;
+                compiled.forwardX = std::cos(thetaRad);
+                compiled.forwardY = std::sin(thetaRad);
+                compiled.perpendicularX = (c.lateralSign > 0) ? compiled.forwardY : -compiled.forwardY;
+                compiled.perpendicularY = (c.lateralSign > 0) ? -compiled.forwardX : compiled.forwardX;
+            }
+            slot = compiled;
+        }
     }
 }
 
 void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame>& in,
                                             std::vector<domain::ObservationFrame>& out) {
-    out.clear();  // capacity 는 유지 -> 윈도우마다 재할당하지 않음
-    out.reserve(in.size());
+    // 프레임별 objects 벡터까지 재사용한다. clear()+push_back은 바깥 벡터의 capacity만 남기고
+    // 각 ObservationFrame을 파괴해 내부 capacity를 매 호출 잃어버린다.
+    out.resize(in.size());
 
-    for (const auto& frame : in) {
-        const CameraCalibration* cal = nullptr;
+    for (std::size_t frameIndex = 0; frameIndex < in.size(); ++frameIndex) {
+        const auto& frame = in[frameIndex];
+        const CompiledCalibration* cal = nullptr;
         if (frame.ch >= 0 && static_cast<std::size_t>(frame.ch) < byChannel_.size()) {
             const auto& slot = byChannel_[static_cast<std::size_t>(frame.ch)];
             if (slot.has_value())
                 cal = &slot.value();
         }
 
-        domain::ObservationFrame observed;
+        auto& observed = out[frameIndex];
         observed.ts = frame.ts;
         observed.ch = frame.ch;
+        observed.objects.clear();
 
         if (cal == nullptr) {
             // 캘리브레이션이 없으면 로컬 좌표를 도면 좌표로 옮길 방법이 없음.
@@ -70,21 +87,40 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
                     observed.objects.push_back(
                         domain::WorldObservation{obj.id, obj.cls, domain::WorldPoint{obj.pos.x, obj.pos.y}});
             }
-            out.push_back(std::move(observed));
             continue;
         }
 
-        // 나침반 방위(북=0, 시계방향) -> atan2 규약으로 변환한 뒤 전방/측방 단위벡터를 구함
-        const double thetaRad = (90.0 - cal->facingAngleDeg) * kPi / 180.0;
-        const double fx = std::cos(thetaRad);
-        const double fy = std::sin(thetaRad);
-        const double perpX = (cal->lateralSign > 0) ? fy : -fy;
-        const double perpY = (cal->lateralSign > 0) ? -fx : fx;
+        double forwardX = cal->forwardX;
+        double forwardY = cal->forwardY;
+        double perpendicularX = cal->perpendicularX;
+        double perpendicularY = cal->perpendicularY;
+        if (!cal->rotationPrecomputed) {
+            const double thetaRad = (90.0 - cal->facingAngleDeg) * kPi / 180.0;
+            forwardX = std::cos(thetaRad);
+            forwardY = std::sin(thetaRad);
+            perpendicularX = (cal->lateralSign > 0) ? forwardY : -forwardY;
+            perpendicularY = (cal->lateralSign > 0) ? -forwardX : forwardX;
+        }
+
+        if (!bounds_.enabled) {
+            observed.objects.resize(frame.objects.size());
+            for (std::size_t objectIndex = 0; objectIndex < frame.objects.size(); ++objectIndex) {
+                const auto& object = frame.objects[objectIndex];
+                auto& transformed = observed.objects[objectIndex];
+                transformed.id = object.id;
+                transformed.cls = object.cls;
+                transformed.pos.x =
+                    cal->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
+                transformed.pos.y =
+                    cal->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
+            }
+            continue;
+        }
 
         observed.objects.reserve(frame.objects.size());
         for (const auto& obj : frame.objects) {
-            const double worldX = cal->cameraPosX + obj.pos.x * perpX + obj.pos.y * fx;
-            const double worldY = cal->cameraPosY + obj.pos.x * perpY + obj.pos.y * fy;
+            const double worldX = cal->cameraPosX + obj.pos.x * perpendicularX + obj.pos.y * forwardX;
+            const double worldY = cal->cameraPosY + obj.pos.x * perpendicularY + obj.pos.y * forwardY;
 
             if (bounds_.enabled && (worldX < bounds_.minX || worldX > bounds_.maxX || worldY < bounds_.minY ||
                                     worldY > bounds_.maxY)) {
@@ -102,7 +138,5 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
 
             observed.objects.push_back(domain::WorldObservation{obj.id, obj.cls, domain::WorldPoint{worldX, worldY}});
         }
-
-        out.push_back(std::move(observed));
     }
 }

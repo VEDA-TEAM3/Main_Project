@@ -4,6 +4,8 @@
  * @file    SpatialZoneMapper.h
  */
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "core/AppConfig.h"
@@ -30,5 +32,13 @@ public:
     void assign(domain::WorldFrame& frame) override;
 
 private:
+    void assignLinear(domain::WorldFrame& frame) const;
+    void assignIndexed(domain::WorldFrame& frame) const;
+    void buildDecisionIndex();
+
     std::vector<SpatialZone> zones_;
+    std::vector<double> xEdges_;
+    std::vector<double> yEdges_;
+    std::vector<std::uint32_t> winnerZoneIndices_;
+    std::size_t xBucketCount_ = 0;
 };
