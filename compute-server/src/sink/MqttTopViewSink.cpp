@@ -18,24 +18,30 @@ MqttTopViewSink::MqttTopViewSink(std::shared_ptr<IMqttTransport> transport, cons
 MqttTopViewSink::~MqttTopViewSink() { shutdown(); }
 
 bool MqttTopViewSink::isValidFrame(const veda::TopViewFrame& frame) const noexcept {
-    if (frame.v != veda::kSchemaVersion)
+    if (frame.v != veda::kSchemaVersion) {
         return false;
+    }
 
-    if (frame.ts <= 0)
+    if (frame.ts <= 0) {
         return false;
+    }
 
-    if (frame.ch != channelId_)
+    if (frame.ch != channelId_) {
         return false;
+    }
 
-    if (frame.objects.size() > kMaxObjectsPerFrame)
+    if (frame.objects.size() > kMaxObjectsPerFrame) {
         return false;
+    }
 
     for (const auto& object : frame.objects) {
-        if (!veda::isRiskClass(object.cls))
+        if (!veda::isRiskClass(object.cls)) {
             return false;
+        }
 
-        if (!std::isfinite(object.pos.x) || !std::isfinite(object.pos.y))
+        if (!std::isfinite(object.pos.x) || !std::isfinite(object.pos.y)) {
             return false;
+        }
     }
 
     // 객체가 없는 프레임도 해당 시각에 위험 객체가 없다는 유효한 상태다.
@@ -43,8 +49,9 @@ bool MqttTopViewSink::isValidFrame(const veda::TopViewFrame& frame) const noexce
 }
 
 bool MqttTopViewSink::prepare(const veda::TopViewFrame& in, veda::TopViewFrame& out) {
-    if (!isValidFrame(in))
+    if (!isValidFrame(in)) {
         return false;
+    }
 
     out.v = in.v;
     out.ts = in.ts;

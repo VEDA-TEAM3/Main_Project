@@ -129,8 +129,9 @@ MqttTransport::MqttTransport(const AppConfig& config)
       reconnectDelayMaxSeconds_(config.mqttReconnectDelayMaxSeconds),
       caFile_(config.mqttCaFile),
       publishTopic_(config.mqttSendTopic.empty() ? std::string(veda::topic::kRisk) : config.mqttSendTopic) {
-    if (clientId_.empty())
+    if (clientId_.empty()) {
         clientId_ = createClientId();
+    }
 
     const ParsedBroker broker = parseBrokerUrl(config.mqttBrokerUrl);
     host_ = broker.host;
