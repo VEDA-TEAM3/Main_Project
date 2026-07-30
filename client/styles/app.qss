@@ -378,8 +378,20 @@ QComboBox#videoPreprocessingChannelComboBox QAbstractItemView {
     outline: 0;
 }
 
-QWidget#videoPreprocessingControls:disabled QLabel,
-QWidget#videoPreprocessingControls:disabled QComboBox {
+QWidget#videoPreprocessingControls[preprocessingActive="true"] QLabel#videoPreprocessingFieldLabel {
+    color: #f2faff;
+}
+
+QWidget#videoPreprocessingControls[preprocessingActive="true"] QLabel#videoPreprocessingValueLabel {
+    color: #aeeaff;
+}
+
+QWidget#videoPreprocessingControls[preprocessingActive="true"] QComboBox {
+    color: #eefaff;
+}
+
+QWidget#videoPreprocessingControls[preprocessingActive="false"] QLabel,
+QWidget#videoPreprocessingControls[preprocessingActive="false"] QComboBox {
     color: #587386;
 }
 
@@ -545,11 +557,11 @@ QPushButton#reportChannelButton3:pressed, QPushButton#reportChannelButton4:press
     color: #9ddcf1;
 }
 
-QDialog#reportConfirmationDialog, QDialog#reportSuccessDialog {
+QDialog#reportConfirmationDialog, QDialog#reportSuccessDialog, QDialog#informationDialog {
     background-color: transparent;
 }
 
-QFrame#reportConfirmationPanel, QFrame#reportSuccessPanel {
+QFrame#reportConfirmationPanel, QFrame#reportSuccessPanel, QFrame#informationPanel {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                       stop:0 #123651, stop:0.42 #0c273d, stop:1 #071928);
     border: 1px solid #50c8ee;
@@ -562,7 +574,7 @@ QLabel#reportConfirmationIcon, QLabel#reportSuccessIcon {
     border: 0;
 }
 
-QLabel#reportConfirmationTitle, QLabel#reportSuccessTitle {
+QLabel#reportConfirmationTitle, QLabel#reportSuccessTitle, QLabel#informationTitle {
     color: #eafaff;
     background-color: transparent;
     border: 0;
@@ -571,7 +583,7 @@ QLabel#reportConfirmationTitle, QLabel#reportSuccessTitle {
     font-weight: 800;
 }
 
-QLabel#reportConfirmationMessage, QLabel#reportSuccessMessage {
+QLabel#reportConfirmationMessage, QLabel#reportSuccessMessage, QLabel#informationMessage {
     color: #f4fbff;
     background-color: #081d2e;
     border: 1px solid #2f6685;
@@ -602,7 +614,7 @@ QPushButton#reportDialogCloseButton:hover {
 }
 
 QPushButton#reportDialogCancelButton, QPushButton#reportDialogConfirmButton,
-QPushButton#reportSuccessConfirmButton {
+QPushButton#reportSuccessConfirmButton, QPushButton#informationConfirmButton {
     min-width: 104px;
     min-height: 38px;
     max-height: 38px;
@@ -624,20 +636,22 @@ QPushButton#reportDialogCancelButton:hover {
     color: #ffffff;
 }
 
-QPushButton#reportDialogConfirmButton, QPushButton#reportSuccessConfirmButton {
+QPushButton#reportDialogConfirmButton, QPushButton#reportSuccessConfirmButton,
+QPushButton#informationConfirmButton {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                       stop:0 #1a88b4, stop:1 #106085);
     border: 1px solid #69ddff;
     color: #ffffff;
 }
 
-QPushButton#reportDialogConfirmButton:hover, QPushButton#reportSuccessConfirmButton:hover {
+QPushButton#reportDialogConfirmButton:hover, QPushButton#reportSuccessConfirmButton:hover,
+QPushButton#informationConfirmButton:hover {
     background-color: #20a2d3;
     border-color: #a3efff;
 }
 
 QPushButton#reportDialogCancelButton:pressed, QPushButton#reportDialogConfirmButton:pressed,
-QPushButton#reportSuccessConfirmButton:pressed {
+QPushButton#reportSuccessConfirmButton:pressed, QPushButton#informationConfirmButton:pressed {
     padding-top: 1px;
 }
 

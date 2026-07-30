@@ -33,6 +33,8 @@ qt_add_executable(Qtcctvclient
     src/ui/ClickableVideoWidget.cpp
     include/ui/dialogs/MapSettingsDialog.h
     src/ui/dialogs/MapSettingsDialog.cpp
+    include/ui/dialogs/InformationDialog.h
+    src/ui/dialogs/InformationDialog.cpp
     include/ui/dialogs/ReportConfirmationDialog.h
     src/ui/dialogs/ReportConfirmationDialog.cpp
     include/ui/dialogs/ReportSuccessDialog.h

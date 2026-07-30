@@ -11,6 +11,7 @@ class QComboBox;
 class QLabel;
 class QShowEvent;
 class QSlider;
+class InformationDialog;
 
 class MapSettingsDialog final : public QWidget {
     Q_OBJECT
@@ -46,6 +47,7 @@ private:
     void markPreprocessingAsCustom();
     void loadPreprocessingChannel(int channelIndex);
     void storeCurrentPreprocessingChannel();
+    void showPreprocessingAppliedMessage(const QString& message);
 
     QCheckBox* movementTrailsCheckBox_ = nullptr;
     QCheckBox* ledCheckBox_ = nullptr;
@@ -66,6 +68,7 @@ private:
     QComboBox* denoiseComboBox_ = nullptr;
     QComboBox* sharpeningComboBox_ = nullptr;
     QWidget* preprocessingControlsWidget_ = nullptr;
+    InformationDialog* informationDialog_ = nullptr;
     QVector<VideoPreprocessingSettings> preprocessingSettingsByChannel_;
     int currentPreprocessingChannelIndex_ = 0;
     bool updatingPreprocessingControls_ = false;

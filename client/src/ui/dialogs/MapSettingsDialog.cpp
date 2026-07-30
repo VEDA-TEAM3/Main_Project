@@ -1,5 +1,7 @@
 #include "ui/dialogs/MapSettingsDialog.h"
 
+#include "ui/dialogs/InformationDialog.h"
+
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
@@ -156,6 +158,8 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("mapSettingsDialog"));
     setAttribute(Qt::WA_StyledBackground, true);
     setFocusPolicy(Qt::StrongFocus);
+
+    informationDialog_ = new InformationDialog(this);
 
     auto* overlayLayout = new QVBoxLayout(this);
     overlayLayout->setContentsMargins(0, 0, 0, 0);
@@ -375,8 +379,15 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     buttonLayout->addWidget(applyButton);
     panelLayout->addLayout(buttonLayout);
 
-    connect(preprocessingEnabledCheckBox_, &QCheckBox::toggled, this,
-            &MapSettingsDialog::setPreprocessingControlsEnabled);
+    connect(preprocessingEnabledCheckBox_, &QCheckBox::toggled, this, [this](bool enabled) {
+        if (!enabled && !updatingPreprocessingControls_) {
+            VideoPreprocessingSettings settings;
+            settings.enabled = false;
+            setPreprocessingControls(settings);
+            return;
+        }
+        setPreprocessingControlsEnabled(enabled);
+    });
     connect(preprocessingChannelComboBox_, &QComboBox::currentIndexChanged, this, [this](int channelIndex) {
         if (updatingPreprocessingControls_) {
             return;
@@ -411,11 +422,14 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
         storeCurrentPreprocessingChannel();
         emit videoPreprocessingApplyRequested(currentPreprocessingChannelIndex_,
                                               preprocessingSettingsByChannel_.value(currentPreprocessingChannelIndex_));
+        showPreprocessingAppliedMessage(
+            QStringLiteral("%1 채널에 변경된 설정이 적용되었습니다!").arg(currentPreprocessingChannelIndex_ + 1));
     });
     connect(applyAllButton, &QPushButton::clicked, this, [this]() {
         const VideoPreprocessingSettings settings = videoPreprocessingSettings();
         preprocessingSettingsByChannel_.fill(settings, preprocessingChannelCount);
         emit videoPreprocessingApplyRequested(-1, settings);
+        showPreprocessingAppliedMessage(QStringLiteral("전체 채널에 변경된 설정이 적용되었습니다!"));
     });
 
     preprocessingSettingsByChannel_.fill(VideoPreprocessingSettings{}, preprocessingChannelCount);
@@ -533,6 +547,11 @@ bool MapSettingsDialog::licensePlateBlurEnabled() const { return licensePlateBlu
 VideoPreprocessingSettings MapSettingsDialog::videoPreprocessingSettings() const {
     VideoPreprocessingSettings settings;
     settings.enabled = preprocessingEnabledCheckBox_->isChecked();
+    if (!settings.enabled) {
+        settings.enabled = false;
+        return settings;
+    }
+
     settings.brightness = brightnessSlider_->value();
     settings.contrast = static_cast<double>(contrastSlider_->value()) / 100.0;
     settings.gamma = static_cast<double>(gammaSlider_->value()) / 100.0;
@@ -594,6 +613,21 @@ void MapSettingsDialog::storeCurrentPreprocessingChannel() {
 }
 
 /**
+ * @brief         영상 전처리 설정 전달 완료 안내를 비동기 모달로 표시합니다.
+ * @param message 선택 또는 전체 채널 적용 결과 문구
+ */
+void MapSettingsDialog::showPreprocessingAppliedMessage(const QString& message) {
+    if (!informationDialog_) {
+        return;
+    }
+
+    informationDialog_->setContent(QStringLiteral("영상 설정 적용"), message);
+    informationDialog_->open();
+    informationDialog_->raise();
+    informationDialog_->activateWindow();
+}
+
+/**
  * @brief 슬라이더 오른쪽에 현재 보정 수치를 표시합니다.
  */
 void MapSettingsDialog::updatePreprocessingValueLabels() {
@@ -608,7 +642,21 @@ void MapSettingsDialog::updatePreprocessingValueLabels() {
  * @param enabled 전처리 사용 여부
  */
 void MapSettingsDialog::setPreprocessingControlsEnabled(bool enabled) {
-    preprocessingControlsWidget_->setEnabled(enabled);
+    preprocessingPresetComboBox_->setEnabled(enabled);
+    brightnessSlider_->setEnabled(enabled);
+    contrastSlider_->setEnabled(enabled);
+    gammaSlider_->setEnabled(enabled);
+    denoiseComboBox_->setEnabled(enabled);
+    sharpeningComboBox_->setEnabled(enabled);
+
+    preprocessingControlsWidget_->setProperty("preprocessingActive", enabled);
+    preprocessingControlsWidget_->style()->unpolish(preprocessingControlsWidget_);
+    preprocessingControlsWidget_->style()->polish(preprocessingControlsWidget_);
+    for (QWidget* child : preprocessingControlsWidget_->findChildren<QWidget*>()) {
+        child->style()->unpolish(child);
+        child->style()->polish(child);
+    }
+    preprocessingControlsWidget_->update();
 }
 
 /**
