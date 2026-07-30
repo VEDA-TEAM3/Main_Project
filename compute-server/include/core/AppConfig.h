@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -65,6 +66,18 @@ struct AppConfig {
     double imageMapOffsetX = 0.0;
     double imageMapOffsetY = 0.0;
 
+    /**
+     * @brief   blur 박스 확대 배율 (지연 보상 여유, 1.0 = 확대 안 함)
+     *
+     * @details
+     * 전송/렌더 지연 동안 빠른 객체가 박스를 벗어나는 것을 트래킹 없이 보정하기 위한 여유폭.
+     * 중심을 고정한 채 폭/높이에만 곱하므로 1.2 는 '면적 1.44 배'다 -- 과하게 키우면
+     * 가려야 할 대상 주변까지 뭉개진다
+     * 하한이 1.0 인 이유: 1.0 미만은 박스를 '줄여서' 얼굴/번호판을 노출시키는 방향이며,
+     * 이는 설정 실수로도 절대 도달하면 안 되는 값이다 (blur 는 프라이버시 기능)
+     */
+    double blurBoxScale = 1.25;
+
     // ==== Homography Config ====
     std::array<double, 9> homography{
         {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};  // Homography 행렬 (기본값: 항등 행렬)
@@ -94,7 +107,7 @@ struct AppConfig {
 
     // ==== MQTT Broker Config ====
     std::string mqttHost;
-    int mqttPort = 0;
+    int mqttPort = 8883;
     std::string mqttCaFile;
     std::string mqttClientId;  // MQTT clientId (채널 간에는 반드시 달라야 함)
 
@@ -115,6 +128,12 @@ struct AppConfig {
      * 상한이 없으면 '프레임을 덜 버리려고' 큐를 키우는 자연스러운 대응이 그대로 OOM 이 된다
      */
     static constexpr int kMaxMqttQueueSize = 1000;
+
+    /**
+     * @brief   blur 박스 확대 배율의 절대 상한
+     * @details 2.0 이면 면적 4 배 -- 그 이상은 '지연 보정'이 아니라 화면을 통째로 가리는 것에 가깝다
+     */
+    static constexpr double kMaxBlurBoxScale = 2.0;
 
     /**
      * @brief   0 이하의 값이 들어오면 기본값으로 되돌리고 경고 (버퍼 크기/주기 등에 사용)
@@ -148,6 +167,25 @@ struct AppConfig {
      */
     static inline void clampRange(int& value, int minValue, int maxValue, const char* name) {
         if (value < minValue) {
+            std::cerr << "[Config] 경고: " << name << "=" << value << " 는 " << minValue << " 이상이어야 합니다 — "
+                      << minValue << " 로 조정합니다.\n";
+            value = minValue;
+        } else if (value > maxValue) {
+            std::cerr << "[Config] 경고: " << name << "=" << value << " 는 " << maxValue << " 이하여야 합니다 — "
+                      << maxValue << " 로 조정합니다.\n";
+            value = maxValue;
+        }
+    }
+
+    /**
+     * @brief   clampRange 의 double 오버로드 (배율/비율처럼 정수가 아닌 상·하한 설정에 사용)
+     * @details 비유한값(NaN/Inf)은 어떤 비교에도 false 이므로 별도로 걸러 기본값 의미의 minValue 로 되돌린다
+     */
+    static inline void clampRange(double& value, double minValue, double maxValue, const char* name) {
+        if (!std::isfinite(value)) {
+            std::cerr << "[Config] 경고: " << name << " 가 유한한 수가 아닙니다 — " << minValue << " 로 조정합니다.\n";
+            value = minValue;
+        } else if (value < minValue) {
             std::cerr << "[Config] 경고: " << name << "=" << value << " 는 " << minValue << " 이상이어야 합니다 — "
                       << minValue << " 로 조정합니다.\n";
             value = minValue;
@@ -258,6 +296,8 @@ struct AppConfig {
         cfg.imageMapScaleY = veda::detail::get_or<double>(j, "imageMapScaleY", cfg.imageMapScaleY);
         cfg.imageMapOffsetX = veda::detail::get_or<double>(j, "imageMapOffsetX", cfg.imageMapOffsetX);
         cfg.imageMapOffsetY = veda::detail::get_or<double>(j, "imageMapOffsetY", cfg.imageMapOffsetY);
+        cfg.blurBoxScale = veda::detail::get_or<double>(j, "blurBoxScale", cfg.blurBoxScale);
+        clampRange(cfg.blurBoxScale, 1.0, kMaxBlurBoxScale, "blurBoxScale");
 
         // Homography Config
         std::vector<double> homographyDefault(cfg.homography.begin(), cfg.homography.end());

@@ -41,8 +41,10 @@ AppContext::AppContext(const AppConfig& config) {
     source_ = std::make_shared<RtspOnvifSourceV2>(config);
 
     auto parser = std::make_shared<OnvifParser>(config.edgeEpsilon);
-    auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
-                                                                     config.imageMapOffsetX, config.imageMapOffsetY);
+    auto imageMapper =
+        std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
+                                                      config.imageMapOffsetX, config.imageMapOffsetY,
+                                                      config.blurBoxScale);
     auto sanitizer = std::make_shared<ContainmentSanitizer>(config.sanitizerIouThresh, config.sanitizerContainThresh);
     auto router = std::make_shared<ParentBasedRouter>();
     auto ground = std::make_shared<BottomCenterExtractor>();
