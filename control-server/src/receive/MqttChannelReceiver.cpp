@@ -12,9 +12,13 @@ namespace {
 
 constexpr const char* kIface = "MqttChannelReceiver";
 constexpr std::string_view kChannelPrefix = "veda/ch/";
+constexpr std::size_t kMaxObjectsPerFrame = 256;
 
 bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noexcept {
     if (frame.v != veda::kSchemaVersion || frame.ts <= 0 || frame.ch < 0 || frame.ch >= channelCount) {
+        return false;
+    }
+    if (frame.objects.size() > kMaxObjectsPerFrame) {
         return false;
     }
     for (const veda::TopViewObject& object : frame.objects) {
@@ -86,6 +90,8 @@ void MqttChannelReceiver::stop() {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         queueStopping_ = true;
+        queue_.clear();
+        queuedBytes_ = 0;
     }
     queueCv_.notify_all();
     if (pipelineThread_.joinable()) {
@@ -146,16 +152,41 @@ void MqttChannelReceiver::handleMessage(std::string_view topic, std::string_view
     if (!running_.load(std::memory_order_acquire)) {
         return;
     }
+
+    // 신뢰할 수 없는 MQTT payload를 복사하거나 nlohmann DOM으로 확장하기 전에 차단한다.
+    // alive는 wire 계약상 정확히 1 byte("0" 또는 "1")이며, TopView/기타 메시지는
+    // 정상 최대 256-object 프레임에 여유를 둔 64 KiB까지만 허용한다.
+    const std::size_t maxPayloadBytes =
+        topic.ends_with("/alive") ? 1U : kMaxTopViewPayloadBytes;
+    if (payload.size() > maxPayloadBytes) {
+        recordDrop(topic, "payload too large");
+        return;
+    }
+
+    RawMessage incoming{std::string(topic), std::string(payload)};
+    const std::size_t incomingBytes = incoming.byteSize();
+    if (incomingBytes > kMaxQueuedPayloadBytes) {
+        recordDrop(topic, "message exceeds queue byte limit");
+        return;
+    }
+
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (queueStopping_) {
             return;
         }
-        if (queue_.size() >= kMaxQueuedMessages) {
+
+        // 메시지 개수와 총 바이트를 함께 제한한다. 단일 payload 상한만 두면
+        // 64 KiB × 4096건으로 payload 문자열만 약 256 MiB까지 적체될 수 있다.
+        while (!queue_.empty() &&
+               (queue_.size() >= kMaxQueuedMessages ||
+                queuedBytes_ + incomingBytes > kMaxQueuedPayloadBytes)) {
+            queuedBytes_ -= queue_.front().byteSize();
             queue_.pop_front();  // drop-oldest: 실시간 좌표라 오래된 프레임보다 최신이 항상 유용
             queueDroppedCount_.fetch_add(1, std::memory_order_relaxed);
         }
-        queue_.push_back(RawMessage{std::string(topic), std::string(payload)});
+        queue_.push_back(std::move(incoming));
+        queuedBytes_ += incomingBytes;
     }
     queueCv_.notify_one();
 }
@@ -170,6 +201,7 @@ void MqttChannelReceiver::pipelineLoop() noexcept {
                 return;  // 종료: 남은 큐는 버리고 빠져나감
             }
             message = std::move(queue_.front());
+            queuedBytes_ -= message.byteSize();
             queue_.pop_front();
         }
         // 무거운 작업(디코드 + fusion/dispatch 파이프라인 전체)은 전부 이 워커 스레드에서 수행
