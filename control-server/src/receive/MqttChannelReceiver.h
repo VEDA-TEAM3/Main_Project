@@ -61,8 +61,8 @@ private:
     bool tryConnect() noexcept;
     void retryLoop() noexcept;
 
-    void handleMessage(std::string_view topic, std::string_view payload) noexcept;   ///< mosquitto 스레드: enqueue 만
-    void pipelineLoop() noexcept;                                                    ///< PipelineWorker 스레드 루프
+    void handleMessage(std::string_view topic, std::string_view payload) noexcept;  ///< mosquitto 스레드: enqueue 만
+    void pipelineLoop() noexcept;                                                   ///< PipelineWorker 스레드 루프
     void processMessage(std::string_view topic, std::string_view payload) noexcept;  ///< 디코드+파이프라인(워커에서)
     void handleConnection(bool connected) noexcept;
     std::optional<veda::ChannelId> parseChannel(std::string_view topic, std::string_view suffix) const noexcept;
@@ -91,11 +91,17 @@ private:
     struct RawMessage {
         std::string topic;
         std::string payload;
+
+        std::size_t byteSize() const noexcept { return topic.size() + payload.size(); }
     };
-    static constexpr std::size_t kMaxQueuedMessages = 4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
+    static constexpr std::size_t kMaxTopViewPayloadBytes = 64U * 1024U;
+    static constexpr std::size_t kMaxQueuedPayloadBytes = 8U * 1024U * 1024U;
+    static constexpr std::size_t kMaxQueuedMessages =
+        4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
     std::mutex queueMutex_;
     std::condition_variable queueCv_;
     std::deque<RawMessage> queue_;  ///< queueMutex_ 로 보호
+    std::size_t queuedBytes_ = 0;    ///< queueMutex_ 로 보호 (topic + payload 합계)
     bool queueStopping_ = false;    ///< queueMutex_ 로 보호
     std::thread pipelineThread_;
     std::atomic_uint64_t queueDroppedCount_{0};
