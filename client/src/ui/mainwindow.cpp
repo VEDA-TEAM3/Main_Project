@@ -6,6 +6,7 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -13,6 +14,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QShowEvent>
+#include <QShortcut>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
@@ -75,12 +77,33 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupDashboardLayout();
     setupTopBarStatuses();
     setupClock();
+    setupWindowShortcuts();
     setupDashboardPanels();
     setupDashboardPanelCoordinator();
     setupDeviceStatusService();
     setupVideoViewEvents();
     setupReportActions();
     setupStreamSessionManager(std::move(streamReceiverFactory));
+}
+
+/** @brief Alt+Enter로 메인 창의 전체 화면 상태를 전환하는 단축키를 등록합니다. */
+void MainWindow::setupWindowShortcuts() {
+    auto* returnShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Return), this);
+    auto* enterShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Enter), this);
+    connect(returnShortcut, &QShortcut::activated, this, &MainWindow::toggleFullScreen);
+    connect(enterShortcut, &QShortcut::activated, this, &MainWindow::toggleFullScreen);
+}
+
+/** @brief 전체 화면으로 전환하거나 전체 화면 진입 전의 창 상태로 복원합니다. */
+void MainWindow::toggleFullScreen() {
+    if (isFullScreen()) {
+        setWindowState(windowStateBeforeFullScreen_);
+        return;
+    }
+
+    windowStateBeforeFullScreen_ = windowState();
+    windowStateBeforeFullScreen_.setFlag(Qt::WindowFullScreen, false);
+    showFullScreen();
 }
 
 /**

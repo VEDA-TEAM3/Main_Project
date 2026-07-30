@@ -62,6 +62,7 @@ private:
     void setupDeviceStatusService();
     void setupTopBarStatuses();
     void setupClock();
+    void setupWindowShortcuts();
     void setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory> receiverFactory);
     void setupVideoViewEvents();
     void setupReportActions();
@@ -79,6 +80,7 @@ private:
     void updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels);
     void updateCurrentDateTime();
     void setTopBarStatus(QLabel* label, const QString& title, const QString& status, const QString& color);
+    void toggleFullScreen();
 
     void toggleExpandVideo(QWidget* targetWidget);
     void expandVideo(QWidget* targetWidget);
@@ -117,4 +119,5 @@ private:
     bool faceBlurEnabled_ = true;
     bool licensePlateBlurEnabled_ = true;
     bool reportInProgress_ = false;
+    Qt::WindowStates windowStateBeforeFullScreen_ = Qt::WindowNoState;
 };
