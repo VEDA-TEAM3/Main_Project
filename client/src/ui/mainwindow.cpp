@@ -5,7 +5,6 @@
 #include <QEvent>
 #include <QFrame>
 #include <QGridLayout>
-#include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMessageBox>
@@ -128,6 +127,7 @@ void MainWindow::setupReportActions() {
         ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
 
     for (int channelIndex = 0; channelIndex < static_cast<int>(reportButtons.size()); ++channelIndex) {
+        reportButtons[static_cast<std::size_t>(channelIndex)]->setFocusPolicy(Qt::NoFocus);
         connect(reportButtons[static_cast<std::size_t>(channelIndex)], &QPushButton::clicked, this,
                 [this, channelIndex]() { openReportConfirmationDialog(channelIndex + 1); });
     }
@@ -252,7 +252,7 @@ void MainWindow::setupDashboardLayout() {
     ui_->settingsLabel->setPixmap(settingsIcon.scaled(QSize(29, 29), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     ui_->settingsLabel->setAlignment(Qt::AlignCenter);
     ui_->settingsLabel->setFixedSize(65, 49);
-    ui_->settingsLabel->setFocusPolicy(Qt::StrongFocus);
+    ui_->settingsLabel->setFocusPolicy(Qt::NoFocus);
     ui_->settingsLabel->installEventFilter(this);
     ui_->settingsLabel->setToolTip(QStringLiteral("설정"));
 
@@ -307,7 +307,7 @@ void MainWindow::setupDashboardLayout() {
 }
 
 /**
- * @brief         우측 상단 설정 버튼의 마우스와 키보드 입력을 팝업 열기로 변환합니다.
+ * @brief         우측 상단 설정 버튼의 마우스 클릭을 팝업 열기로 변환합니다.
  * @param watched 이벤트를 받은 객체
  * @param event   전달된 Qt 이벤트
  * @return        설정 열기 입력을 처리했으면 true
@@ -317,15 +317,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::MouseButtonRelease) {
             const auto* mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton) {
-                openMapSettingsDialog();
-                return true;
-            }
-        }
-
-        if (event->type() == QEvent::KeyPress) {
-            const auto* keyEvent = static_cast<QKeyEvent*>(event);
-            if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter ||
-                keyEvent->key() == Qt::Key_Space) {
                 openMapSettingsDialog();
                 return true;
             }
