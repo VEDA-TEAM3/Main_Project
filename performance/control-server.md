@@ -1,10 +1,10 @@
-# Control-Server 최적화 및 성능 검증 보고서
+# Control-Server
 
-> Control-server의 `core`, `fuse`, `transform`, `zone` 최적화 내용과 전후 성능지표를 한 문서로 통합한다.
+> 관제 서버 최적화 과정 및 지표를 정리한 마크다운입니다.
 
-## 문서 정보
+### 문서 정보
 
-- 문서 버전: **1.0.0**
+- 문서 버전: **1.1.0**
 - 최종 갱신일: **2026-07-30**
 - 작성자: **Jeong-dap**
 - 적용 범위: `control-server/src/core`, `control-server/src/fuse`, `control-server/src/transform`, `control-server/src/zone`
@@ -13,15 +13,17 @@
 | Date | Version | Writer | Summary |
 | :--- | :--- | :--- | :--- |
 | 2026-07-30 | 1.0.0 | Jeong-dap | Core·Fuse·Transform·Zone 최적화 내용, 전후 성능지표, 검증 결과 및 한계를 단일 문서로 통합 |
+| 2026-07-30 | 1.0.1 | Jeong-dap | Control-server 벤치마크 디렉토리 분리와 Fuser 통합 테스트 경로 반영 |
+
 
 ---
 
-## 1. 요약
+# 요약
 
-### 1.1 최종 결과
+### 최종 결과
 
 | 영역 | 적용 여부 | 대표 입력 | 최적화 전 | 최적화 후 | 결과 |
-| :--- | :---: | :--- | ---: | ---: | :--- |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | Core | 미적용 | 4프레임 전달 경계 | 59.36 ns | 59.11 ns | 0.42% 차이지만 측정 변동보다 작아 개선으로 판정하지 않음 |
 | Fuse | 적용 | 관측 1,024개 | 2,038.790 µs/frame | 198.310 µs/frame | **10.28배, 지연 90.27% 감소** |
 | Transform | 적용 | 4채널·총 512객체·경계 꺼짐 | 3,694.08 ns | 904.32 ns | **4.08배, 지연 75.52% 감소** |
@@ -30,19 +32,19 @@
 Core는 변경을 넣지 않은 것이 최종 결과다. 측정된 후보 차이가 독립 실행 변동보다 작았고 다른
 입력에서는 오히려 느렸기 때문에 최적화 효과를 주장할 근거가 없었다.
 
-### 1.2 공통 계산식
+### 공통 계산식
 
 ```text
 배속 = 최적화 전 시간 / 최적화 후 시간
 지연 감소율(%) = (1 - 최적화 후 시간 / 최적화 전 시간) × 100
 ```
 
-### 1.3 검증 결과
+### 검증 결과
 
 2026-07-29 최종 직접 컴파일 검증 결과:
 
 | 테스트 대상 | 테스트 수 | 결과 |
-| :--- | ---: | :---: |
+| :--- | :--- | :--- |
 | Fuse·월드 좌표 안정화 | 16 | 통과 |
 | Transform | 5 | 통과 |
 | Zone | 7 | 통과 |
@@ -52,34 +54,40 @@ Core는 변경을 넣지 않은 것이 최종 결과다. 측정된 후보 차이
 
 ---
 
-## 2. 기존 IAggregate 성능 기록
+# IAggregate
 
-### 2.1 TimeWindowAggregator
+### TimeWindowAggregator
 
-```text
+#### 성능 지표
+
+```bash
 [2026-07-21-21:16:16] Aggregator - Success: 최근 5000ms 지표 -
 push() 6078회
 윈도우 마감 50회
 평균 락 보유시간 71.95 us
 ```
 
-### 2.2 TimeWindowAggregatorV2
+### TimeWindowAggregatorV2
 
-```text
+#### 성능 지표
+
+```bash
 [2026-07-21-21:20:52] Aggregator - Success: 최근 5000ms 지표 -
 push() 6188회
 윈도우 마감 49회
 평균 락 보유시간 2.92 us
 ```
 
-변경 내용:
+#### 개선 사항
 
 1. 콜백을 lock 밖에서 호출해 다른 채널의 `push()`가 파이프라인 처리 시간만큼 대기하지 않게 했다.
 2. 윈도우 마감 시 슬롯에서 `flushFrames`로 복사하지 않고 이동한다.
 3. 고정 채널을 `std::unordered_map` 대신 `std::vector<std::optional<TopViewFrame>>`로 인덱싱한다.
 
+#### 이전 버전과의 비교
+
 | 지표 | TimeWindowAggregator | TimeWindowAggregatorV2 | 변화량 |
-| :--- | ---: | ---: | :--- |
+| :--- | :--- | :--- | :--- |
 | 평균 lock 보유 시간 | 71.95 us | 2.92 us | **95.9% 감소** |
 | `push()` 호출 횟수 | 6,078회 | 6,188회 | 1.8% 증가 |
 | 윈도우 마감 횟수 | 50회 | 49회 | 거의 동일 |
@@ -87,9 +95,11 @@ push() 6188회
 
 ---
 
-## 3. Core
+# Core
 
-### 3.1 최종 판단
+### Controller
+
+#### 최종 판단
 
 `core` 프로덕션 코드에는 측정으로 입증된 최적화 변경을 적용하지 않았다.
 
@@ -116,13 +126,13 @@ void Controller::processPipeline(
     const std::vector<veda::TopViewFrame>& frames);
 ```
 
-### 3.2 후보 변경 전후 지표
+#### 이전 버전과의 비교
 
 동일 실행 파일을 3회 독립 실행했다. 각 실행에서 11개 측정값의 중앙값을 구한 뒤 세 실행의
 중앙값을 사용했다.
 
 | 프레임 수 | 현재 값 전달 | 후보 `const&` 전달 | 배속 | 지연 감소율 |
-| ---: | ---: | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- | :--- |
 | 1 | 58.57 ns | 61.91 ns | 0.95배 | -5.70% |
 | 4 | 59.36 ns | 59.11 ns | 1.00배 | 0.42% |
 | 16 | 85.92 ns | 89.20 ns | 0.96배 | -3.82% |
@@ -139,7 +149,7 @@ void Controller::processPipeline(
 독립 실행 변동:
 
 | 프레임 수 | 현재 3회 범위 | 후보 3회 범위 |
-| ---: | ---: | ---: |
+| :--- | :--- | :--- |
 | 1 | 58.32~59.61 ns | 58.95~62.58 ns |
 | 4 | 56.24~63.88 ns | 55.08~60.77 ns |
 | 16 | 69.95~88.28 ns | 87.63~107.68 ns |
@@ -148,7 +158,7 @@ void Controller::processPipeline(
 4프레임의 `0.25 ns` 차이는 현재 구현의 실행 범위 `7.64 ns`와 후보 실행 범위 `5.69 ns`보다
 작다. 따라서 통계적으로 유의한 개선이라고 판정할 근거가 없다.
 
-### 3.3 변경하지 않은 이유
+#### 변경하지 않은 이유
 
 - `Controller`는 transform → fuse → zone → risk → dispatch → sink를 순서대로 호출하는
   오케스트레이터이며, 객체 수에 비례하는 주요 계산은 하위 모듈에 있다.
@@ -159,9 +169,9 @@ void Controller::processPipeline(
 - 파이프라인 병렬화는 전역 ID 추적 상태와 단계별 출력 순서를 바꿀 수 있어 기능 불변 조건을
   만족한다고 입증되지 않았다.
 
-### 3.4 벤치마크
+#### 벤치마크
 
-- 소스: `performance/CoreBoundaryBenchmark.cpp`
+- 소스: `performance/control-server/CoreBoundaryBenchmark.cpp`
 - 컴파일러: MinGW-w64 GCC 13.1.0
 - 옵션: `-std=c++20 -O2 -DNDEBUG`
 - 워밍업: trial 전 1,000회
@@ -170,9 +180,11 @@ void Controller::processPipeline(
 
 ---
 
-## 4. Fuse
+# Fuse
 
-### 4.1 적용 내용
+### GridFuser
+
+#### 개선 사항
 
 운영 조립 코드가 `ConcatFuser` 대신 적응형 `GridFuser`를 사용한다.
 
@@ -192,14 +204,14 @@ void Controller::processPipeline(
 `ConcatFuser`는 기준 구현과 회귀 비교 대상으로 보존한다. 16,384개 해시 버킷은 큰 정상 입력이
 처음 들어왔을 때 한 번만 지연 할당한다.
 
-### 4.2 최적화 전후 지표
+#### 이전 버전과의 비교
 
 4채널 중첩 관측 합성 입력을 사용했다. 각 독립 실행에서 9개 측정값의 중앙값을 구하고 프로그램을
 3회 독립 실행한 뒤 다시 중앙값을 사용했다. 좌표 안정화 비용을 분리하기 위해
 `positionJitterRadius=0` 조건으로 측정했다.
 
 | 전체 관측 객체 | 실제 객체 | 최적화 전 `ConcatFuser` | 최적화 후 `GridFuser` | 배속 | 지연 감소 |
-| ---: | ---: | ---: | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | 64 | 16 | 12.011 µs/frame | 11.807 µs/frame | 1.02배 | 1.70% |
 | 128 | 32 | 38.721 µs/frame | 23.588 µs/frame | 1.64배 | 39.08% |
 | 256 | 64 | 143.673 µs/frame | 46.717 µs/frame | 3.08배 | 67.48% |
@@ -213,7 +225,7 @@ void Controller::processPipeline(
 지연 감소율 = (1 - 198.310 / 2,038.790) × 100 = 90.27%
 ```
 
-### 4.3 비교량
+#### 비교량
 
 기준 구현의 최대 비교 쌍:
 
@@ -222,7 +234,7 @@ N × (N - 1) / 2
 ```
 
 | 전체 관측 `N` | 기준 최대 비교 쌍 | 그리드 근접 쌍 |
-| ---: | ---: | ---: |
+| :--- | :--- | :--- |
 | 64 | 2,016 | 작은 입력 폴백으로 2,016 |
 | 128 | 8,128 | 192 |
 | 256 | 32,640 | 384 |
@@ -232,7 +244,7 @@ N × (N - 1) / 2
 그리드 경로도 해시 충돌로 먼 후보를 확인할 수 있으며 최종 병합 전 실제 거리를 다시 계산한다.
 위 근접 쌍 수는 충돌이 없는 벤치마크 입력에서의 값이다.
 
-### 4.4 월드 좌표 튐 안정화
+#### 월드 좌표 튐 안정화
 
 같은 `gid`의 이전 출력 위치를 `P`, 현재 원시 융합 위치를 `R`, 안정화 반경을 `r`이라고 한다.
 
@@ -253,7 +265,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 고정 시드의 ±0.20m 정지 잡음 5,000프레임 결과:
 
 | 안정성 지표 | 안정화 전 | 안정화 후 | 감소율 |
-| :--- | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- |
 | 위치 RMS 오차 | 0.164272 m | 0.066136 m | 59.74% |
 | 프레임 간 RMS 이동량 | 0.232256 m | 0.056162 m | **75.82%** |
 | 최대 단일 프레임 이동량 | 0.516612 m | 0.216831 m | 58.03% |
@@ -267,7 +279,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 처리비용:
 
 | 객체/프레임 | 안정화 전 | 안정화 후 | paired 오버헤드 중앙값 |
-| ---: | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- |
 | 1 | 676.32 ns | 667.70 ns | +3.74% |
 | 64 | 25,311.33 ns | 25,566.67 ns | -0.41% |
 | 256 | 116,024.00 ns | 118,980.00 ns | +1.81% |
@@ -275,7 +287,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 오버헤드의 방향이 실행마다 일관되지 않았다. 필터가 처리량을 개선한다고 주장할 수 없으며,
 현재 Windows 측정에서 관측된 최대 오버헤드는 3.74%다.
 
-### 4.5 검증
+#### 검증
 
 - 기존/최적화 구현의 500개 결정적 무작위 윈도우 출력 비교
 - 채널·클래스·병합 거리 경계·평균 좌표·타임스탬프·객체 순서 검증
@@ -285,9 +297,10 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 최종 결과: **16개 테스트 통과**
 
-### 4.6 벤치마크
+#### 벤치마크
 
-- 소스: `performance/FuserBenchmark.cpp`, `performance/PositionStabilizationBenchmark.cpp`
+- 소스: `performance/control-server/FuserBenchmark.cpp`,
+  `performance/control-server/PositionStabilizationBenchmark.cpp`
 - 컴파일러: MinGW-w64 GCC 13.1.0
 - 옵션: `-std=c++20 -O2 -DNDEBUG -pthread`
 - 채널 수: 4
@@ -298,9 +311,11 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 ---
 
-## 5. Transform
+# Transform
 
-### 5.1 적용 내용
+### AffineLocalToWorldTransform
+
+#### 개선 사항
 
 `AffineLocalToWorldTransform`의 좌표식, 캘리브레이션 선택, 미보정 채널 정책, 월드 경계 필터링과
 출력 순서를 유지하면서 다음 비용을 제거했다.
@@ -311,14 +326,14 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 4. 월드 경계 검사가 꺼지면 출력 크기를 한 번에 맞추고 인덱스로 직접 기록한다.
 5. 경계 검사가 켜지면 기존처럼 범위 밖 객체를 폐기하고 통과 객체만 순서대로 기록한다.
 
-### 5.2 최적화 전후 지표
+#### 이전 버전과의 비교
 
 수정 전 프로덕션 소스로 기준 실행 파일을 먼저 생성하고 측정한 다음, 같은 입력과 벤치마크로
 수정 후 실행 파일을 측정했다. 각 실행의 9개 trial 중앙값과 전후 각각 3회 독립 실행의 중앙값을
 사용했다.
 
 | 채널 | 프레임당 객체 | 총 객체 | 경계 검사 | 최적화 전 | 최적화 후 | 배속 | 지연 감소 |
-| ---: | ---: | ---: | :---: | ---: | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | 4 | 0 | 0 | 꺼짐 | 239.56 ns | 27.95 ns | 8.57배 | 88.33% |
 | 4 | 1 | 4 | 꺼짐 | 487.89 ns | 56.48 ns | 8.64배 | 88.42% |
 | 4 | 8 | 32 | 꺼짐 | 596.49 ns | 100.62 ns | 5.93배 | 83.13% |
@@ -334,7 +349,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 지연 감소율 = (1 - 904.32 / 3,694.08) × 100 = 75.52%
 ```
 
-### 5.3 검증
+#### 검증
 
 - 채널별 회전·이동 좌표식과 양수·음수 `lateralSign`
 - 중복 채널 캘리브레이션의 first-match
@@ -349,9 +364,9 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 최종 결과: **5개 테스트 통과**
 
-### 5.4 벤치마크
+#### 벤치마크
 
-- 소스: `performance/TransformBenchmark.cpp`
+- 소스: `performance/control-server/TransformBenchmark.cpp`
 - 컴파일러: MinGW-w64 GCC 13.1.0
 - 옵션: `-std=c++20 -O2 -DNDEBUG -pthread`
 - trial 전 워밍업 50회
@@ -361,9 +376,11 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 ---
 
-## 6. Zone
+# Zone
 
-### 6.1 적용 내용
+### SpatialZoneMapper
+
+#### 개선 사항
 
 `SpatialZoneMapper`의 선언 순서 first-match, 경계 포함, 미배정 `zoneId=-1`과 출력 순서를
 유지하면서 구역 수에 따라 실행 경로를 선택한다.
@@ -387,13 +404,13 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 첫 시도의 객체별 `switch`와 8구역 이상 결정표는 4구역 일부 케이스를 약 30% 느리게 만들고
 16구역에서도 이득이 없어 폐기했다. 최종 구현은 측정으로 이득이 확인된 경로만 남겼다.
 
-### 6.2 최적화 전후 지표
+#### 이전 버전과의 비교
 
 수정 전·후 프로덕션 소스를 각각 직접 컴파일했다. 각 실행의 9개 trial 중앙값과 전후 각각
 3회 독립 실행의 중앙값을 사용했다.
 
 | 구역 | 객체 | 최적화 전 | 최적화 후 | 배속 | 지연 감소 |
-| ---: | ---: | ---: | ---: | ---: | ---: |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | 4 | 16 | 57.25 ns | 49.01 ns | 1.17배 | 14.39% |
 | 4 | 64 | 213.32 ns | 170.63 ns | 1.25배 | 20.01% |
 | 4 | 256 | 725.51 ns | 701.48 ns | 1.03배 | 3.31% |
@@ -412,7 +429,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 지연 감소율 = (1 - 13,318.67 / 126,600.67) × 100 = 89.48%
 ```
 
-### 6.3 결정표의 기능 보존과 메모리 제한
+#### 결정표의 기능 보존과 메모리 제한
 
 - 경계값 자체를 별도 버킷으로 만들어 `>= min`, `<= max` 규칙을 보존한다.
 - 구역을 선언 순서의 역순으로 기록하고 앞 구역이 뒤 구역을 덮어쓰게 해 first-match를 보존한다.
@@ -420,7 +437,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 - 결정표는 `uint32_t` 인덱스 최대 1,100,000셀, 약 4.20MiB로 제한한다.
 - 한도를 넘거나 경계가 전제 조건을 만족하지 않으면 선형 경로로 폴백한다.
 
-### 6.4 검증
+#### 검증
 
 - first-match와 네 경계의 포함 규칙
 - 겹치는 구역과 미배정 `zoneId=-1`
@@ -433,9 +450,9 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 최종 결과: **7개 테스트 통과**
 
-### 6.5 벤치마크
+#### 벤치마크
 
-- 소스: `performance/ZoneBenchmark.cpp`
+- 소스: `performance/control-server/ZoneBenchmark.cpp`
 - 컴파일러: MinGW-w64 GCC 13.1.0
 - 옵션: `-std=c++20 -O2 -DNDEBUG -pthread`
 - trial 전 워밍업 50회
@@ -445,7 +462,7 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 ---
 
-## 7. 공통 측정 환경과 해석 제한
+# 공통 측정 환경과 해석 제한
 
 | 항목 | 값 |
 | :--- | :--- |
@@ -472,30 +489,20 @@ zone·risk·MQTT/UI 출력에 사용한다. 기본 설정은 `risk.positionJitte
 
 ---
 
-## 8. 재현 및 근거 파일
+# 재현 및 근거 파일
 
 ### 벤치마크
 
-- `performance/CoreBoundaryBenchmark.cpp`
-- `performance/FuserBenchmark.cpp`
-- `performance/PositionStabilizationBenchmark.cpp`
-- `performance/TransformBenchmark.cpp`
-- `performance/ZoneBenchmark.cpp`
+- `performance/control-server/CoreBoundaryBenchmark.cpp`
+- `performance/control-server/FuserBenchmark.cpp`
+- `performance/control-server/PositionStabilizationBenchmark.cpp`
+- `performance/control-server/TransformBenchmark.cpp`
+- `performance/control-server/ZoneBenchmark.cpp`
 
 ### 테스트
 
-- `tests/control-server/unit/FuserEquivalenceTest.cpp`
-- `tests/control-server/unit/PositionStabilizationTest.cpp`
+- `tests/control-server/unit/FuserTest.cpp`
 - `tests/control-server/unit/TransformEquivalenceTest.cpp`
 - `tests/control-server/unit/ZoneMapperEquivalenceTest.cpp`
 
-### 기존 상세 보고서
-
-- `performance/core-optimization-review-2026-07-29.md`
-- `performance/fuse-optimization-2026-07-29.md`
-- `performance/world-position-stabilization-2026-07-29.md`
-- `performance/transform-optimization-2026-07-29.md`
-- `performance/zone-optimization-2026-07-29.md`
-
-이 문서가 네 영역의 최적화 내용과 성능지표를 함께 보는 최종 통합본이며, 위 상세 보고서는
-측정 절차와 개별 구현 판단을 추적하기 위한 근거 문서로 유지한다.
+이 문서가 네 영역의 최적화 내용과 성능지표를 함께 보는 최종 통합본이다.

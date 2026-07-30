@@ -5,14 +5,51 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <new>
 #include <random>
+#include <string>
 #include <vector>
 
-#include "ZoneTestSupport.h"
+#include "Logger.h"
+#include "core/AppConfig.h"
+#include "domain/WorldFrame.h"
 #include "zone/SpatialZoneMapper.h"
+
+namespace zone_test {
+
+void referenceAssign(const std::vector<SpatialZone>& zones, domain::WorldFrame& frame) {
+    for (auto& object : frame.objects) {
+        object.zoneId = -1;
+        for (const auto& zone : zones) {
+            if (object.pos.x >= zone.minX && object.pos.x <= zone.maxX && object.pos.y >= zone.minY &&
+                object.pos.y <= zone.maxY) {
+                object.zoneId = zone.zoneId;
+                break;
+            }
+        }
+    }
+}
+
+std::string compareZoneIds(const domain::WorldFrame& expected, const domain::WorldFrame& actual) {
+    if (expected.objects.size() != actual.objects.size()) {
+        return "object count mismatch: expected=" + std::to_string(expected.objects.size()) +
+               " actual=" + std::to_string(actual.objects.size());
+    }
+    for (std::size_t index = 0; index < expected.objects.size(); ++index) {
+        if (expected.objects[index].zoneId != actual.objects[index].zoneId) {
+            return "object[" + std::to_string(index) + "] zone mismatch: expected=" +
+                   std::to_string(expected.objects[index].zoneId) +
+                   " actual=" + std::to_string(actual.objects[index].zoneId);
+        }
+    }
+    return {};
+}
+
+}  // namespace zone_test
 
 long g_zoneAllocCount = 0;
 bool g_zoneAllocCounting = false;
@@ -35,6 +72,15 @@ void operator delete(void* memory, std::size_t) noexcept {
 }
 
 namespace {
+
+[[maybe_unused]] const bool kLoggerDisabled = [] {
+    LogConfig config;
+    config.level = LogLevel::Off;
+    config.console = false;
+    config.file = false;
+    initLogger(config);
+    return true;
+}();
 
 void expectEquivalent(const std::vector<SpatialZone>& zones, const domain::WorldFrame& input) {
     domain::WorldFrame expected = input;

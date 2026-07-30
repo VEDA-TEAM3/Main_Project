@@ -66,9 +66,9 @@ domain::WorldPoint stabilizePosition(const domain::WorldPoint& previous, const d
     const double dx = raw.x - previous.x;
     const double dy = raw.y - previous.y;
     const double distance = std::hypot(dx, dy);
-    if (distance <= radius)
+    if (distance <= radius) {
         return previous;
-
+    }
     const double followScale = (distance - radius) / distance;
     return {previous.x + dx * followScale, previous.y + dy * followScale};
 }
@@ -147,8 +147,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
     if (useGrid) {
         // 지난 그리드 프레임에 쓴 버킷만 비운다. 그 사이 작은 프레임이 실행됐어도
         // touchedBuckets_를 보존하므로 다음 그리드 진입 시 정확히 정리된다.
-        for (std::uint32_t b : touchedBuckets_)
+        for (std::uint32_t b : touchedBuckets_) {
             buckets_[b].clear();
+        }
         touchedBuckets_.clear();
         pairs_.clear();
 
@@ -189,15 +190,19 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                     seenBuckets[seenCount++] = b;
 
                     for (std::uint32_t j : buckets_[b]) {
-                        if (j <= i)
+                        if (j <= i) {
                             continue;  // 각 무순서 쌍을 i<j 로 정확히 한 번만
+                        }
                         const Candidate& cj = candidates_[j];
-                        if (ci.ch == cj.ch)
+                        if (ci.ch == cj.ch) {
                             continue;
-                        if (ci.cls != cj.cls)
+                        }
+                        if (ci.cls != cj.cls) {
                             continue;
-                        if (metric_->calculate(ci.pos, cj.pos) > dedupMergeDistance_)
+                        }
+                        if (metric_->calculate(ci.pos, cj.pos) > dedupMergeDistance_) {
                             continue;  // 해시 충돌로 들어온 먼 후보는 여기서 걸러짐
+                        }
                         pairs_.emplace_back(i, j);
                     }
                 }
@@ -210,10 +215,12 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         for (const auto& [i, j] : pairs_) {
             const std::size_t rootI = ufFind(i);
             const std::size_t rootJ = ufFind(j);
-            if (rootI == rootJ)
+            if (rootI == rootJ) {
                 continue;
-            if ((ufMask_[rootI] & ufMask_[rootJ]) != 0)
+            }
+            if ((ufMask_[rootI] & ufMask_[rootJ]) != 0) {
                 continue;
+            }
             ufParent_[rootI] = rootJ;
             ufMask_[rootJ] |= ufMask_[rootI];
         }
@@ -222,18 +229,23 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         // ConcatFuser와 같은 순서로 즉시 union하여 정렬/후보 저장 비용도 만들지 않는다.
         for (std::uint32_t i = 0; i < n; ++i) {
             for (std::uint32_t j = i + 1; j < n; ++j) {
-                if (candidates_[i].ch == candidates_[j].ch)
+                if (candidates_[i].ch == candidates_[j].ch) {
                     continue;
-                if (candidates_[i].cls != candidates_[j].cls)
+                }
+                if (candidates_[i].cls != candidates_[j].cls) {
                     continue;
-                if (metric_->calculate(candidates_[i].pos, candidates_[j].pos) > dedupMergeDistance_)
+                }
+                if (metric_->calculate(candidates_[i].pos, candidates_[j].pos) > dedupMergeDistance_) {
                     continue;
+                }
                 const std::size_t rootI = ufFind(i);
                 const std::size_t rootJ = ufFind(j);
-                if (rootI == rootJ)
+                if (rootI == rootJ) {
                     continue;
-                if ((ufMask_[rootI] & ufMask_[rootJ]) != 0)
+                }
+                if ((ufMask_[rootI] & ufMask_[rootJ]) != 0) {
                     continue;
+                }
                 ufParent_[rootI] = rootJ;
                 ufMask_[rootJ] |= ufMask_[rootI];
             }

@@ -84,8 +84,9 @@ void SpatialZoneMapper::buildDecisionIndex() {
         const std::size_t yEnd = axisBucket(yEdges_, zone.maxY);
         for (std::size_t y = yBegin; y <= yEnd; ++y) {
             const std::size_t row = y * xBucketCount_;
-            for (std::size_t x = xBegin; x <= xEnd; ++x)
+            for (std::size_t x = xBegin; x <= xEnd; ++x) {
                 winnerZoneIndices_[row + x] = static_cast<std::uint32_t>(zoneIndex);
+            }
         }
     }
 }
