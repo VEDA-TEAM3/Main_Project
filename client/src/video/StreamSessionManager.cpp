@@ -131,6 +131,48 @@ void StreamSessionManager::setBlurTargetsEnabled(bool faceEnabled, bool licenseP
 }
 
 /**
+ * @brief          모든 채널 worker에 동일한 영상 전처리 설정을 비동기로 전달합니다.
+ * @param settings 적용할 영상 전처리 설정
+ */
+void StreamSessionManager::setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) {
+    preprocessingSettings_ = settings;
+    preprocessingSettingsByChannel_.clear();
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (!worker.receiver || !worker.thread || !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, settings]() { receiver->setVideoPreprocessingSettings(settings); },
+            Qt::QueuedConnection);
+    }
+}
+
+/**
+ * @brief              지정한 채널 worker에 영상 전처리 설정을 비동기로 전달합니다.
+ * @param channelIndex 적용할 0 기반 채널 인덱스
+ * @param settings     적용할 영상 전처리 설정
+ */
+void StreamSessionManager::setVideoPreprocessingSettings(int channelIndex, const VideoPreprocessingSettings& settings) {
+    preprocessingSettingsByChannel_.insert(channelIndex, settings);
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex != channelIndex || !worker.receiver || !worker.thread ||
+            !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, settings]() { receiver->setVideoPreprocessingSettings(settings); },
+            Qt::QueuedConnection);
+        break;
+    }
+}
+
+/**
  * @brief 등록된 출력 정보에 맞춰 receiver와 전용 worker thread를 생성합니다.
  */
 void StreamSessionManager::createWorkers() {
@@ -178,6 +220,8 @@ void StreamSessionManager::createWorkers() {
         receiver->setObjectName(config.cameraId);
         receiver->setUrl(config.url);
         receiver->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+        receiver->setVideoPreprocessingSettings(
+            preprocessingSettingsByChannel_.value(config.channelIndex, preprocessingSettings_));
         receiver->moveInternalObjectsToThread(receiverThread.get());
 
         if (receiver->thread() != receiverThread.get()) {

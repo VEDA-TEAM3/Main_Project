@@ -2,6 +2,7 @@
 
 #include <QtGui/qwindowdefs.h>
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QVector>
@@ -10,6 +11,7 @@
 
 #include "model/MqttRealtimeData.h"
 #include "model/StreamConfig.h"
+#include "model/VideoPreprocessingSettings.h"
 
 class QThread;
 class BlurFrameBuffer;
@@ -77,6 +79,12 @@ public:
     /** 모든 채널에 적용할 얼굴·차량 번호판 블러 활성 상태를 설정합니다. */
     void setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled);
 
+    /** 모든 채널에 동일한 영상 전처리 설정을 적용합니다. */
+    void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings);
+
+    /** 지정한 채널에 영상 전처리 설정을 적용합니다. */
+    void setVideoPreprocessingSettings(int channelIndex, const VideoPreprocessingSettings& settings);
+
 signals:
     /**
      * @brief              특정 채널의 로딩 상태가 변경됐음을 알립니다.
@@ -122,6 +130,8 @@ private:
     int receiverStartSpacingMsec_ = 0;
     bool faceBlurEnabled_ = true;
     bool licensePlateBlurEnabled_ = true;
+    VideoPreprocessingSettings preprocessingSettings_;
+    QHash<int, VideoPreprocessingSettings> preprocessingSettingsByChannel_;
 
     QVector<StreamOutputBinding> bindings_;
     QVector<ReceiverWorker> receiverWorkers_;

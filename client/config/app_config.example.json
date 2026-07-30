@@ -62,6 +62,15 @@
             "sinkAsync": false,
             "minimumLoadingMs": 700,
             "reconnectSpreadMs": 3000,
+            "preprocessing": {
+                "enabled": true,
+                "preset": "custom",
+                "brightness": 0,
+                "contrast": 1.0,
+                "gamma": 1.0,
+                "weakDenoiseEnabled": false,
+                "weakSharpeningEnabled": false
+            },
             "blur": {
                 "syncOffsetMs": 300,
                 "historyMs": 10000,

@@ -4,6 +4,7 @@
 #include <QtGlobal>
 
 #include "model/StreamConfig.h"
+#include "model/VideoPreprocessingSettings.h"
 
 struct BlurProcessorConfig {
     qint64 syncOffsetMsec = 0;
@@ -47,6 +48,7 @@ struct GstRtspReceiverConfig {
     bool sinkAsync = false;
     qint64 minimumLoadingMsec = 0;
     int reconnectSpreadMsec = 0;
+    VideoPreprocessingSettings preprocessing;
     BlurProcessorConfig blur;
 };
 

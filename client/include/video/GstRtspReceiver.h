@@ -10,6 +10,7 @@
 
 #include "video/BlurProcessor.h"
 #include "video/StreamReceiver.h"
+#include "video/VideoDetailProcessor.h"
 #include "video/VideoRuntimeConfig.h"
 
 class QThread;
@@ -25,6 +26,7 @@ public:
     void setUrl(const QString& url) override;
     void setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) override;
     void setBlurFrame(BlurFrameData frame) override;
+    void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) override;
     void moveInternalObjectsToThread(QThread* thread) override;
     void start() override;
     void stop() override;
@@ -40,6 +42,7 @@ private:
     void restartPipeline(const QString& reason);
     bool applySourceProperties(GstElement* source);
     QString decoderChain() const;
+    void applyVideoPreprocessingSettings();
     void checkStall();
 
     void markFirstPacket();
@@ -84,4 +87,5 @@ private:
     bool firstFrameReported_ = false;
 
     BlurProcessor blurProcessor_;
+    VideoDetailProcessor detailProcessor_;
 };

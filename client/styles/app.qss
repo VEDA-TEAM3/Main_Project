@@ -176,9 +176,70 @@ QPushButton#mapSettingsCloseButton:hover {
 }
 
 QFrame#mapSettingsOptionsFrame {
-    background-color: rgba(6, 20, 33, 242);
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0f293f, stop:0.68 #0a1d31, stop:1 #081626);
     border: 1px solid #315f7e;
-    border-radius: 6px;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QTabWidget#settingsTabs::pane {
+    background-color: transparent;
+    border: 0;
+    top: 0;
+}
+
+QTabWidget#settingsTabs QTabBar {
+    background-color: transparent;
+    border: 0;
+}
+
+QTabWidget#settingsTabs QTabBar::tab {
+    min-height: 38px;
+    padding: 0 18px;
+    margin: 0;
+    color: #8fb7cc;
+    background-color: #071a2a;
+    border: 1px solid #315f7e;
+    border-bottom: 2px solid #315f7e;
+    border-radius: 0;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:first {
+    border-top-left-radius: 5px;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:last {
+    border-left: 0;
+    border-top-right-radius: 5px;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:hover {
+    color: #dff8ff;
+    background-color: #0d2d44;
+    border-color: #4aa2c7;
+    border-bottom-color: #59b8da;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:selected {
+    color: #ffffff;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #18516f, stop:1 #123b55);
+    border-color: #4c94b7;
+    border-bottom-color: #66d8ff;
+}
+
+QWidget#settingsTabPage {
+    background-color: transparent;
+}
+
+QWidget#videoPreprocessingControls {
+    background-color: transparent;
 }
 
 QLabel#mapSettingsSectionLabel {
@@ -218,6 +279,138 @@ QCheckBox#mapSettingsOption::indicator:checked {
 QCheckBox#mapSettingsOption::indicator:checked:hover {
     border-color: #e1f8ff;
     background-color: #209bc5;
+}
+
+QLabel#videoPreprocessingFieldLabel {
+    min-width: 108px;
+    color: #dceaf2;
+    background-color: transparent;
+    border: 0;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+QLabel#videoPreprocessingValueLabel {
+    color: #75ddff;
+    background-color: #071827;
+    border: 1px solid #315f7e;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+QSlider#videoPreprocessingSlider {
+    min-height: 28px;
+    background-color: transparent;
+}
+
+QSlider#videoPreprocessingSlider::groove:horizontal {
+    height: 6px;
+    background-color: #06131f;
+    border: 1px solid #284d65;
+    border-radius: 3px;
+}
+
+QSlider#videoPreprocessingSlider::sub-page:horizontal {
+    background-color: #28b9e9;
+    border: 1px solid #69dcff;
+    border-radius: 3px;
+}
+
+QSlider#videoPreprocessingSlider::handle:horizontal {
+    width: 18px;
+    height: 18px;
+    margin: -7px 0;
+    background-color: #e6f9ff;
+    border: 2px solid #35c9f5;
+    border-radius: 9px;
+}
+
+QSlider#videoPreprocessingSlider::handle:horizontal:hover {
+    background-color: #ffffff;
+    border-color: #8ae8ff;
+}
+
+QComboBox#videoPreprocessingComboBox,
+QComboBox#videoPreprocessingChannelComboBox {
+    min-height: 36px;
+    color: #e6f4fa;
+    background-color: #071827;
+    border: 1px solid #376a88;
+    border-radius: 5px;
+    padding: 0 34px 0 12px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QComboBox#videoPreprocessingComboBox::drop-down,
+QComboBox#videoPreprocessingChannelComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 32px;
+    border: 0;
+    background-color: transparent;
+}
+
+QComboBox#videoPreprocessingComboBox::down-arrow,
+QComboBox#videoPreprocessingChannelComboBox::down-arrow {
+    image: none;
+    width: 0;
+    height: 0;
+}
+
+QComboBox#videoPreprocessingComboBox:hover,
+QComboBox#videoPreprocessingComboBox:focus,
+QComboBox#videoPreprocessingChannelComboBox:hover,
+QComboBox#videoPreprocessingChannelComboBox:focus {
+    background-color: #0b263a;
+    border-color: #58c9ed;
+}
+
+QComboBox#videoPreprocessingComboBox QAbstractItemView,
+QComboBox#videoPreprocessingChannelComboBox QAbstractItemView {
+    color: #e6f4fa;
+    background-color: #091e30;
+    border: 1px solid #4a91b5;
+    selection-color: #ffffff;
+    selection-background-color: #17698f;
+    outline: 0;
+}
+
+QWidget#videoPreprocessingControls:disabled QLabel,
+QWidget#videoPreprocessingControls:disabled QComboBox {
+    color: #587386;
+}
+
+QPushButton#videoPreprocessingSecondaryButton,
+QPushButton#videoPreprocessingApplyAllButton {
+    min-width: 126px;
+    min-height: 38px;
+    color: #cfe7f1;
+    background-color: #0a2133;
+    border: 1px solid #376b88;
+    border-radius: 5px;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+QPushButton#videoPreprocessingSecondaryButton:hover {
+    color: #ffffff;
+    background-color: #123b55;
+    border-color: #55b3d7;
+}
+
+QPushButton#videoPreprocessingApplyAllButton {
+    color: #eafaff;
+    background-color: #145b7f;
+    border-color: #5bc9ed;
+}
+
+QPushButton#videoPreprocessingApplyAllButton:hover {
+    color: #ffffff;
+    background-color: #1a779e;
+    border-color: #a5edff;
 }
 
 QPushButton#mapSettingsCancelButton,

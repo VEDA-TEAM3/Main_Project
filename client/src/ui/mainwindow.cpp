@@ -71,6 +71,7 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     ui_->setupUi(this);
 
     streamConfigs_ = videoConfig_.streams;
+    videoPreprocessingSettingsByChannel_.fill(videoConfig_.receiver.preprocessing, requiredCctvChannelCount);
     setupDashboardLayout();
     setupTopBarStatuses();
     setupClock();
@@ -245,18 +246,40 @@ void MainWindow::setupDashboardLayout() {
     mapSettingsDialog_ = new MapSettingsDialog(this);
     connect(mapSettingsDialog_, &MapSettingsDialog::settingsApplied, this,
             [this](const DigitalTwinMapDisplaySettings& settings, bool videoRiskBordersEnabled, bool faceBlurEnabled,
-                   bool licensePlateBlurEnabled) {
+                   bool licensePlateBlurEnabled, int channelIndex,
+                   const VideoPreprocessingSettings& preprocessingSettings) {
                 mapDisplaySettings_ = settings;
                 videoRiskBordersEnabled_ = videoRiskBordersEnabled;
                 faceBlurEnabled_ = faceBlurEnabled;
                 licensePlateBlurEnabled_ = licensePlateBlurEnabled;
+                selectedPreprocessingChannelIndex_ = channelIndex;
+                if (channelIndex >= 0 && channelIndex < videoPreprocessingSettingsByChannel_.size()) {
+                    videoPreprocessingSettingsByChannel_[channelIndex] = preprocessingSettings;
+                }
                 if (ui_->digitalTwinMapWidget) {
                     ui_->digitalTwinMapWidget->applyDisplaySettings(mapDisplaySettings_);
                 }
                 if (streamSessionManager_) {
                     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+                    streamSessionManager_->setVideoPreprocessingSettings(channelIndex, preprocessingSettings);
                 }
                 updateVideoRiskBorders(latestVideoRiskLevels_);
+            });
+    connect(mapSettingsDialog_, &MapSettingsDialog::videoPreprocessingApplyRequested, this,
+            [this](int channelIndex, const VideoPreprocessingSettings& settings) {
+                if (channelIndex < 0) {
+                    videoPreprocessingSettingsByChannel_.fill(settings, requiredCctvChannelCount);
+                } else if (channelIndex < videoPreprocessingSettingsByChannel_.size()) {
+                    selectedPreprocessingChannelIndex_ = channelIndex;
+                    videoPreprocessingSettingsByChannel_[channelIndex] = settings;
+                }
+                if (streamSessionManager_) {
+                    if (channelIndex < 0) {
+                        streamSessionManager_->setVideoPreprocessingSettings(settings);
+                    } else {
+                        streamSessionManager_->setVideoPreprocessingSettings(channelIndex, settings);
+                    }
+                }
             });
 }
 
@@ -300,6 +323,8 @@ void MainWindow::openMapSettingsDialog() {
     mapSettingsDialog_->setSettings(mapDisplaySettings_);
     mapSettingsDialog_->setVideoRiskBordersEnabled(videoRiskBordersEnabled_);
     mapSettingsDialog_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+    mapSettingsDialog_->setVideoPreprocessingSettings(videoPreprocessingSettingsByChannel_,
+                                                      selectedPreprocessingChannelIndex_);
     mapSettingsDialog_->setGeometry(rect());
     mapSettingsDialog_->show();
     mapSettingsDialog_->raise();
@@ -629,6 +654,7 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
     streamSessionManager_ =
         new StreamSessionManager(std::move(receiverFactory), videoConfig_.receiverStartSpacingMsec, this);
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+    streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
 
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,

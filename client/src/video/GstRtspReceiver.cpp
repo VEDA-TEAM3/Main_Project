@@ -1,5 +1,6 @@
 #include "video/GstRtspReceiver.h"
 
+#include <gst/base/gstbasetransform.h>
 #include <gst/rtsp/gstrtsptransport.h>
 #include <gst/video/videooverlay.h>
 
@@ -15,6 +16,7 @@
 #include <utility>
 
 #include "video/BlurVideoFilter.h"
+#include "video/VideoDetailFilter.h"
 
 namespace {
 /**
@@ -158,6 +160,7 @@ GstRtspReceiver::GstRtspReceiver(guintptr outputWindowHandle, GstRtspReceiverCon
       outputWindowHandle_(outputWindowHandle),
       config_(std::move(config)),
       blurProcessor_(config_.blur) {
+    detailProcessor_.setSettings(config_.preprocessing);
     busTimer_ = new QTimer(this);
     reconnectTimer_ = new QTimer(this);
     busTimer_->setTimerType(Qt::PreciseTimer);
@@ -184,6 +187,16 @@ void GstRtspReceiver::setBlurTargetsEnabled(bool faceEnabled, bool licensePlateE
 }
 
 void GstRtspReceiver::setBlurFrame(BlurFrameData frame) { blurProcessor_.submitFrame(std::move(frame)); }
+
+/**
+ * @brief          현재 채널의 영상 전처리 값을 저장하고 실행 중인 필터에 반영합니다.
+ * @param settings 적용할 영상 전처리 설정
+ */
+void GstRtspReceiver::setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) {
+    config_.preprocessing = settings;
+    detailProcessor_.setSettings(settings);
+    applyVideoPreprocessingSettings();
+}
 
 /**
  * @brief        수신기 본체와 자식 타이머를 지정한 worker 스레드로 이동합니다.
@@ -274,15 +287,23 @@ void GstRtspReceiver::startPipeline() {
         return;
     }
 
+    if (!VideoDetailFilter::ensureRegistered()) {
+        emit errorOccurred("Failed to register video detail filter");
+        scheduleReconnect("video detail filter registration failed");
+        return;
+    }
+
     const QString videoChainDesc =
         QString(
             "rtph264depay name=depay request-keyframe=true wait-for-keyframe=true ! "
             "h264parse config-interval=-1 ! "
             "queue name=decodequeue silent=true max-size-buffers=%2 max-size-bytes=0 max-size-time=%3 ! "
-            "%1 ! videoconvert ! video/x-raw,format=BGRA ! "
+            "%1 ! videobalance name=balance brightness=0.0 contrast=1.0 saturation=1.0 ! "
+            "gamma name=gammafilter gamma=1.0 ! videoconvert ! video/x-raw,format=BGRA ! "
             "queue name=renderqueue silent=true leaky=downstream max-size-buffers=%4 max-size-bytes=0 "
             "max-size-time=%5 ! "
-            "qtblur name=blur ! identity name=framewatch silent=true signal-handoffs=false ! "
+            "qtvideodetail name=videodetail ! qtblur name=blur ! "
+            "identity name=framewatch silent=true signal-handoffs=false ! "
             "d3d11videosink name=videosink force-aspect-ratio=true enable-last-sample=false qos=false "
             "sync=false async=false")
             .arg(decoderChain())
@@ -375,13 +396,24 @@ void GstRtspReceiver::startPipeline() {
     GstElement* videoChainForProbe = gst_bin_get_by_name(GST_BIN(pipeline_), "videochain");
     GstElement* depay = nullptr;
     GstElement* blur = nullptr;
+    GstElement* videoDetail = nullptr;
     GstElement* framewatch = nullptr;
 
     if (videoChainForProbe && GST_IS_BIN(videoChainForProbe)) {
         depay = gst_bin_get_by_name(GST_BIN(videoChainForProbe), "depay");
         blur = gst_bin_get_by_name(GST_BIN(videoChainForProbe), "blur");
+        videoDetail = gst_bin_get_by_name(GST_BIN(videoChainForProbe), "videodetail");
         framewatch = gst_bin_get_by_name(GST_BIN(videoChainForProbe), "framewatch");
     }
+
+    if (videoDetail) {
+        VideoDetailFilter::setProcessor(videoDetail, &detailProcessor_);
+        gst_object_unref(videoDetail);
+    } else {
+        qWarning() << "[GstRtspReceiver] Failed to find video detail filter";
+    }
+
+    applyVideoPreprocessingSettings();
 
     if (blur) {
         BlurVideoFilter::setProcessor(blur, &blurProcessor_);
@@ -899,6 +931,63 @@ QString GstRtspReceiver::decoderChain() const {
     }
 
     return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
+}
+
+/**
+ * @brief 실행 중인 videobalance와 gamma 요소에 현재 전처리 설정을 반영합니다.
+ */
+void GstRtspReceiver::applyVideoPreprocessingSettings() {
+    detailProcessor_.setSettings(config_.preprocessing);
+    if (!pipeline_) {
+        return;
+    }
+
+    GstElement* videoChain = gst_bin_get_by_name(GST_BIN(pipeline_), "videochain");
+    if (!videoChain || !GST_IS_BIN(videoChain)) {
+        if (videoChain) {
+            gst_object_unref(videoChain);
+        }
+        return;
+    }
+
+    GstElement* balance = gst_bin_get_by_name(GST_BIN(videoChain), "balance");
+    GstElement* gamma = gst_bin_get_by_name(GST_BIN(videoChain), "gammafilter");
+    GstElement* videoDetail = gst_bin_get_by_name(GST_BIN(videoChain), "videodetail");
+    gst_object_unref(videoChain);
+
+    const bool enabled = config_.preprocessing.enabled;
+    const gdouble brightness = enabled ? static_cast<gdouble>(config_.preprocessing.brightness) / 100.0 : 0.0;
+    const gdouble contrast = enabled ? config_.preprocessing.contrast : 1.0;
+    const gdouble gammaValue = enabled ? config_.preprocessing.gamma : 1.0;
+
+    if (balance) {
+        g_object_set(balance, "brightness", brightness, "contrast", contrast, nullptr);
+        gst_base_transform_set_passthrough(
+            GST_BASE_TRANSFORM(balance),
+            !enabled || (config_.preprocessing.brightness == 0 && config_.preprocessing.contrast == 1.0));
+        gst_object_unref(balance);
+    }
+    if (gamma) {
+        g_object_set(gamma, "gamma", gammaValue, nullptr);
+        gst_base_transform_set_passthrough(GST_BASE_TRANSFORM(gamma), !enabled || config_.preprocessing.gamma == 1.0);
+        gst_object_unref(gamma);
+    }
+    if (videoDetail) {
+        const bool detailEnabled =
+            enabled && (config_.preprocessing.weakDenoiseEnabled || config_.preprocessing.weakSharpeningEnabled);
+        gst_base_transform_set_passthrough(GST_BASE_TRANSFORM(videoDetail), !detailEnabled);
+        gst_object_unref(videoDetail);
+    }
+
+    qDebug().noquote() << QStringLiteral(
+                              "[VIDEO PREPROCESS] enabled=%1 brightness=%2 contrast=%3 gamma=%4 denoise=%5 "
+                              "sharpening=%6")
+                              .arg(enabled)
+                              .arg(config_.preprocessing.brightness)
+                              .arg(config_.preprocessing.contrast, 0, 'f', 2)
+                              .arg(config_.preprocessing.gamma, 0, 'f', 2)
+                              .arg(enabled && config_.preprocessing.weakDenoiseEnabled)
+                              .arg(enabled && config_.preprocessing.weakSharpeningEnabled);
 }
 
 /**

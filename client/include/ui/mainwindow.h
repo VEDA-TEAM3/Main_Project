@@ -7,6 +7,7 @@
 
 #include "model/DigitalTwinMapDisplaySettings.h"
 #include "model/StreamConfig.h"
+#include "model/VideoPreprocessingSettings.h"
 #include "video/VideoRuntimeConfig.h"
 
 class ClickableVideoWidget;
@@ -107,7 +108,9 @@ private:
     QWidget* expandedWidget_ = nullptr;
     QTimer clockTimer_;
     DigitalTwinMapDisplaySettings mapDisplaySettings_;
+    QVector<VideoPreprocessingSettings> videoPreprocessingSettingsByChannel_;
     QVector<DigitalTwinRiskLevel> latestVideoRiskLevels_;
+    int selectedPreprocessingChannelIndex_ = 0;
 
     bool streamSessionStarted_ = false;
     bool videoRiskBordersEnabled_ = true;

@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QColor>
+#include <QComboBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -11,15 +12,24 @@
 #include <QPen>
 #include <QPolygonF>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QShowEvent>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QStyle>
 #include <QStyleOptionButton>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
 namespace {
-constexpr int dialogPanelWidth = 720;
-constexpr int dialogPanelHeight = 600;
+constexpr int dialogPanelWidth = 760;
+constexpr int dialogPanelHeight = 640;
+constexpr int preprocessingChannelCount = 4;
+constexpr int customPresetIndex = 0;
+constexpr int dayPresetIndex = 1;
+constexpr int nightPresetIndex = 2;
 
 class MapOptionCheckBox final : public QCheckBox {
 public:
@@ -52,16 +62,94 @@ protected:
     }
 };
 
+class SettingsTabWidget final : public QTabWidget {
+public:
+    using QTabWidget::QTabWidget;
+
+protected:
+    /**
+     * @brief       탭 바를 설정 내용 영역과 같은 너비로 유지합니다.
+     * @param event Qt 크기 변경 이벤트
+     */
+    void resizeEvent(QResizeEvent* event) override {
+        QTabWidget::resizeEvent(event);
+        tabBar()->setFixedWidth(width());
+    }
+};
+
+class VideoOptionComboBox final : public QComboBox {
+public:
+    using QComboBox::QComboBox;
+
+protected:
+    /**
+     * @brief       플랫폼별 기본 화살표 대신 테마와 맞는 화살표를 그립니다.
+     * @param event Qt 그리기 이벤트
+     */
+    void paintEvent(QPaintEvent* event) override {
+        QComboBox::paintEvent(event);
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QColor arrowColor = isEnabled() ? QColor(QStringLiteral("#8edfff")) : QColor(QStringLiteral("#4a6b7d"));
+        painter.setPen(QPen(arrowColor, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+
+        const qreal centerX = width() - 17.0;
+        const qreal centerY = height() / 2.0;
+        QPolygonF chevron;
+        chevron << QPointF(centerX - 4.0, centerY - 2.0) << QPointF(centerX, centerY + 2.0)
+                << QPointF(centerX + 4.0, centerY - 2.0);
+        painter.drawPolyline(chevron);
+    }
+};
+
+/**
+ * @brief        설정창 공통 스타일을 사용하는 체크박스를 생성합니다.
+ * @param text   체크박스 표시 문구
+ * @param parent 체크박스 부모 위젯
+ * @return       생성된 체크박스
+ */
 QCheckBox* createOptionCheckBox(const QString& text, QWidget* parent) {
     auto* checkBox = new MapOptionCheckBox(text, parent);
     checkBox->setObjectName(QStringLiteral("mapSettingsOption"));
     checkBox->setCursor(Qt::PointingHandCursor);
     return checkBox;
 }
+
+/**
+ * @brief            영상 조정 슬라이더 한 행을 구성합니다.
+ * @param layout     컨트롤을 배치할 그리드 레이아웃
+ * @param row        배치할 행 인덱스
+ * @param title      조정 항목 이름
+ * @param minimum    슬라이더 최솟값
+ * @param maximum    슬라이더 최댓값
+ * @param slider     생성된 슬라이더를 받을 포인터
+ * @param valueLabel 현재 값을 표시할 라벨 포인터
+ * @param parent     컨트롤의 부모 위젯
+ */
+void addSliderRow(QGridLayout* layout, int row, const QString& title, int minimum, int maximum, QSlider*& slider,
+                  QLabel*& valueLabel, QWidget* parent) {
+    auto* titleLabel = new QLabel(title, parent);
+    titleLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+
+    slider = new QSlider(Qt::Horizontal, parent);
+    slider->setObjectName(QStringLiteral("videoPreprocessingSlider"));
+    slider->setRange(minimum, maximum);
+    slider->setCursor(Qt::PointingHandCursor);
+
+    valueLabel = new QLabel(parent);
+    valueLabel->setObjectName(QStringLiteral("videoPreprocessingValueLabel"));
+    valueLabel->setAlignment(Qt::AlignCenter);
+    valueLabel->setFixedWidth(64);
+
+    layout->addWidget(titleLabel, row, 0);
+    layout->addWidget(slider, row, 1);
+    layout->addWidget(valueLabel, row, 2);
+}
 }  // namespace
 
 /**
- * @brief        디지털 트윈 맵 표시 옵션을 편집하는 모달 팝업을 구성합니다.
+ * @brief        UI 표시와 영상 전처리 옵션을 편집하는 모달 팝업을 구성합니다.
  * @param parent 팝업 배경을 덮을 메인 윈도우
  */
 MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
@@ -79,8 +167,8 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     overlayLayout->addWidget(panel);
 
     auto* panelLayout = new QVBoxLayout(panel);
-    panelLayout->setContentsMargins(32, 26, 32, 28);
-    panelLayout->setSpacing(22);
+    panelLayout->setContentsMargins(32, 22, 32, 22);
+    panelLayout->setSpacing(12);
 
     auto* headerLayout = new QHBoxLayout();
     auto* titleLabel = new QLabel(QStringLiteral("설정"), panel);
@@ -88,16 +176,27 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch(1);
 
-    auto* closeButton = new QPushButton(panel);
+    auto* closeButton = new QPushButton(QStringLiteral("×"), panel);
     closeButton->setObjectName(QStringLiteral("mapSettingsCloseButton"));
-    closeButton->setText(QStringLiteral("×"));
     closeButton->setToolTip(QStringLiteral("닫기"));
     closeButton->setCursor(Qt::PointingHandCursor);
     connect(closeButton, &QPushButton::clicked, this, &QWidget::hide);
     headerLayout->addWidget(closeButton);
     panelLayout->addLayout(headerLayout);
 
-    auto* optionsFrame = new QFrame(panel);
+    auto* settingsTabs = new SettingsTabWidget(panel);
+    settingsTabs->setObjectName(QStringLiteral("settingsTabs"));
+    settingsTabs->setUsesScrollButtons(false);
+    settingsTabs->tabBar()->setExpanding(true);
+    settingsTabs->tabBar()->setCursor(Qt::PointingHandCursor);
+    panelLayout->addWidget(settingsTabs, 1);
+
+    auto* uiTab = new QWidget(settingsTabs);
+    uiTab->setObjectName(QStringLiteral("settingsTabPage"));
+    auto* uiTabLayout = new QVBoxLayout(uiTab);
+    uiTabLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* optionsFrame = new QFrame(uiTab);
     optionsFrame->setObjectName(QStringLiteral("mapSettingsOptionsFrame"));
     auto* optionsLayout = new QVBoxLayout(optionsFrame);
     optionsLayout->setContentsMargins(28, 22, 28, 24);
@@ -117,7 +216,6 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     ledCheckBox_ = createOptionCheckBox(QStringLiteral("LED 표시"), optionsFrame);
     cctvCheckBox_ = createOptionCheckBox(QStringLiteral("CCTV 표시"), optionsFrame);
     alertDeviceCheckBox_ = createOptionCheckBox(QStringLiteral("알림 장치 표시"), optionsFrame);
-
     optionGrid->addWidget(movementTrailsCheckBox_, 0, 0);
     optionGrid->addWidget(ledCheckBox_, 0, 1);
     optionGrid->addWidget(cctvCheckBox_, 1, 0);
@@ -127,7 +225,6 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     auto* cctvSectionTitleLabel = new QLabel(QStringLiteral("CCTV 알림 설정"), optionsFrame);
     cctvSectionTitleLabel->setObjectName(QStringLiteral("mapSettingsSectionLabel"));
     optionsLayout->addWidget(cctvSectionTitleLabel);
-
     videoRiskBordersCheckBox_ = createOptionCheckBox(QStringLiteral("CCTV 테두리 알림 표시"), optionsFrame);
     optionsLayout->addWidget(videoRiskBordersCheckBox_);
 
@@ -144,11 +241,120 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     blurOptionGrid->addWidget(faceBlurCheckBox_, 0, 0);
     blurOptionGrid->addWidget(licensePlateBlurCheckBox_, 0, 1);
     optionsLayout->addLayout(blurOptionGrid);
-    panelLayout->addWidget(optionsFrame, 1);
+    optionsLayout->addStretch(1);
+    uiTabLayout->addWidget(optionsFrame, 1);
+    settingsTabs->addTab(uiTab, QStringLiteral("UI 설정"));
+
+    auto* videoTab = new QWidget(settingsTabs);
+    videoTab->setObjectName(QStringLiteral("settingsTabPage"));
+    auto* videoTabLayout = new QVBoxLayout(videoTab);
+    videoTabLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* preprocessingFrame = new QFrame(videoTab);
+    preprocessingFrame->setObjectName(QStringLiteral("mapSettingsOptionsFrame"));
+    auto* preprocessingLayout = new QVBoxLayout(preprocessingFrame);
+    preprocessingLayout->setContentsMargins(28, 16, 28, 18);
+    preprocessingLayout->setSpacing(10);
+
+    auto* preprocessingHeaderLayout = new QHBoxLayout();
+    auto* preprocessingTitleLabel = new QLabel(QStringLiteral("영상 전처리"), preprocessingFrame);
+    preprocessingTitleLabel->setObjectName(QStringLiteral("mapSettingsSectionLabel"));
+    preprocessingHeaderLayout->addWidget(preprocessingTitleLabel);
+    preprocessingHeaderLayout->addStretch(1);
+    preprocessingEnabledCheckBox_ = createOptionCheckBox(QStringLiteral("사용"), preprocessingFrame);
+    preprocessingHeaderLayout->addWidget(preprocessingEnabledCheckBox_);
+    preprocessingLayout->addLayout(preprocessingHeaderLayout);
+
+    auto* channelLayout = new QHBoxLayout();
+    auto* channelLabel = new QLabel(QStringLiteral("적용 대상"), preprocessingFrame);
+    channelLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+    channelLayout->addWidget(channelLabel);
+    channelLayout->addStretch(1);
+    preprocessingChannelComboBox_ = new VideoOptionComboBox(preprocessingFrame);
+    preprocessingChannelComboBox_->setObjectName(QStringLiteral("videoPreprocessingChannelComboBox"));
+    preprocessingChannelComboBox_->addItems(
+        {QStringLiteral("CH 01"), QStringLiteral("CH 02"), QStringLiteral("CH 03"), QStringLiteral("CH 04")});
+    preprocessingChannelComboBox_->setCursor(Qt::PointingHandCursor);
+    preprocessingChannelComboBox_->setMinimumWidth(190);
+    channelLayout->addWidget(preprocessingChannelComboBox_);
+    preprocessingLayout->addLayout(channelLayout);
+
+    preprocessingControlsWidget_ = new QWidget(preprocessingFrame);
+    preprocessingControlsWidget_->setObjectName(QStringLiteral("videoPreprocessingControls"));
+    auto* controlsLayout = new QVBoxLayout(preprocessingControlsWidget_);
+    controlsLayout->setContentsMargins(0, 4, 0, 0);
+    controlsLayout->setSpacing(10);
+
+    auto* presetLayout = new QHBoxLayout();
+    auto* presetLabel = new QLabel(QStringLiteral("모드"), preprocessingControlsWidget_);
+    presetLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+    presetLayout->addWidget(presetLabel);
+    presetLayout->addStretch(1);
+    preprocessingPresetComboBox_ = new VideoOptionComboBox(preprocessingControlsWidget_);
+    preprocessingPresetComboBox_->setObjectName(QStringLiteral("videoPreprocessingComboBox"));
+    preprocessingPresetComboBox_->addItems(
+        {QStringLiteral("사용자 설정"), QStringLiteral("주간"), QStringLiteral("야간")});
+    preprocessingPresetComboBox_->setCursor(Qt::PointingHandCursor);
+    preprocessingPresetComboBox_->setMinimumWidth(190);
+    presetLayout->addWidget(preprocessingPresetComboBox_);
+    controlsLayout->addLayout(presetLayout);
+
+    auto* adjustmentGrid = new QGridLayout();
+    adjustmentGrid->setHorizontalSpacing(18);
+    adjustmentGrid->setVerticalSpacing(12);
+    adjustmentGrid->setColumnStretch(1, 1);
+    addSliderRow(adjustmentGrid, 0, QStringLiteral("밝기"), -20, 20, brightnessSlider_, brightnessValueLabel_,
+                 preprocessingControlsWidget_);
+    addSliderRow(adjustmentGrid, 1, QStringLiteral("대비"), 80, 120, contrastSlider_, contrastValueLabel_,
+                 preprocessingControlsWidget_);
+    addSliderRow(adjustmentGrid, 2, QStringLiteral("감마"), 80, 140, gammaSlider_, gammaValueLabel_,
+                 preprocessingControlsWidget_);
+    controlsLayout->addLayout(adjustmentGrid);
+
+    auto* detailGrid = new QGridLayout();
+    detailGrid->setHorizontalSpacing(18);
+    detailGrid->setVerticalSpacing(12);
+    detailGrid->setColumnStretch(1, 1);
+    auto* denoiseLabel = new QLabel(QStringLiteral("노이즈 제거"), preprocessingControlsWidget_);
+    denoiseLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+    denoiseComboBox_ = new VideoOptionComboBox(preprocessingControlsWidget_);
+    denoiseComboBox_->setObjectName(QStringLiteral("videoPreprocessingComboBox"));
+    denoiseComboBox_->addItems({QStringLiteral("OFF"), QStringLiteral("약하게")});
+    denoiseComboBox_->setCursor(Qt::PointingHandCursor);
+    auto* sharpeningLabel = new QLabel(QStringLiteral("선명도"), preprocessingControlsWidget_);
+    sharpeningLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+    sharpeningComboBox_ = new VideoOptionComboBox(preprocessingControlsWidget_);
+    sharpeningComboBox_->setObjectName(QStringLiteral("videoPreprocessingComboBox"));
+    sharpeningComboBox_->addItems({QStringLiteral("OFF"), QStringLiteral("약하게")});
+    sharpeningComboBox_->setCursor(Qt::PointingHandCursor);
+    detailGrid->addWidget(denoiseLabel, 0, 0);
+    detailGrid->addWidget(denoiseComboBox_, 0, 1);
+    detailGrid->addWidget(sharpeningLabel, 1, 0);
+    detailGrid->addWidget(sharpeningComboBox_, 1, 1);
+    controlsLayout->addLayout(detailGrid);
+    preprocessingLayout->addWidget(preprocessingControlsWidget_, 1);
+
+    auto* preprocessingButtonLayout = new QHBoxLayout();
+    auto* resetButton = new QPushButton(QStringLiteral("기본값 복원"), preprocessingFrame);
+    resetButton->setObjectName(QStringLiteral("videoPreprocessingSecondaryButton"));
+    resetButton->setCursor(Qt::PointingHandCursor);
+    preprocessingButtonLayout->addWidget(resetButton);
+    preprocessingButtonLayout->addStretch(1);
+    auto* applySelectedButton = new QPushButton(QStringLiteral("선택 채널 적용"), preprocessingFrame);
+    applySelectedButton->setObjectName(QStringLiteral("videoPreprocessingSecondaryButton"));
+    applySelectedButton->setCursor(Qt::PointingHandCursor);
+    preprocessingButtonLayout->addWidget(applySelectedButton);
+    auto* applyAllButton = new QPushButton(QStringLiteral("전체 채널 적용"), preprocessingFrame);
+    applyAllButton->setObjectName(QStringLiteral("videoPreprocessingApplyAllButton"));
+    applyAllButton->setCursor(Qt::PointingHandCursor);
+    preprocessingButtonLayout->addWidget(applyAllButton);
+    preprocessingLayout->addLayout(preprocessingButtonLayout);
+
+    videoTabLayout->addWidget(preprocessingFrame, 1);
+    settingsTabs->addTab(videoTab, QStringLiteral("영상 설정"));
 
     auto* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch(1);
-
     auto* cancelButton = new QPushButton(QStringLiteral("취소"), panel);
     cancelButton->setObjectName(QStringLiteral("mapSettingsCancelButton"));
     cancelButton->setCursor(Qt::PointingHandCursor);
@@ -160,12 +366,60 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     applyButton->setCursor(Qt::PointingHandCursor);
     applyButton->setDefault(true);
     connect(applyButton, &QPushButton::clicked, this, [this]() {
-        emit settingsApplied(settings(), videoRiskBordersEnabled(), faceBlurEnabled(), licensePlateBlurEnabled());
+        storeCurrentPreprocessingChannel();
+        emit settingsApplied(settings(), videoRiskBordersEnabled(), faceBlurEnabled(), licensePlateBlurEnabled(),
+                             currentPreprocessingChannelIndex_,
+                             preprocessingSettingsByChannel_.value(currentPreprocessingChannelIndex_));
         hide();
     });
     buttonLayout->addWidget(applyButton);
     panelLayout->addLayout(buttonLayout);
 
+    connect(preprocessingEnabledCheckBox_, &QCheckBox::toggled, this,
+            &MapSettingsDialog::setPreprocessingControlsEnabled);
+    connect(preprocessingChannelComboBox_, &QComboBox::currentIndexChanged, this, [this](int channelIndex) {
+        if (updatingPreprocessingControls_) {
+            return;
+        }
+        storeCurrentPreprocessingChannel();
+        currentPreprocessingChannelIndex_ = channelIndex;
+        loadPreprocessingChannel(channelIndex);
+    });
+    connect(preprocessingPresetComboBox_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (updatingPreprocessingControls_) {
+            return;
+        }
+        if (index == dayPresetIndex) {
+            applyPreprocessingPreset(VideoPreprocessingPreset::Day);
+        } else if (index == nightPresetIndex) {
+            applyPreprocessingPreset(VideoPreprocessingPreset::Night);
+        }
+    });
+
+    const auto handleManualAdjustment = [this]() {
+        updatePreprocessingValueLabels();
+        markPreprocessingAsCustom();
+    };
+    connect(brightnessSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
+    connect(contrastSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
+    connect(gammaSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
+    connect(denoiseComboBox_, &QComboBox::currentIndexChanged, this, [this](int) { markPreprocessingAsCustom(); });
+    connect(sharpeningComboBox_, &QComboBox::currentIndexChanged, this, [this](int) { markPreprocessingAsCustom(); });
+    connect(resetButton, &QPushButton::clicked, this,
+            [this]() { applyPreprocessingPreset(VideoPreprocessingPreset::Custom); });
+    connect(applySelectedButton, &QPushButton::clicked, this, [this]() {
+        storeCurrentPreprocessingChannel();
+        emit videoPreprocessingApplyRequested(currentPreprocessingChannelIndex_,
+                                              preprocessingSettingsByChannel_.value(currentPreprocessingChannelIndex_));
+    });
+    connect(applyAllButton, &QPushButton::clicked, this, [this]() {
+        const VideoPreprocessingSettings settings = videoPreprocessingSettings();
+        preprocessingSettingsByChannel_.fill(settings, preprocessingChannelCount);
+        emit videoPreprocessingApplyRequested(-1, settings);
+    });
+
+    preprocessingSettingsByChannel_.fill(VideoPreprocessingSettings{}, preprocessingChannelCount);
+    setVideoPreprocessingSettings(preprocessingSettingsByChannel_);
     hide();
 }
 
@@ -197,6 +451,51 @@ void MapSettingsDialog::setBlurTargetsEnabled(bool faceEnabled, bool licensePlat
 }
 
 /**
+ * @brief                      채널별 영상 전처리 설정을 영상 탭에 반영합니다.
+ * @param settingsByChannel    채널 인덱스 순서의 영상 전처리 설정
+ * @param selectedChannelIndex 처음 표시할 채널 인덱스
+ */
+void MapSettingsDialog::setVideoPreprocessingSettings(const QVector<VideoPreprocessingSettings>& settingsByChannel,
+                                                      int selectedChannelIndex) {
+    preprocessingSettingsByChannel_ = settingsByChannel;
+    if (preprocessingSettingsByChannel_.size() < preprocessingChannelCount) {
+        preprocessingSettingsByChannel_.resize(preprocessingChannelCount);
+    }
+
+    currentPreprocessingChannelIndex_ = qBound(0, selectedChannelIndex, preprocessingSettingsByChannel_.size() - 1);
+
+    const QSignalBlocker channelBlocker(preprocessingChannelComboBox_);
+    preprocessingChannelComboBox_->setCurrentIndex(currentPreprocessingChannelIndex_);
+    loadPreprocessingChannel(currentPreprocessingChannelIndex_);
+}
+
+/**
+ * @brief          영상 전처리 설정 하나를 현재 컨트롤에 반영합니다.
+ * @param settings 표시할 영상 전처리 설정
+ */
+void MapSettingsDialog::setPreprocessingControls(const VideoPreprocessingSettings& settings) {
+    updatingPreprocessingControls_ = true;
+    preprocessingEnabledCheckBox_->setChecked(settings.enabled);
+    brightnessSlider_->setValue(settings.brightness);
+    contrastSlider_->setValue(qRound(settings.contrast * 100.0));
+    gammaSlider_->setValue(qRound(settings.gamma * 100.0));
+    denoiseComboBox_->setCurrentIndex(settings.weakDenoiseEnabled ? 1 : 0);
+    sharpeningComboBox_->setCurrentIndex(settings.weakSharpeningEnabled ? 1 : 0);
+
+    int presetIndex = customPresetIndex;
+    if (settings.preset == VideoPreprocessingPreset::Day) {
+        presetIndex = dayPresetIndex;
+    } else if (settings.preset == VideoPreprocessingPreset::Night) {
+        presetIndex = nightPresetIndex;
+    }
+    preprocessingPresetComboBox_->setCurrentIndex(presetIndex);
+    updatingPreprocessingControls_ = false;
+
+    updatePreprocessingValueLabels();
+    setPreprocessingControlsEnabled(settings.enabled);
+}
+
+/**
  * @brief  사용자가 선택한 네 개 표시 옵션을 반환합니다.
  * @return 현재 체크 상태로 구성한 맵 표시 설정
  */
@@ -210,7 +509,7 @@ DigitalTwinMapDisplaySettings MapSettingsDialog::settings() const {
 }
 
 /**
- * @brief  사용자가 선택한 CCTV 테두리 알림 표시 여부를 반환합니다.
+ * @brief  CCTV 테두리 알림 표시 여부를 반환합니다.
  * @return 테두리 알림을 표시하면 true
  */
 bool MapSettingsDialog::videoRiskBordersEnabled() const { return videoRiskBordersCheckBox_->isChecked(); }
@@ -228,16 +527,110 @@ bool MapSettingsDialog::faceBlurEnabled() const { return faceBlurCheckBox_->isCh
 bool MapSettingsDialog::licensePlateBlurEnabled() const { return licensePlateBlurCheckBox_->isChecked(); }
 
 /**
+ * @brief  현재 영상 탭 값을 전처리 설정 모델로 변환합니다.
+ * @return 모든 채널 수신기에 전달할 영상 전처리 설정
+ */
+VideoPreprocessingSettings MapSettingsDialog::videoPreprocessingSettings() const {
+    VideoPreprocessingSettings settings;
+    settings.enabled = preprocessingEnabledCheckBox_->isChecked();
+    settings.brightness = brightnessSlider_->value();
+    settings.contrast = static_cast<double>(contrastSlider_->value()) / 100.0;
+    settings.gamma = static_cast<double>(gammaSlider_->value()) / 100.0;
+    settings.weakDenoiseEnabled = denoiseComboBox_->currentIndex() == 1;
+    settings.weakSharpeningEnabled = sharpeningComboBox_->currentIndex() == 1;
+
+    if (preprocessingPresetComboBox_->currentIndex() == dayPresetIndex) {
+        settings.preset = VideoPreprocessingPreset::Day;
+    } else if (preprocessingPresetComboBox_->currentIndex() == nightPresetIndex) {
+        settings.preset = VideoPreprocessingPreset::Night;
+    }
+    return settings;
+}
+
+/**
+ * @brief        주간·야간 또는 중립 기본값을 영상 설정 컨트롤에 적용합니다.
+ * @param preset 적용할 프리셋
+ */
+void MapSettingsDialog::applyPreprocessingPreset(VideoPreprocessingPreset preset) {
+    VideoPreprocessingSettings settings;
+    settings.enabled = preset == VideoPreprocessingPreset::Custom || preprocessingEnabledCheckBox_->isChecked();
+    settings.preset = preset;
+
+    if (preset == VideoPreprocessingPreset::Day) {
+        settings.brightness = 3;
+        settings.contrast = 1.08;
+        settings.gamma = 1.0;
+        settings.weakSharpeningEnabled = true;
+    } else if (preset == VideoPreprocessingPreset::Night) {
+        settings.brightness = 10;
+        settings.contrast = 1.05;
+        settings.gamma = 1.2;
+        settings.weakDenoiseEnabled = true;
+    }
+
+    setPreprocessingControls(settings);
+}
+
+/**
+ * @brief              선택한 채널의 저장된 영상 전처리 설정을 불러옵니다.
+ * @param channelIndex 불러올 0 기반 채널 인덱스
+ */
+void MapSettingsDialog::loadPreprocessingChannel(int channelIndex) {
+    if (channelIndex < 0 || channelIndex >= preprocessingSettingsByChannel_.size()) {
+        return;
+    }
+    setPreprocessingControls(preprocessingSettingsByChannel_.at(channelIndex));
+}
+
+/**
+ * @brief 현재 컨트롤 값을 선택 중인 채널 설정에 저장합니다.
+ */
+void MapSettingsDialog::storeCurrentPreprocessingChannel() {
+    if (currentPreprocessingChannelIndex_ < 0 ||
+        currentPreprocessingChannelIndex_ >= preprocessingSettingsByChannel_.size()) {
+        return;
+    }
+    preprocessingSettingsByChannel_[currentPreprocessingChannelIndex_] = videoPreprocessingSettings();
+}
+
+/**
+ * @brief 슬라이더 오른쪽에 현재 보정 수치를 표시합니다.
+ */
+void MapSettingsDialog::updatePreprocessingValueLabels() {
+    brightnessValueLabel_->setText(
+        QStringLiteral("%1%2").arg(brightnessSlider_->value() > 0 ? "+" : "").arg(brightnessSlider_->value()));
+    contrastValueLabel_->setText(QString::number(static_cast<double>(contrastSlider_->value()) / 100.0, 'f', 2));
+    gammaValueLabel_->setText(QString::number(static_cast<double>(gammaSlider_->value()) / 100.0, 'f', 2));
+}
+
+/**
+ * @brief         전처리 사용 여부에 맞춰 세부 컨트롤을 활성화합니다.
+ * @param enabled 전처리 사용 여부
+ */
+void MapSettingsDialog::setPreprocessingControlsEnabled(bool enabled) {
+    preprocessingControlsWidget_->setEnabled(enabled);
+}
+
+/**
+ * @brief 사용자가 프리셋 값을 직접 변경하면 모드를 사용자 설정으로 전환합니다.
+ */
+void MapSettingsDialog::markPreprocessingAsCustom() {
+    if (updatingPreprocessingControls_) {
+        return;
+    }
+    const QSignalBlocker blocker(preprocessingPresetComboBox_);
+    preprocessingPresetComboBox_->setCurrentIndex(customPresetIndex);
+}
+
+/**
  * @brief       팝업을 메인 윈도우의 클라이언트 영역 전체에 맞춰 표시합니다.
  * @param event Qt 표시 이벤트
  */
 void MapSettingsDialog::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
-
     if (parentWidget()) {
         setGeometry(parentWidget()->rect());
     }
-
     raise();
     setFocus(Qt::PopupFocusReason);
 }

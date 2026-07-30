@@ -6,6 +6,7 @@
 #include <QString>
 
 #include "model/MqttRealtimeData.h"
+#include "model/VideoPreprocessingSettings.h"
 
 class QThread;
 
@@ -19,6 +20,7 @@ public:
     virtual void setUrl(const QString& url) = 0;
     virtual void setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) = 0;
     virtual void setBlurFrame(BlurFrameData frame) = 0;
+    virtual void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) = 0;
     virtual void moveInternalObjectsToThread(QThread* thread) = 0;
     virtual void start() = 0;
     virtual void stop() = 0;

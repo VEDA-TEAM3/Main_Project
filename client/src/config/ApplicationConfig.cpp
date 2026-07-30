@@ -201,6 +201,38 @@ bool parseBlurConfig(const QJsonObject& receiver, BlurProcessorConfig& config, Q
            readInt(blur, QStringLiteral("debugLogIntervalMs"), 0, 600000, config.debugLogIntervalMsec, error);
 }
 
+bool parseVideoPreprocessingConfig(const QJsonObject& receiver, VideoPreprocessingSettings& settings, QString& error) {
+    if (!receiver.contains(QStringLiteral("preprocessing"))) {
+        return true;
+    }
+
+    QJsonObject preprocessing;
+    QString preset;
+    if (!readObject(receiver, QStringLiteral("preprocessing"), preprocessing, error) ||
+        !readBoolean(preprocessing, QStringLiteral("enabled"), settings.enabled, error) ||
+        !readString(preprocessing, QStringLiteral("preset"), preset, error) ||
+        !readInt(preprocessing, QStringLiteral("brightness"), -20, 20, settings.brightness, error) ||
+        !readDouble(preprocessing, QStringLiteral("contrast"), 0.8, 1.2, settings.contrast, error) ||
+        !readDouble(preprocessing, QStringLiteral("gamma"), 0.8, 1.4, settings.gamma, error) ||
+        !readBoolean(preprocessing, QStringLiteral("weakDenoiseEnabled"), settings.weakDenoiseEnabled, error) ||
+        !readBoolean(preprocessing, QStringLiteral("weakSharpeningEnabled"), settings.weakSharpeningEnabled, error)) {
+        return false;
+    }
+
+    preset = preset.trimmed().toLower();
+    if (preset == QStringLiteral("custom")) {
+        settings.preset = VideoPreprocessingPreset::Custom;
+    } else if (preset == QStringLiteral("day")) {
+        settings.preset = VideoPreprocessingPreset::Day;
+    } else if (preset == QStringLiteral("night")) {
+        settings.preset = VideoPreprocessingPreset::Night;
+    } else {
+        error = QStringLiteral("video.receiver.preprocessing.preset must be custom, day or night");
+        return false;
+    }
+    return true;
+}
+
 bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config, QString& error) {
     QJsonObject receiver;
     qint64 udpBufferSize = 0;
@@ -253,6 +285,7 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
            readBoolean(receiver, QStringLiteral("sinkAsync"), config.sinkAsync, error) &&
            readInteger(receiver, QStringLiteral("minimumLoadingMs"), 0, 60000, config.minimumLoadingMsec, error) &&
            readInt(receiver, QStringLiteral("reconnectSpreadMs"), 1, 600000, config.reconnectSpreadMsec, error) &&
+           parseVideoPreprocessingConfig(receiver, config.preprocessing, error) &&
            parseBlurConfig(receiver, config.blur, error);
 }
 
