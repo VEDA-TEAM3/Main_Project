@@ -1,0 +1,70 @@
+name: veda-cctv-01
+
+x-compute-common: &compute-common
+  image: veda/compute-server:1.0.0
+  restart: always
+  working_dir: /opt/veda
+  stop_grace_period: 15s
+  network_mode: host
+  deploy:
+    resources:
+      limits:
+        cpus: "0.75"
+        memory: 256M
+
+services:
+  compute-ch0:
+    <<: *compute-common
+    container_name: cctv_01_ch0
+    volumes:
+      - ./ch0/config.json:/opt/veda/config.json:ro
+      - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
+      - /var/log/veda/cctv_01:/opt/veda/logs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  compute-ch1:
+    <<: *compute-common
+    container_name: cctv_01_ch1
+    volumes:
+      - ./ch1/config.json:/opt/veda/config.json:ro
+      - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
+      - /var/log/veda/cctv_01:/opt/veda/logs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  compute-ch2:
+    <<: *compute-common
+    container_name: cctv_01_ch2
+    volumes:
+      - ./ch2/config.json:/opt/veda/config.json:ro
+      - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
+      - /var/log/veda/cctv_01:/opt/veda/logs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  compute-ch3:
+    <<: *compute-common
+    container_name: cctv_01_ch3
+    volumes:
+      - ./ch3/config.json:/opt/veda/config.json:ro
+      - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
+      - /var/log/veda/cctv_01:/opt/veda/logs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
