@@ -76,10 +76,6 @@ qt_add_executable(Qtcctvclient
     include/video/StreamReceiver.h
     include/video/StreamReceiverFactory.h
     include/video/VideoRuntimeConfig.h
-    include/video/VideoDetailProcessor.h
-    src/video/VideoDetailProcessor.cpp
-    include/video/VideoDetailFilter.h
-    src/video/VideoDetailFilter.cpp
     include/video/GstStreamReceiverFactory.h
     src/video/GstStreamReceiverFactory.cpp
     include/video/GstRtspReceiver.h

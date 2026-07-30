@@ -65,8 +65,6 @@ private:
     QLabel* brightnessValueLabel_ = nullptr;
     QLabel* contrastValueLabel_ = nullptr;
     QLabel* gammaValueLabel_ = nullptr;
-    QComboBox* denoiseComboBox_ = nullptr;
-    QComboBox* sharpeningComboBox_ = nullptr;
     QWidget* preprocessingControlsWidget_ = nullptr;
     InformationDialog* informationDialog_ = nullptr;
     QVector<VideoPreprocessingSettings> preprocessingSettingsByChannel_;

@@ -26,8 +26,8 @@
 #include <QWidget>
 
 namespace {
-constexpr int dialogPanelWidth = 760;
-constexpr int dialogPanelHeight = 640;
+constexpr int dialogPanelWidth = 800;
+constexpr int dialogPanelHeight = 600;
 constexpr int preprocessingChannelCount = 4;
 constexpr int customPresetIndex = 0;
 constexpr int dayPresetIndex = 1;
@@ -226,26 +226,48 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     optionGrid->addWidget(alertDeviceCheckBox_, 1, 1);
     optionsLayout->addLayout(optionGrid);
 
+    auto* horizontalDivider = new QFrame(optionsFrame);
+    horizontalDivider->setObjectName(QStringLiteral("mapSettingsHorizontalDivider"));
+    horizontalDivider->setFrameShape(QFrame::HLine);
+    optionsLayout->addWidget(horizontalDivider);
+
+    auto* secondaryOptionsLayout = new QHBoxLayout();
+    secondaryOptionsLayout->setContentsMargins(0, 0, 0, 0);
+    secondaryOptionsLayout->setSpacing(32);
+
+    auto* cctvOptionsLayout = new QVBoxLayout();
+    cctvOptionsLayout->setSpacing(14);
     auto* cctvSectionTitleLabel = new QLabel(QStringLiteral("CCTV 알림 설정"), optionsFrame);
     cctvSectionTitleLabel->setObjectName(QStringLiteral("mapSettingsSectionLabel"));
-    optionsLayout->addWidget(cctvSectionTitleLabel);
+    cctvOptionsLayout->addWidget(cctvSectionTitleLabel);
     videoRiskBordersCheckBox_ = createOptionCheckBox(QStringLiteral("CCTV 테두리 알림 표시"), optionsFrame);
-    optionsLayout->addWidget(videoRiskBordersCheckBox_);
+    cctvOptionsLayout->addWidget(videoRiskBordersCheckBox_);
+    cctvOptionsLayout->addStretch(1);
+    secondaryOptionsLayout->addLayout(cctvOptionsLayout, 1);
 
+    auto* sectionDivider = new QFrame(optionsFrame);
+    sectionDivider->setObjectName(QStringLiteral("mapSettingsSectionDivider"));
+    sectionDivider->setFrameShape(QFrame::VLine);
+    secondaryOptionsLayout->addWidget(sectionDivider);
+
+    auto* blurOptionsLayout = new QVBoxLayout();
+    blurOptionsLayout->setSpacing(14);
     auto* blurSectionTitleLabel = new QLabel(QStringLiteral("블러 설정"), optionsFrame);
     blurSectionTitleLabel->setObjectName(QStringLiteral("mapSettingsSectionLabel"));
-    optionsLayout->addWidget(blurSectionTitleLabel);
+    blurOptionsLayout->addWidget(blurSectionTitleLabel);
 
-    auto* blurOptionGrid = new QGridLayout();
-    blurOptionGrid->setHorizontalSpacing(72);
-    blurOptionGrid->setColumnStretch(0, 1);
-    blurOptionGrid->setColumnStretch(1, 1);
+    auto* blurOptionLayout = new QHBoxLayout();
+    blurOptionLayout->setSpacing(28);
     faceBlurCheckBox_ = createOptionCheckBox(QStringLiteral("얼굴"), optionsFrame);
     licensePlateBlurCheckBox_ = createOptionCheckBox(QStringLiteral("차량 번호판"), optionsFrame);
-    blurOptionGrid->addWidget(faceBlurCheckBox_, 0, 0);
-    blurOptionGrid->addWidget(licensePlateBlurCheckBox_, 0, 1);
-    optionsLayout->addLayout(blurOptionGrid);
-    optionsLayout->addStretch(1);
+    blurOptionLayout->addWidget(faceBlurCheckBox_);
+    blurOptionLayout->addWidget(licensePlateBlurCheckBox_);
+    blurOptionLayout->addStretch(1);
+    blurOptionsLayout->addLayout(blurOptionLayout);
+    blurOptionsLayout->addStretch(1);
+    secondaryOptionsLayout->addLayout(blurOptionsLayout, 1);
+
+    optionsLayout->addLayout(secondaryOptionsLayout, 1);
     uiTabLayout->addWidget(optionsFrame, 1);
     settingsTabs->addTab(uiTab, QStringLiteral("UI 설정"));
 
@@ -302,6 +324,7 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     preprocessingPresetComboBox_->setMinimumWidth(190);
     presetLayout->addWidget(preprocessingPresetComboBox_);
     controlsLayout->addLayout(presetLayout);
+    controlsLayout->addSpacing(10);
 
     auto* adjustmentGrid = new QGridLayout();
     adjustmentGrid->setHorizontalSpacing(18);
@@ -315,27 +338,7 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
                  preprocessingControlsWidget_);
     controlsLayout->addLayout(adjustmentGrid);
 
-    auto* detailGrid = new QGridLayout();
-    detailGrid->setHorizontalSpacing(18);
-    detailGrid->setVerticalSpacing(12);
-    detailGrid->setColumnStretch(1, 1);
-    auto* denoiseLabel = new QLabel(QStringLiteral("노이즈 제거"), preprocessingControlsWidget_);
-    denoiseLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
-    denoiseComboBox_ = new VideoOptionComboBox(preprocessingControlsWidget_);
-    denoiseComboBox_->setObjectName(QStringLiteral("videoPreprocessingComboBox"));
-    denoiseComboBox_->addItems({QStringLiteral("OFF"), QStringLiteral("약하게")});
-    denoiseComboBox_->setCursor(Qt::PointingHandCursor);
-    auto* sharpeningLabel = new QLabel(QStringLiteral("선명도"), preprocessingControlsWidget_);
-    sharpeningLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
-    sharpeningComboBox_ = new VideoOptionComboBox(preprocessingControlsWidget_);
-    sharpeningComboBox_->setObjectName(QStringLiteral("videoPreprocessingComboBox"));
-    sharpeningComboBox_->addItems({QStringLiteral("OFF"), QStringLiteral("약하게")});
-    sharpeningComboBox_->setCursor(Qt::PointingHandCursor);
-    detailGrid->addWidget(denoiseLabel, 0, 0);
-    detailGrid->addWidget(denoiseComboBox_, 0, 1);
-    detailGrid->addWidget(sharpeningLabel, 1, 0);
-    detailGrid->addWidget(sharpeningComboBox_, 1, 1);
-    controlsLayout->addLayout(detailGrid);
+    controlsLayout->addStretch(1);
     preprocessingLayout->addWidget(preprocessingControlsWidget_, 1);
 
     auto* preprocessingButtonLayout = new QHBoxLayout();
@@ -414,8 +417,6 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     connect(brightnessSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
     connect(contrastSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
     connect(gammaSlider_, &QSlider::valueChanged, this, handleManualAdjustment);
-    connect(denoiseComboBox_, &QComboBox::currentIndexChanged, this, [this](int) { markPreprocessingAsCustom(); });
-    connect(sharpeningComboBox_, &QComboBox::currentIndexChanged, this, [this](int) { markPreprocessingAsCustom(); });
     connect(resetButton, &QPushButton::clicked, this,
             [this]() { applyPreprocessingPreset(VideoPreprocessingPreset::Custom); });
     connect(applySelectedButton, &QPushButton::clicked, this, [this]() {
@@ -493,8 +494,6 @@ void MapSettingsDialog::setPreprocessingControls(const VideoPreprocessingSetting
     brightnessSlider_->setValue(settings.brightness);
     contrastSlider_->setValue(qRound(settings.contrast * 100.0));
     gammaSlider_->setValue(qRound(settings.gamma * 100.0));
-    denoiseComboBox_->setCurrentIndex(settings.weakDenoiseEnabled ? 1 : 0);
-    sharpeningComboBox_->setCurrentIndex(settings.weakSharpeningEnabled ? 1 : 0);
 
     int presetIndex = customPresetIndex;
     if (settings.preset == VideoPreprocessingPreset::Day) {
@@ -555,8 +554,6 @@ VideoPreprocessingSettings MapSettingsDialog::videoPreprocessingSettings() const
     settings.brightness = brightnessSlider_->value();
     settings.contrast = static_cast<double>(contrastSlider_->value()) / 100.0;
     settings.gamma = static_cast<double>(gammaSlider_->value()) / 100.0;
-    settings.weakDenoiseEnabled = denoiseComboBox_->currentIndex() == 1;
-    settings.weakSharpeningEnabled = sharpeningComboBox_->currentIndex() == 1;
 
     if (preprocessingPresetComboBox_->currentIndex() == dayPresetIndex) {
         settings.preset = VideoPreprocessingPreset::Day;
@@ -579,12 +576,10 @@ void MapSettingsDialog::applyPreprocessingPreset(VideoPreprocessingPreset preset
         settings.brightness = 3;
         settings.contrast = 1.08;
         settings.gamma = 1.0;
-        settings.weakSharpeningEnabled = true;
     } else if (preset == VideoPreprocessingPreset::Night) {
         settings.brightness = 10;
         settings.contrast = 1.05;
         settings.gamma = 1.2;
-        settings.weakDenoiseEnabled = true;
     }
 
     setPreprocessingControls(settings);
@@ -646,8 +641,6 @@ void MapSettingsDialog::setPreprocessingControlsEnabled(bool enabled) {
     brightnessSlider_->setEnabled(enabled);
     contrastSlider_->setEnabled(enabled);
     gammaSlider_->setEnabled(enabled);
-    denoiseComboBox_->setEnabled(enabled);
-    sharpeningComboBox_->setEnabled(enabled);
 
     preprocessingControlsWidget_->setProperty("preprocessingActive", enabled);
     preprocessingControlsWidget_->style()->unpolish(preprocessingControlsWidget_);

@@ -67,9 +67,7 @@
                 "preset": "custom",
                 "brightness": 0,
                 "contrast": 1.0,
-                "gamma": 1.0,
-                "weakDenoiseEnabled": false,
-                "weakSharpeningEnabled": false
+                "gamma": 1.0
             },
             "blur": {
                 "syncOffsetMs": 300,

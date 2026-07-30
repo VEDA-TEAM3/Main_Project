@@ -12,6 +12,4 @@ struct VideoPreprocessingSettings {
     int brightness = 0;
     double contrast = 1.0;
     double gamma = 1.0;
-    bool weakDenoiseEnabled = false;
-    bool weakSharpeningEnabled = false;
 };

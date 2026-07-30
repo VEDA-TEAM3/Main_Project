@@ -248,6 +248,20 @@ QLabel#mapSettingsSectionLabel {
     font-weight: 800;
 }
 
+QFrame#mapSettingsSectionDivider {
+    min-width: 1px;
+    max-width: 1px;
+    background-color: #315f7e;
+    border: 0;
+}
+
+QFrame#mapSettingsHorizontalDivider {
+    min-height: 1px;
+    max-height: 1px;
+    background-color: #315f7e;
+    border: 0;
+}
+
 QCheckBox#mapSettingsOption {
     color: #dceaf2;
     background-color: transparent;

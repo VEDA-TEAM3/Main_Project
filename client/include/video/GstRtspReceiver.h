@@ -10,7 +10,6 @@
 
 #include "video/BlurProcessor.h"
 #include "video/StreamReceiver.h"
-#include "video/VideoDetailProcessor.h"
 #include "video/VideoRuntimeConfig.h"
 
 class QThread;
@@ -87,5 +86,4 @@ private:
     bool firstFrameReported_ = false;
 
     BlurProcessor blurProcessor_;
-    VideoDetailProcessor detailProcessor_;
 };

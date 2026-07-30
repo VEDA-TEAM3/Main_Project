@@ -12,6 +12,29 @@
 namespace {
 constexpr int requestTimeoutMsec = 10000;
 const QString slackApiBaseUrl = QStringLiteral("https://slack.com/api/");
+
+QString slackApiErrorMessage(const QString& errorCode) {
+    if (errorCode == QStringLiteral("account_inactive")) {
+        return QStringLiteral(
+            "Slack 봇 계정 또는 워크스페이스가 비활성 상태입니다. Slack 앱을 워크스페이스에 다시 설치한 뒤 "
+            "새 Bot User OAuth Token으로 SLACK_BOT_TOKEN을 갱신하세요.");
+    }
+    if (errorCode == QStringLiteral("invalid_auth") || errorCode == QStringLiteral("token_revoked") ||
+        errorCode == QStringLiteral("token_expired")) {
+        return QStringLiteral(
+            "Slack 인증 토큰이 유효하지 않습니다. 앱 설치 상태를 확인하고 SLACK_BOT_TOKEN을 갱신하세요.");
+    }
+    if (errorCode == QStringLiteral("missing_scope")) {
+        return QStringLiteral("Slack 앱 권한이 부족합니다. Bot Token Scopes의 chat:write 및 im:write를 확인하세요.");
+    }
+    if (errorCode == QStringLiteral("channel_not_found")) {
+        return QStringLiteral("Slack 신고 대상 채널을 찾을 수 없습니다. 사용자 또는 채널 ID를 확인하세요.");
+    }
+    if (errorCode == QStringLiteral("not_in_channel")) {
+        return QStringLiteral("Slack 봇이 신고 대상 채널에 참여하지 않았습니다. 해당 채널에 앱을 초대하세요.");
+    }
+    return QStringLiteral("Slack API 오류: %1").arg(errorCode);
+}
 }  // namespace
 
 /**
@@ -109,10 +132,11 @@ void SlackReportGateway::postMessage(const ReportRequest& request) {
         const QByteArray response = reply->readAll();
         QJsonObject responseObject;
         const QString error = parseSlackError(reply, response, responseObject);
+        const QString errorCode = responseObject.value(QStringLiteral("error")).toString();
         reply->deleteLater();
 
         if (!error.isEmpty()) {
-            if (!usesChannelTarget() && error == QStringLiteral("channel_not_found")) {
+            if (!usesChannelTarget() && errorCode == QStringLiteral("channel_not_found")) {
                 destinationChannelId_.clear();
             }
             finishWithFailure(request, error);
@@ -180,7 +204,9 @@ QString SlackReportGateway::parseSlackError(QNetworkReply* reply, const QByteArr
 
     responseObject = document.object();
     if (!responseObject.value(QStringLiteral("ok")).toBool(false)) {
-        return responseObject.value(QStringLiteral("error")).toString(QStringLiteral("Slack API 오류"));
+        const QString errorCode =
+            responseObject.value(QStringLiteral("error")).toString(QStringLiteral("unknown_error"));
+        return slackApiErrorMessage(errorCode);
     }
 
     return {};

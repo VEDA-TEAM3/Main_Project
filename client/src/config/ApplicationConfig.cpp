@@ -213,9 +213,7 @@ bool parseVideoPreprocessingConfig(const QJsonObject& receiver, VideoPreprocessi
         !readString(preprocessing, QStringLiteral("preset"), preset, error) ||
         !readInt(preprocessing, QStringLiteral("brightness"), -20, 20, settings.brightness, error) ||
         !readDouble(preprocessing, QStringLiteral("contrast"), 0.8, 1.2, settings.contrast, error) ||
-        !readDouble(preprocessing, QStringLiteral("gamma"), 0.8, 1.4, settings.gamma, error) ||
-        !readBoolean(preprocessing, QStringLiteral("weakDenoiseEnabled"), settings.weakDenoiseEnabled, error) ||
-        !readBoolean(preprocessing, QStringLiteral("weakSharpeningEnabled"), settings.weakSharpeningEnabled, error)) {
+        !readDouble(preprocessing, QStringLiteral("gamma"), 0.8, 1.4, settings.gamma, error)) {
         return false;
     }
 
