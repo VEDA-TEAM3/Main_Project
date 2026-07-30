@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <unordered_set>
@@ -15,6 +16,9 @@
 namespace {
 
 constexpr const char* kIface = "GridFuser";
+// 작은 프레임은 3x3 셀 탐색 준비 비용이 전체 쌍 비교보다 크다.
+// 동일한 union-find/추적 상태를 유지한 채 이 지점부터 공간 그리드를 사용한다.
+constexpr std::uint32_t kMinGridCandidateCount = 96;
 
 /// @brief 좌표를 셀 격자 인덱스로 (floor). cellSize > 0 보장됨
 std::int32_t cellCoord(double value, double cellSize) {
@@ -28,23 +32,61 @@ std::uint32_t cellHash(std::int32_t cx, std::int32_t cy, std::uint32_t mask) {
     return h & mask;
 }
 
+/// @brief floor(value / cellSize)를 int32_t로 안전하게 표현할 수 있는지 확인한다.
+bool canRepresentCell(double value, double cellSize) {
+    if (!std::isfinite(value)) {
+        return false;
+    }
+    const double coordinate = std::floor(value / cellSize);
+    return std::isfinite(coordinate) &&
+           coordinate >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
+           coordinate <= static_cast<double>(std::numeric_limits<std::int32_t>::max());
+}
+
 /// @brief 채널 비트. 64채널을 넘으면 마스크로 표현 못하므로 0을 돌려 병합을 막음 (ConcatFuser 와 동일)
 std::uint64_t channelBit(veda::ChannelId ch) {
-    if (ch < 0 || ch >= 64)
+    if (ch < 0 || ch >= 64) {
         return 0;
+    }
     return std::uint64_t{1} << ch;
+}
+
+/**
+ * @brief 원시 좌표 주위에 반경 radius 의 공간 히스테리시스를 적용한다.
+ *
+ * 이전 출력에서 radius 안쪽의 변화는 정지 잡음으로 보고 고정한다. 반경 밖으로 이동하면
+ * 원시 좌표 방향으로 따라가되 출력과 원시 좌표 사이 거리가 정확히 radius 가 되게 한다.
+ * 따라서 EMA처럼 속도에 따라 시간 지연이 계속 누적되지 않고 공간 오차 상한이 radius 로 제한된다.
+ */
+domain::WorldPoint stabilizePosition(const domain::WorldPoint& previous, const domain::WorldPoint& raw,
+                                     double radius) {
+    if (!(radius > 0.0) || !std::isfinite(previous.x) || !std::isfinite(previous.y) ||
+        !std::isfinite(raw.x) || !std::isfinite(raw.y)) {
+        return raw;
+    }
+
+    const double dx = raw.x - previous.x;
+    const double dy = raw.y - previous.y;
+    const double distance = std::hypot(dx, dy);
+    if (distance <= radius) {
+        return previous;
+    }
+    const double followScale = (distance - radius) / distance;
+    return {previous.x + dx * followScale, previous.y + dy * followScale};
 }
 
 }  // namespace
 
-GridFuser::GridFuser(std::shared_ptr<IDistanceMetric> metric, double dedupMergeDistance, double trackMaxDistance)
+GridFuser::GridFuser(std::shared_ptr<IDistanceMetric> metric, double dedupMergeDistance, double trackMaxDistance,
+                     double positionJitterRadius)
     : metric_(std::move(metric)),
       dedupMergeDistance_(dedupMergeDistance),
       cellSize_(dedupMergeDistance > 0.0 ? dedupMergeDistance : 1.0),
       trackMaxDistance_(trackMaxDistance),
-      nextGlobalId_(1) {
-    buckets_.resize(kBucketCount);  // 고정 크기 버킷 배열 (이후 재할당 없음)
-}
+      positionJitterRadius_(std::isfinite(positionJitterRadius) && positionJitterRadius > 0.0
+                                ? positionJitterRadius
+                                : 0.0),
+      nextGlobalId_(1) {}
 
 std::size_t GridFuser::ufFind(std::size_t x) {
     while (ufParent_[x] != x) {
@@ -86,85 +128,136 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
     const std::uint32_t n = static_cast<std::uint32_t>(candidates_.size());
 
     // --- BROAD-PHASE: 공간 해시 그리드로 '근접 쌍'만 수집 -> O(N*k) ---
-    // 1) 지난 프레임에 쓴 버킷만 비운다 (capacity 유지 -> 재할당 없음)
-    for (std::uint32_t b : touchedBuckets_)
-        buckets_[b].clear();
-    touchedBuckets_.clear();
-    pairs_.clear();
-
-    // 2) 후보를 셀 버킷에 삽입
-    for (std::uint32_t i = 0; i < n; ++i) {
-        const std::int32_t cx = cellCoord(candidates_[i].pos.x, cellSize_);
-        const std::int32_t cy = cellCoord(candidates_[i].pos.y, cellSize_);
-        const std::uint32_t b = cellHash(cx, cy, kBucketCount - 1);
-        if (buckets_[b].empty())
-            touchedBuckets_.push_back(b);
-        buckets_[b].push_back(i);
-    }
-
-    // 3) 각 후보의 3x3 이웃 셀만 훑어 '근접 + 다른채널 + 같은클래스' 쌍(i<j)을 수집
-    //    셀이 dedupMergeDistance 변이므로, 병합 가능한 쌍은 반드시 이 9개 셀 안에 있다.
-    for (std::uint32_t i = 0; i < n; ++i) {
-        const Candidate& ci = candidates_[i];
-        const std::int32_t cx = cellCoord(ci.pos.x, cellSize_);
-        const std::int32_t cy = cellCoord(ci.pos.y, cellSize_);
-
-        std::uint32_t seenBuckets[9];  // 이웃 셀들이 같은 버킷으로 해시-충돌하면 중복 스캔 방지
-        int seenCount = 0;
-        for (std::int32_t dy = -1; dy <= 1; ++dy) {
-            for (std::int32_t dx = -1; dx <= 1; ++dx) {
-                const std::uint32_t b = cellHash(cx + dx, cy + dy, kBucketCount - 1);
-                bool dup = false;
-                for (int s = 0; s < seenCount; ++s) {
-                    if (seenBuckets[s] == b) {
-                        dup = true;
-                        break;
-                    }
-                }
-                if (dup)
-                    continue;
-                seenBuckets[seenCount++] = b;
-
-                for (std::uint32_t j : buckets_[b]) {
-                    if (j <= i)
-                        continue;  // 각 무순서 쌍을 i<j 로 정확히 한 번만
-                    const Candidate& cj = candidates_[j];
-                    if (ci.ch == cj.ch)
-                        continue;
-                    if (ci.cls != cj.cls)
-                        continue;
-                    if (metric_->calculate(ci.pos, cj.pos) > dedupMergeDistance_)
-                        continue;  // 해시 충돌로 들어온 먼 후보는 여기서 걸러짐
-                    pairs_.emplace_back(i, j);
-                }
-            }
-        }
-    }
-
-    // 4) (i,j) 사전순 정렬 -> ConcatFuser 의 전체 O(N^2) 루프와 '동일한 순서'로 병합
-    //    (union-find 결과가 순서에 의존할 수 있으므로, 동일 결과를 보장하려면 순서까지 맞춰야 함)
-    std::sort(pairs_.begin(), pairs_.end());
-
-    // 5) 채널중복 제약 union-find (재사용 버퍼)
+    // 2) 채널중복 제약 union-find 초기화. 작은 프레임의 직접 비교 경로와 그리드 경로가 공유한다.
     ufParent_.resize(n);
     ufMask_.resize(n);
     for (std::uint32_t i = 0; i < n; ++i) {
         ufParent_[i] = i;
         ufMask_[i] = channelBit(candidates_[i].ch);
     }
-    for (const auto& [i, j] : pairs_) {
-        const std::size_t rootI = ufFind(i);
-        const std::size_t rootJ = ufFind(j);
-        if (rootI == rootJ)
-            continue;
-        // 두 클러스터가 이미 같은 채널을 품고 있으면 합치지 않음 (한 카메라의 서로 다른 실체 보호)
-        if ((ufMask_[rootI] & ufMask_[rootJ]) != 0)
-            continue;
-        ufParent_[rootI] = rootJ;
-        ufMask_[rootJ] |= ufMask_[rootI];
+
+    bool useGrid = n >= kMinGridCandidateCount && !std::isnan(dedupMergeDistance_);
+    if (useGrid) {
+        for (const auto& candidate : candidates_) {
+            if (!canRepresentCell(candidate.pos.x, cellSize_) || !canRepresentCell(candidate.pos.y, cellSize_)) {
+                useGrid = false;
+                break;
+            }
+        }
     }
 
-    // --- 이하 cluster 조립 + gid 추적 + coasting: ConcatFuser 와 문자 그대로 동일 ---
+    if (useGrid) {
+        // 지난 그리드 프레임에 쓴 버킷만 비운다. 그 사이 작은 프레임이 실행됐어도
+        // touchedBuckets_를 보존하므로 다음 그리드 진입 시 정확히 정리된다.
+        for (std::uint32_t b : touchedBuckets_) {
+            buckets_[b].clear();
+        }
+        touchedBuckets_.clear();
+        pairs_.clear();
+
+        if (buckets_.empty()) {
+            buckets_.resize(kBucketCount);  // 큰 프레임이 실제로 들어올 때 한 번만 할당
+        }
+        
+        // 2) 후보를 셀 버킷에 삽입
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const std::int32_t cx = cellCoord(candidates_[i].pos.x, cellSize_);
+            const std::int32_t cy = cellCoord(candidates_[i].pos.y, cellSize_);
+            const std::uint32_t b = cellHash(cx, cy, kBucketCount - 1);
+            if (buckets_[b].empty()) {
+                touchedBuckets_.push_back(b);
+            }
+            buckets_[b].push_back(i);
+        }
+
+        // 3) 각 후보의 3x3 이웃 셀만 훑어 '근접 + 다른채널 + 같은클래스' 쌍(i<j)을 수집
+        //    셀이 dedupMergeDistance 변이므로, 병합 가능한 쌍은 반드시 이 9개 셀 안에 있다.
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const Candidate& ci = candidates_[i];
+            const std::int32_t cx = cellCoord(ci.pos.x, cellSize_);
+            const std::int32_t cy = cellCoord(ci.pos.y, cellSize_);
+
+            std::uint32_t seenBuckets[9];  // 이웃 셀들이 같은 버킷으로 해시-충돌하면 중복 스캔 방지
+            int seenCount = 0;
+            for (std::int32_t dy = -1; dy <= 1; ++dy) {
+                for (std::int32_t dx = -1; dx <= 1; ++dx) {
+                    const std::uint32_t b = cellHash(cx + dx, cy + dy, kBucketCount - 1);
+                    bool dup = false;
+                    for (int s = 0; s < seenCount; ++s) {
+                        if (seenBuckets[s] == b) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (dup) {
+                        continue;
+                    }
+                    seenBuckets[seenCount++] = b;
+
+                    for (std::uint32_t j : buckets_[b]) {
+                        if (j <= i) {
+                            continue;  // 각 무순서 쌍을 i<j 로 정확히 한 번만
+                        }
+                        const Candidate& cj = candidates_[j];
+                        if (ci.ch == cj.ch) {
+                            continue;
+                        }
+                        if (ci.cls != cj.cls) {
+                            continue;
+                        }
+                        if (metric_->calculate(ci.pos, cj.pos) > dedupMergeDistance_) {
+                            continue;  // 해시 충돌로 들어온 먼 후보는 여기서 걸러짐
+                        }
+                        pairs_.emplace_back(i, j);
+                    }
+                }
+            }
+        }
+
+        // (i,j) 사전순 정렬 -> ConcatFuser 의 전체 O(N^2) 루프와 '동일한 순서'로 병합한다.
+        // union-find 결과가 순서에 의존할 수 있으므로 결과 보존을 위해 순서까지 맞춘다.
+        std::sort(pairs_.begin(), pairs_.end());
+        for (const auto& [i, j] : pairs_) {
+            const std::size_t rootI = ufFind(i);
+            const std::size_t rootJ = ufFind(j);
+            if (rootI == rootJ) {
+                continue;
+            }
+            if ((ufMask_[rootI] & ufMask_[rootJ]) != 0) {
+                continue;
+            }
+            ufParent_[rootI] = rootJ;
+            ufMask_[rootJ] |= ufMask_[rootI];
+        }
+    } else {
+        // 작은 프레임 또는 셀로 안전하게 표현할 수 없는 입력은 전체 쌍 비교를 사용한다.
+        // ConcatFuser와 같은 순서로 즉시 union하여 정렬/후보 저장 비용도 만들지 않는다.
+        for (std::uint32_t i = 0; i < n; ++i) {
+            for (std::uint32_t j = i + 1; j < n; ++j) {
+                if (candidates_[i].ch == candidates_[j].ch) {
+                    continue;
+                }
+                if (candidates_[i].cls != candidates_[j].cls) {
+                    continue;
+                }
+                if (metric_->calculate(candidates_[i].pos, candidates_[j].pos) > dedupMergeDistance_) {
+                    continue;
+                }
+                const std::size_t rootI = ufFind(i);
+                const std::size_t rootJ = ufFind(j);
+                if (rootI == rootJ) {
+                    continue;
+                }
+                if ((ufMask_[rootI] & ufMask_[rootJ]) != 0) {
+                    continue;
+                }
+                ufParent_[rootI] = rootJ;
+                ufMask_[rootJ] |= ufMask_[rootI];
+            }
+        }
+    }
+
+    // --- cluster 조립 + gid 추적은 ConcatFuser 규칙을 보존하고, 출력 직전에만 좌표를 안정화 ---
     std::vector<std::vector<std::size_t>> clusters(candidates_.size());
     for (std::uint32_t i = 0; i < n; ++i) {
         clusters[ufFind(i)].push_back(i);
@@ -175,8 +268,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
     fusedObjects.reserve(clusters.size());
     fusedSourceIds.reserve(clusters.size());
     for (const auto& members : clusters) {
-        if (members.empty())
+        if (members.empty()) {
             continue;
+        }
 
         domain::WorldObject wObj;
         wObj.cls = candidates_[members.front()].cls;
@@ -211,19 +305,24 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         // 1순위: (channel, ObjectId) 가 idIndex_ 에 있으면 그 gid 를 그대로 물려받음
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
             for (const auto& sourceId : fusedSourceIds[c]) {
-                if (sourceId.second == 0)
+                if (sourceId.second == 0) {
                     continue;
+                }
                 auto idxIt = idIndex_.find(sourceId);
-                if (idxIt == idIndex_.end())
+                if (idxIt == idIndex_.end()) {
                     continue;
+                }
                 const veda::GlobalId gid = idxIt->second;
-                if (claimedGids.count(gid))
+                if (claimedGids.count(gid)) {
                     continue;
+                }
                 auto trackIt = byGid_.find(gid);
-                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls)
+                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls) {
                     continue;
-                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.pos) > trackMaxDistance_)
+                }
+                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos) > trackMaxDistance_) {
                     continue;
+                }
                 fusedObjects[c].gid = gid;
                 curMatched[c] = true;
                 claimedGids.insert(gid);
@@ -239,14 +338,17 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         };
         std::vector<MatchCandidate> matchCandidates;
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
-            if (curMatched[c])
+            if (curMatched[c]) {
                 continue;
+            }
             for (const auto& [gid, tracked] : byGid_) {
-                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls)
+                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls) {
                     continue;
-                const double dist = metric_->calculate(fusedObjects[c].pos, tracked.pos);
-                if (dist > trackMaxDistance_)
+                }
+                const double dist = metric_->calculate(fusedObjects[c].pos, tracked.rawPos);
+                if (dist > trackMaxDistance_) {
                     continue;
+                }
                 matchCandidates.push_back({dist, c, gid});
             }
         }
@@ -254,8 +356,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                   [](const MatchCandidate& a, const MatchCandidate& b) { return a.dist < b.dist; });
 
         for (const auto& match : matchCandidates) {
-            if (curMatched[match.curIdx] || claimedGids.count(match.gid))
+            if (curMatched[match.curIdx] || claimedGids.count(match.gid)) {
                 continue;
+            }
             fusedObjects[match.curIdx].gid = match.gid;
             curMatched[match.curIdx] = true;
             claimedGids.insert(match.gid);
@@ -264,8 +367,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
 
     worldFrame.objects.reserve(fusedObjects.size());
     for (auto& wObj : fusedObjects) {
-        if (wObj.gid == 0)
+        if (wObj.gid == 0) {
             wObj.gid = nextGlobalId_.fetch_add(1, std::memory_order_relaxed);
+        }
         worldFrame.objects.push_back(std::move(wObj));
     }
     const std::size_t detectedCount = worldFrame.objects.size();
@@ -273,15 +377,26 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
     if (trackMaxDistance_ > 0.0) {
         std::unordered_set<veda::GlobalId> touchedGids;
         for (std::size_t i = 0; i < worldFrame.objects.size(); ++i) {
-            const auto& object = worldFrame.objects[i];
+            auto& object = worldFrame.objects[i];
+            const domain::WorldPoint rawPosition = object.pos;
+
+            if (positionJitterRadius_ > 0.0) {
+                const auto previous = byGid_.find(object.gid);
+                if (previous != byGid_.end() && previous->second.cls == object.cls) {
+                    object.pos = stabilizePosition(previous->second.pos, rawPosition, positionJitterRadius_);
+                }
+            }
+
             TrackedEntity& entity = byGid_[object.gid];
             entity.cls = object.cls;
+            entity.rawPos = rawPosition;
             entity.pos = object.pos;
             entity.missedWindows = 0;
             touchedGids.insert(object.gid);
             for (const auto& sourceId : fusedSourceIds[i]) {
-                if (sourceId.second != 0)
+                if (sourceId.second != 0) {
                     idIndex_[sourceId] = object.gid;
+                }
             }
         }
 
@@ -298,16 +413,18 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         }
 
         for (auto it = idIndex_.begin(); it != idIndex_.end();) {
-            if (byGid_.find(it->second) == byGid_.end())
+            if (byGid_.find(it->second) == byGid_.end()) {
                 it = idIndex_.erase(it);
-            else
+            } else {
                 ++it;
+            }
         }
 
         // 유예 중(이번 윈도우엔 못 봤지만 아직 안 끊긴)인 실체는 마지막 좌표 그대로 채워 넣음(coast)
         for (const auto& [gid, entity] : byGid_) {
-            if (touchedGids.count(gid))
+            if (touchedGids.count(gid)) {
                 continue;
+            }
             domain::WorldObject coasted;
             coasted.gid = gid;
             coasted.cls = entity.cls;

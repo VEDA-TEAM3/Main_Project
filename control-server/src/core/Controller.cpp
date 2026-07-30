@@ -76,10 +76,11 @@ void Controller::onChannelAlive(veda::ChannelId channel, bool alive, const char*
     if (changed) {
         const std::string message =
             std::string(source) + " 채널 " + std::to_string(channel) + (alive ? " 복구됨(alive)" : " 끊김(dead)");
-        if (alive)
+        if (alive) {
             logSuccess(kIface, message);
-        else
+        } else {
             logError(kIface, message);
+        }
 
         status.ts = clock_ ? clock_->now() : 0;
         sink_->sendChannelStatus(status);
@@ -109,10 +110,11 @@ void Controller::onHardwareStatus(veda::ChannelId channel, bool alive, const HwI
 
     const std::string message =
         std::string("STM32 채널 ") + std::to_string(channel) + (alive ? " 상태 갱신(alive)" : " 끊김(dead)");
-    if (alive)
+    if (alive) {
         logSuccess(kIface, message);
-    else
+    } else {
         logError(kIface, message);
+    }
 
     status.ts = clock_ ? clock_->now() : 0;
     sink_->sendChannelStatus(status);

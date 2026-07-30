@@ -33,6 +33,13 @@ struct RiskConfig {
      *          0 이하면 추적을 끄고 매 프레임 새 gid 를 부여 (예전 동작)
      */
     double trackMaxDistance = 2.0;
+
+    /**
+     * @brief   같은 gid의 정지 좌표 잡음을 고정하는 공간 히스테리시스 반경(m)
+     * @details 이전 출력에서 이 반경 안의 변화는 고정하고, 반경을 넘는 실제 이동은 원시 좌표와의
+     *          최대 공간 지연이 이 값 이하가 되도록 따라감. 0 이면 비활성화
+     */
+    double positionJitterRadius = 0.15;
 };
 
 inline void from_json(const nlohmann::json& j, RiskConfig& r) {
@@ -40,6 +47,7 @@ inline void from_json(const nlohmann::json& j, RiskConfig& r) {
     r.dangerousDistance = veda::detail::get_or<double>(j, "dangerousDistance", r.dangerousDistance);
     r.dedupMergeDistance = veda::detail::get_or<double>(j, "dedupMergeDistance", r.dedupMergeDistance);
     r.trackMaxDistance = veda::detail::get_or<double>(j, "trackMaxDistance", r.trackMaxDistance);
+    r.positionJitterRadius = veda::detail::get_or<double>(j, "positionJitterRadius", r.positionJitterRadius);
 }
 
 /**
@@ -286,6 +294,11 @@ struct AppConfig {
             config.logFileName = "veda.csv";
         }
         config.risk = veda::detail::get_or<RiskConfig>(j, "risk", config.risk);
+        if (!std::isfinite(config.risk.positionJitterRadius) || config.risk.positionJitterRadius < 0.0) {
+            std::cerr << "[Config] 경고: positionJitterRadius=" << config.risk.positionJitterRadius
+                      << " 는 0 이상의 유한한 값이어야 합니다 — 0(비활성화)으로 보정합니다.\n";
+            config.risk.positionJitterRadius = 0.0;
+        }
         config.zones = veda::detail::get_or<std::vector<SpatialZone>>(j, "zones", config.zones);
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);

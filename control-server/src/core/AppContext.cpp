@@ -3,7 +3,7 @@
 #include "Logger.h"
 #include "aggregate/TimeWindowAggregatorV2.h"
 #include "dispatch/SerialHwEventDispatcher.h"
-#include "fuse/ConcatFuser.h"
+#include "fuse/GridFuser.h"
 #include "metric/EuclideanMetric.h"
 #include "receive/MqttChannelReceiver.h"
 #include "risk/ThresholdRiskPolicy.h"
@@ -30,7 +30,9 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto aggregator = std::make_shared<TimeWindowAggregatorV2>(clock, config_.windowSizeMs, config_.channelCount);
     auto transform = std::make_shared<AffineLocalToWorldTransform>(config_.cameraCalibrations,
                                                                    /*dropUncalibrated=*/true, config_.worldBounds);
-    auto fuser = std::make_shared<ConcatFuser>(metric, config_.risk.dedupMergeDistance, config_.risk.trackMaxDistance);
+    auto fuser =
+        std::make_shared<GridFuser>(metric, config_.risk.dedupMergeDistance, config_.risk.trackMaxDistance,
+                                    config_.risk.positionJitterRadius);
     auto zoneMapper = std::make_shared<SpatialZoneMapper>(config_.zones);
     auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk, config_.channelCount);
 

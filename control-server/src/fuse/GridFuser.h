@@ -2,16 +2,17 @@
 
 /**
  * @file    GridFuser.h
- * @brief   ConcatFuser 와 결과가 동일한 드롭인 융합기. 단, 채널 간 매칭 broad-phase 를
- *          공간 해시 그리드로 바꿔 O(N^2) -> O(N*k) 로 낮춘 엔터프라이즈-스케일 구현체.
+ * @brief   좌표 안정화를 끄면 ConcatFuser 와 결과가 동일한 드롭인 융합기. 채널 간 매칭
+ *          broad-phase 를 공간 해시 그리드로 바꿔 O(N^2) -> O(N*k) 로 낮춘 구현체.
  *
  * @details
- * [ 왜 ConcatFuser 와 결과가 동일한가 (drop-in) ]
+ * [ positionJitterRadius == 0 일 때 왜 ConcatFuser 와 결과가 동일한가 (drop-in) ]
  * dedup 병합은 오직 dedupMergeDistance 이내의 (다른 채널 + 같은 클래스) 쌍에서만 일어난다.
  * ConcatFuser 는 전체 O(N^2) 쌍을 훑지만, 실제로 병합을 유발하는 것은 '가까운 쌍'뿐이다.
  * GridFuser 는 그 '가까운 쌍'만 그리드로 수집한 뒤, (i<j) 로 정렬해 ConcatFuser 와 완전히
  * 동일한 union-find + 채널중복 제약을 같은 순서로 적용한다 -> 같은 입력에 같은 클러스터/gid.
- * (cluster 조립·gid 추적·coasting 은 ConcatFuser 와 문자 그대로 동일하게 재현한다.)
+ * positionJitterRadius > 0 이면 클러스터와 gid 매칭은 그대로 두고 최종 위치에만 공간
+ * 히스테리시스를 적용하므로 출력 좌표는 의도적으로 ConcatFuser 와 달라진다.
  *
  * [ Principle #3 (할당 최소화) / #6 (캐시 지역성) ]
  * 그리드 버킷(인덱스 벡터)·후보·쌍·union-find 버퍼를 멤버로 들고 매 프레임 '해제 없이 clear()'
@@ -40,8 +41,11 @@ public:
      * @param metric             좌표 간 거리 계산기 (DI) — ConcatFuser 와 동일
      * @param dedupMergeDistance  병합 판정 거리(m). 그리드 셀 한 변의 크기로도 사용
      * @param trackMaxDistance    같은 실체로 이어붙일 때 sanity 상한(m). 0 이하면 추적 끔
+     * @param positionJitterRadius 정지 대상 좌표를 고정할 공간 히스테리시스 반경(m).
+     *                             0 이하면 비활성화
      */
-    GridFuser(std::shared_ptr<IDistanceMetric> metric, double dedupMergeDistance, double trackMaxDistance = 0.0);
+    GridFuser(std::shared_ptr<IDistanceMetric> metric, double dedupMergeDistance, double trackMaxDistance = 0.0,
+              double positionJitterRadius = 0.0);
     ~GridFuser() override = default;
 
     domain::WorldFrame fuse(const std::vector<domain::ObservationFrame>& frames) override;
@@ -55,10 +59,11 @@ private:
         domain::WorldPoint pos;
     };
 
-    /// @brief gid 하나의 최근 추적 상태 (byGid_ 의 값) — ConcatFuser 와 동일
+    /// @brief gid 하나의 최근 추적 상태. 원시 매칭 좌표와 안정화 출력 좌표를 분리해 저장
     struct TrackedEntity {
         veda::ObjectClass cls = veda::ObjectClass::Unknown;
-        domain::WorldPoint pos;
+        domain::WorldPoint rawPos;  ///< 마지막 원시 융합 좌표. gid 거리 매칭은 이 좌표로 수행
+        domain::WorldPoint pos;     ///< UI/zone/risk에 전달한 안정화 좌표
         int missedWindows = 0;
     };
 
@@ -83,6 +88,7 @@ private:
     double dedupMergeDistance_;
     double cellSize_;  ///< 그리드 셀 한 변 = max(dedupMergeDistance_, eps)
     double trackMaxDistance_;
+    double positionJitterRadius_;
     std::atomic<veda::GlobalId> nextGlobalId_;
 
     /// @brief (channel, ObjectId) -> gid. 같은 채널의 같은 ObjectId 는 항상 같은 gid (ConcatFuser 와 동일)
