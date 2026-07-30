@@ -182,8 +182,8 @@ QFrame#mapSettingsOptionsFrame {
     border-top: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 QTabWidget#settingsTabs::pane {
@@ -235,7 +235,9 @@ QTabWidget#settingsTabs QTabBar::tab:selected {
 }
 
 QWidget#settingsTabPage {
-    background-color: transparent;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #0f293f, stop:0.68 #0a1d31, stop:1 #081626);
+    border: 0;
 }
 
 QWidget#videoPreprocessingControls {
