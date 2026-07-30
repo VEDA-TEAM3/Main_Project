@@ -45,8 +45,9 @@ VEDA_NOINLINE void processByReference(const Frames& frames) {
 Frames makeFrames(std::size_t frameCount) {
     Frames frames;
     frames.resize(frameCount);
-    for (std::size_t index = 0; index < frameCount; ++index)
+    for (std::size_t index = 0; index < frameCount; ++index) {
         frames[index].channel = static_cast<int>(index);
+    }
     return frames;
 }
 
@@ -63,12 +64,14 @@ double measureMedianNsPerCall(bool optimized, std::size_t frameCount, int repeti
     }
 
     for (int trial = 0; trial < kTrials; ++trial) {
-        for (int warmup = 0; warmup < 1'000; ++warmup)
+        for (int warmup = 0; warmup < 1'000; ++warmup) {
             callback(makeFrames(frameCount));
+        }
 
         const auto begin = Clock::now();
-        for (int repetition = 0; repetition < repetitions; ++repetition)
+        for (int repetition = 0; repetition < repetitions; ++repetition) {
             callback(makeFrames(frameCount));
+        }
         const auto end = Clock::now();
 
         const double elapsedNs =
@@ -102,6 +105,7 @@ int main() {
         std::cout << benchmark.frames << ',' << current << ',' << reference << '\n';
     }
 
-    if (checksum == 0)
+    if (checksum == 0) {
         std::cerr << "";
+    }
 }

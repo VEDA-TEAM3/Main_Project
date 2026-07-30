@@ -25,12 +25,15 @@ bool sameDouble(double lhs, double rhs) {
 }
 
 std::string compareFrames(const domain::WorldFrame& expected, const domain::WorldFrame& actual) {
-    if (expected.timestamp != actual.timestamp)
+    if (expected.timestamp != actual.timestamp) {
         return "timestamp mismatch";
-    if (expected.level != actual.level)
+    }
+    if (expected.level != actual.level) {
         return "frame risk level mismatch";
-    if (expected.objects.size() != actual.objects.size())
+    }
+    if (expected.objects.size() != actual.objects.size()) {
         return "object count mismatch";
+    }
 
     for (std::size_t index = 0; index < expected.objects.size(); ++index) {
         const auto& lhs = expected.objects[index];
@@ -43,8 +46,9 @@ std::string compareFrames(const domain::WorldFrame& expected, const domain::Worl
             return "object[" + std::to_string(index) + "] mismatch";
         }
         for (std::uint8_t channel = 0; channel < lhs.sourceChannels.count; ++channel) {
-            if (lhs.sourceChannels.ids[channel] != rhs.sourceChannels.ids[channel])
+            if (lhs.sourceChannels.ids[channel] != rhs.sourceChannels.ids[channel]) {
                 return "object[" + std::to_string(index) + "] source channel order mismatch";
+            }
         }
     }
     return {};
@@ -119,16 +123,19 @@ double measureMedianNsPerFrame(const std::vector<domain::ObservationFrame>& fram
         Fuser fuser(metric, 0.75, 0.0);
         std::size_t checksum = 0;
 
-        for (int warmup = 0; warmup < 20; ++warmup)
+        for (int warmup = 0; warmup < 20; ++warmup) {
             checksum += fuser.fuse(frames).objects.size();
+        }
 
         const auto begin = Clock::now();
-        for (int repetition = 0; repetition < repetitions; ++repetition)
+        for (int repetition = 0; repetition < repetitions; ++repetition) {
             checksum += fuser.fuse(frames).objects.size();
+        }
         const auto end = Clock::now();
 
-        if (checksum == 0)
+        if (checksum == 0) {
             std::abort();
+        }
         const double elapsedNs =
             static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
         samples.push_back(elapsedNs / static_cast<double>(repetitions));

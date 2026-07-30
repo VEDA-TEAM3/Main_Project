@@ -56,22 +56,26 @@ double measureMedianNsPerCall(int channelCount, int objectsPerFrame, bool bounds
     for (int trial = 0; trial < kTrials; ++trial) {
         AffineLocalToWorldTransform transform(calibrations, true, bounds);
         std::vector<domain::ObservationFrame> output;
-        for (int warmup = 0; warmup < 50; ++warmup)
+        for (int warmup = 0; warmup < 50; ++warmup) {
             transform.transform(frames, output);
+        }
 
         const auto begin = Clock::now();
-        for (int repetition = 0; repetition < repetitions; ++repetition)
+        for (int repetition = 0; repetition < repetitions; ++repetition) {
             transform.transform(frames, output);
+        }
         const auto end = Clock::now();
 
         std::uint64_t checksum = output.size();
         for (const auto& frame : output) {
             checksum += frame.objects.size();
-            for (const auto& object : frame.objects)
+            for (const auto& object : frame.objects) {
                 checksum ^= static_cast<std::uint64_t>(object.id);
+            }
         }
-        if (checksum == 0 && !output.empty())
+        if (checksum == 0 && !output.empty()) {
             std::abort();
+        }
 
         const double elapsedNs =
             static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());

@@ -44,8 +44,9 @@ StabilityStats measureStationaryStability(double radius) {
     for (int frameIndex = 0; frameIndex < kFrames; ++frameIndex) {
         const auto result =
             fuser.fuse(makeSingleObjectFrame(frameIndex * 100, kTrueX + jitter(random), kTrueY + jitter(random)));
-        if (result.objects.size() != 1)
+        if (result.objects.size() != 1) {
             std::abort();
+        }
 
         const auto& position = result.objects.front().pos;
         const double error = std::hypot(position.x - kTrueX, position.y - kTrueY);
@@ -93,13 +94,15 @@ double measureNsPerFrame(GridFuser& fuser, const std::vector<domain::Observation
     for (int repetition = 0; repetition < repetitions; ++repetition) {
         const auto result = fuser.fuse((repetition & 1) == 0 ? frameA : frameB);
         checksum += static_cast<std::uint64_t>(result.objects.size());
-        if (!result.objects.empty())
+        if (!result.objects.empty()) {
             checksum ^= static_cast<std::uint64_t>(std::llround(result.objects.front().pos.x * 1'000'000.0));
+        }
     }
     const auto end = Clock::now();
 
-    if (checksum == 0)
+    if (checksum == 0) {
         std::abort();
+    }
 
     const double elapsedNs =
         static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());

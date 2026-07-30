@@ -153,9 +153,10 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         touchedBuckets_.clear();
         pairs_.clear();
 
-        if (buckets_.empty())
+        if (buckets_.empty()) {
             buckets_.resize(kBucketCount);  // 큰 프레임이 실제로 들어올 때 한 번만 할당
-
+        }
+        
         // 2) 후보를 셀 버킷에 삽입
         for (std::uint32_t i = 0; i < n; ++i) {
             const std::int32_t cx = cellCoord(candidates_[i].pos.x, cellSize_);

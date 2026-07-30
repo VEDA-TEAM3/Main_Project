@@ -93,6 +93,9 @@ std::vector<domain::ObservationFrame> referenceTransform(
                 calibration->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
             const double worldY =
                 calibration->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
+            if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
+                continue;
+            }
             if (bounds.enabled &&
                 (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY ||
                  worldY > bounds.maxY)) {
@@ -153,11 +156,13 @@ long g_transformAllocCount = 0;
 bool g_transformAllocCounting = false;
 
 void* operator new(std::size_t size) {
-    if (g_transformAllocCounting)
+    if (g_transformAllocCounting) {
         ++g_transformAllocCount;
+    }
     void* memory = std::malloc(size != 0 ? size : 1);
-    if (memory == nullptr)
+    if (memory == nullptr) {
         throw std::bad_alloc();
+    }
     return memory;
 }
 
@@ -223,8 +228,9 @@ TEST(TransformEquivalenceTest, ReusesOutputWithoutLeavingObjectsFromPreviousCall
     const auto calibrations = makeCalibrations(4);
     AffineLocalToWorldTransform transform(calibrations, true, {});
     std::vector<domain::ObservationFrame> output(12);
-    for (auto& frame : output)
+    for (auto& frame : output) {
         frame.objects.resize(32);
+    }
 
     for (int objectCount : {64, 1, 0, 17, 2}) {
         std::vector<veda::TopViewFrame> input(4);
@@ -280,7 +286,7 @@ TEST(TransformEquivalenceTest, MatchesReferenceAcrossDeterministicRandomFrames) 
     }
 }
 
-TEST(TransformEquivalenceTest, PreservesNonFiniteInputBehavior) {
+TEST(TransformEquivalenceTest, RejectsNonFiniteWorldCoordinatesWithAndWithoutBounds) {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double infinity = std::numeric_limits<double>::infinity();
     auto calibrations = makeCalibrations(2);
@@ -288,16 +294,30 @@ TEST(TransformEquivalenceTest, PreservesNonFiniteInputBehavior) {
     const WorldBounds bounds{true, -10.0, 10.0, -10.0, 10.0};
     const std::vector<veda::TopViewFrame> input = {
         {1, 100, 0, {{1, veda::ObjectClass::Human, {nan, 1.0}, false},
-                     {2, veda::ObjectClass::Vehicle, {infinity, -infinity}, false}}},
+                     {2, veda::ObjectClass::Vehicle, {infinity, -infinity}, false},
+                     {4, veda::ObjectClass::Human, {1.0, 2.0}, false}}},
         {1, 101, 2, {{3, veda::ObjectClass::Human, {1.0, 2.0}, false}}},
     };
 
-    AffineLocalToWorldTransform transform(calibrations, true, bounds);
+    AffineLocalToWorldTransform boundedTransform(calibrations, true, bounds);
     std::vector<domain::ObservationFrame> output;
-    transform.transform(input, output);
-    const auto expected = transform_test::referenceTransform(calibrations, true, bounds, input);
-    EXPECT_TRUE(transform_test::compareFrames(expected, output).empty())
-        << transform_test::compareFrames(expected, output);
+    boundedTransform.transform(input, output);
+    const auto boundedExpected = transform_test::referenceTransform(calibrations, true, bounds, input);
+    EXPECT_TRUE(transform_test::compareFrames(boundedExpected, output).empty())
+        << transform_test::compareFrames(boundedExpected, output);
+    ASSERT_EQ(output.size(), 2U);
+    EXPECT_TRUE(output[0].objects.empty());
+    EXPECT_TRUE(output[1].objects.empty());
+
+    AffineLocalToWorldTransform unboundedTransform(calibrations, true, {});
+    unboundedTransform.transform(input, output);
+    const auto unboundedExpected = transform_test::referenceTransform(calibrations, true, {}, input);
+    EXPECT_TRUE(transform_test::compareFrames(unboundedExpected, output).empty())
+        << transform_test::compareFrames(unboundedExpected, output);
+    ASSERT_EQ(output.size(), 2U);
+    ASSERT_EQ(output[0].objects.size(), 1U);
+    EXPECT_EQ(output[0].objects[0].id, 4U);
+    EXPECT_TRUE(output[1].objects.empty());
 }
 
 TEST(TransformEquivalenceTest, WarmPathReusesFrameAndObjectBuffersWithoutAllocation) {
@@ -319,9 +339,9 @@ TEST(TransformEquivalenceTest, WarmPathReusesFrameAndObjectBuffersWithoutAllocat
     transform.transform(input, output);
     std::vector<std::size_t> capacities;
     capacities.reserve(output.size());
-    for (const auto& frame : output)
+    for (const auto& frame : output) {
         capacities.push_back(frame.objects.capacity());
-
+    }
     g_transformAllocCount = 0;
     g_transformAllocCounting = true;
     transform.transform(input, output);
@@ -329,8 +349,9 @@ TEST(TransformEquivalenceTest, WarmPathReusesFrameAndObjectBuffersWithoutAllocat
 
     EXPECT_EQ(g_transformAllocCount, 0) << "동일 크기 warm path는 기존 출력 버퍼를 재사용해야 함";
     ASSERT_EQ(output.size(), capacities.size());
-    for (std::size_t index = 0; index < output.size(); ++index)
+    for (std::size_t index = 0; index < output.size(); ++index) {
         EXPECT_EQ(output[index].objects.capacity(), capacities[index]);
+    }
 }
 
 }  // namespace

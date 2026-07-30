@@ -57,6 +57,16 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
     // 각 ObservationFrame을 파괴해 내부 capacity를 매 호출 잃어버린다.
     out.resize(in.size());
 
+    const auto recordInvalidWorldCoordinate = [this](veda::ChannelId channel, double worldX, double worldY) {
+        ++outOfBoundsCount_;
+        if (outOfBoundsCount_ == 1 || outOfBoundsCount_ % 100 == 0) {
+            logError(kIface,
+                     "채널 " + std::to_string(channel) + " 월드 좌표(" + std::to_string(worldX) + ", " +
+                         std::to_string(worldY) + ")가 비유한 값임 - 폐기 (누적 " +
+                         std::to_string(outOfBoundsCount_) + "건)");
+        }
+    };
+
     for (std::size_t frameIndex = 0; frameIndex < in.size(); ++frameIndex) {
         const auto& frame = in[frameIndex];
         const CompiledCalibration* cal = nullptr;
@@ -104,16 +114,25 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
 
         if (!bounds_.enabled) {
             observed.objects.resize(frame.objects.size());
+            std::size_t outputIndex = 0;
             for (std::size_t objectIndex = 0; objectIndex < frame.objects.size(); ++objectIndex) {
                 const auto& object = frame.objects[objectIndex];
-                auto& transformed = observed.objects[objectIndex];
+                const double worldX =
+                    cal->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
+                const double worldY =
+                    cal->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
+                if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
+                    recordInvalidWorldCoordinate(frame.ch, worldX, worldY);
+                    continue;
+                }
+
+                auto& transformed = observed.objects[outputIndex++];
                 transformed.id = object.id;
                 transformed.cls = object.cls;
-                transformed.pos.x =
-                    cal->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
-                transformed.pos.y =
-                    cal->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
+                transformed.pos.x = worldX;
+                transformed.pos.y = worldY;
             }
+            observed.objects.resize(outputIndex);
             continue;
         }
 
@@ -121,6 +140,11 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
         for (const auto& obj : frame.objects) {
             const double worldX = cal->cameraPosX + obj.pos.x * perpendicularX + obj.pos.y * forwardX;
             const double worldY = cal->cameraPosY + obj.pos.x * perpendicularY + obj.pos.y * forwardY;
+
+            if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
+                recordInvalidWorldCoordinate(frame.ch, worldX, worldY);
+                continue;
+            }
 
             if (bounds_.enabled && (worldX < bounds_.minX || worldX > bounds_.maxX || worldY < bounds_.minY ||
                                     worldY > bounds_.maxY)) {

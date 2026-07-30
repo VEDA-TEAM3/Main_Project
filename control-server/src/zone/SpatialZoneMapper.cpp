@@ -8,12 +8,6 @@
 
 #include "Logger.h"
 
-#if defined(__GNUC__) || defined(__clang__)
-#define VEDA_ALWAYS_INLINE inline __attribute__((always_inline))
-#else
-#define VEDA_ALWAYS_INLINE inline
-#endif
-
 namespace {
 constexpr const char* kIface = "ZoneMapper";
 constexpr std::size_t kMinIndexedZoneCount = 64;
@@ -28,8 +22,9 @@ bool contains(const SpatialZone& zone, const domain::WorldPoint& position) {
 std::size_t axisBucket(const std::vector<double>& edges, double value) {
     const auto it = std::lower_bound(edges.begin(), edges.end(), value);
     const std::size_t edgeIndex = static_cast<std::size_t>(it - edges.begin());
-    if (it != edges.end() && *it == value)
+    if (it != edges.end() && *it == value) {
         return edgeIndex * 2 + 1;  // 경계값 자체
+    }
     return edgeIndex * 2;          // 경계 전/사이/후의 열린 구간
 }
 }  // namespace
@@ -99,7 +94,7 @@ void SpatialZoneMapper::assign(domain::WorldFrame& frame) {
     assignIndexed(frame);
 }
 
-VEDA_ALWAYS_INLINE void SpatialZoneMapper::assignLinear(domain::WorldFrame& frame) const {
+void SpatialZoneMapper::assignLinear(domain::WorldFrame& frame) const {
     if (zones_.size() == 4) {
         const auto& zone0 = zones_[0];
         const auto& zone1 = zones_[1];
@@ -107,14 +102,15 @@ VEDA_ALWAYS_INLINE void SpatialZoneMapper::assignLinear(domain::WorldFrame& fram
         const auto& zone3 = zones_[3];
         for (auto& obj : frame.objects) {
             obj.zoneId = -1;
-            if (contains(zone0, obj.pos))
+            if (contains(zone0, obj.pos)) {
                 obj.zoneId = zone0.zoneId;
-            else if (contains(zone1, obj.pos))
+            } else if (contains(zone1, obj.pos)) {
                 obj.zoneId = zone1.zoneId;
-            else if (contains(zone2, obj.pos))
+            } else if (contains(zone2, obj.pos)) {
                 obj.zoneId = zone2.zoneId;
-            else if (contains(zone3, obj.pos))
+            } else if (contains(zone3, obj.pos)) {
                 obj.zoneId = zone3.zoneId;
+            }
 
             if (obj.zoneId == -1) {
                 logError(kIface, "gid=" + std::to_string(obj.gid) + " pos=(" + std::to_string(obj.pos.x) + ", " +
@@ -141,8 +137,6 @@ VEDA_ALWAYS_INLINE void SpatialZoneMapper::assignLinear(domain::WorldFrame& fram
     }
 }
 
-#undef VEDA_ALWAYS_INLINE
-
 void SpatialZoneMapper::assignIndexed(domain::WorldFrame& frame) const {
     for (auto& obj : frame.objects) {
         obj.zoneId = -1;
@@ -151,8 +145,9 @@ void SpatialZoneMapper::assignIndexed(domain::WorldFrame& frame) const {
             const std::size_t x = axisBucket(xEdges_, obj.pos.x);
             const std::size_t y = axisBucket(yEdges_, obj.pos.y);
             const std::uint32_t zoneIndex = winnerZoneIndices_[y * xBucketCount_ + x];
-            if (zoneIndex != kNoZoneIndex)
+            if (zoneIndex != kNoZoneIndex) {
                 obj.zoneId = zones_[zoneIndex].zoneId;
+            }
         } else {
             for (const auto& zone : zones_) {
                 if (contains(zone, obj.pos)) {

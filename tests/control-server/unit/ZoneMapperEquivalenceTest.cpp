@@ -55,11 +55,13 @@ long g_zoneAllocCount = 0;
 bool g_zoneAllocCounting = false;
 
 void* operator new(std::size_t size) {
-    if (g_zoneAllocCounting)
+    if (g_zoneAllocCounting) {
         ++g_zoneAllocCount;
+    }
     void* memory = std::malloc(size != 0 ? size : 1);
-    if (memory == nullptr)
+    if (memory == nullptr) {
         throw std::bad_alloc();
+    }
     return memory;
 }
 

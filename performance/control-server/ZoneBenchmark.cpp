@@ -16,8 +16,9 @@ using Clock = std::chrono::steady_clock;
 
 std::vector<SpatialZone> makeZones(int zoneCount) {
     int columns = 1;
-    while (columns * columns < zoneCount)
+    while (columns * columns < zoneCount) {
         ++columns;
+    }
 
     std::vector<SpatialZone> zones;
     zones.reserve(static_cast<std::size_t>(zoneCount));
@@ -52,19 +53,23 @@ double measureMedianNsPerCall(int zoneCount, int objectCount, int repetitions) {
     for (int trial = 0; trial < kTrials; ++trial) {
         SpatialZoneMapper mapper(zones);
         domain::WorldFrame frame = makeFrame(zones, objectCount);
-        for (int warmup = 0; warmup < 50; ++warmup)
+        for (int warmup = 0; warmup < 50; ++warmup) {
             mapper.assign(frame);
+        }
 
         const auto begin = Clock::now();
-        for (int repetition = 0; repetition < repetitions; ++repetition)
+        for (int repetition = 0; repetition < repetitions; ++repetition) {
             mapper.assign(frame);
+        }
         const auto end = Clock::now();
 
         std::int64_t checksum = 0;
-        for (const auto& object : frame.objects)
+        for (const auto& object : frame.objects) {
             checksum += object.zoneId;
-        if (checksum < 0)
+        }
+        if (checksum < 0) {
             std::abort();
+        }
 
         const double elapsedNs =
             static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
