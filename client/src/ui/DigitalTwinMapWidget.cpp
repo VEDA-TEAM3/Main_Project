@@ -35,7 +35,7 @@ constexpr double movingIconRotationOffsetDegrees = 90.0;
 constexpr int liveFrameExpiryMsec = 5000;
 constexpr int liveFrameExpiryPollMsec = 1000;
 constexpr int liveFrameRenderIntervalMsec = 33;
-constexpr int liveSnapshotPublishIntervalMsec = 100;
+constexpr int liveSnapshotPublishIntervalMsec = 50;
 constexpr int digitalTwinChannelCount = 4;
 
 QString centralEventKey(const CentralEventData& event) {

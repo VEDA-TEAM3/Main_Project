@@ -23,11 +23,15 @@ private:
     RiskFrameData interpolatedFrame(qint64 sourceTimestamp) const;
     void updateAutomaticWorldBounds(const RiskFrameData& frame);
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
+    QPointF stabilizedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
+    void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions);
 
     QVector<RiskFrameData> history_;
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, qint64> lastSeenSourceTimes_;
     QHash<QString, QPointF> previousPositions_;
+    QHash<QString, QPointF> stabilizedPositions_;
+    QHash<QString, qint64> stabilizedPositionTimesMsec_;
     QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
     QHash<QString, qint64> nextPairPulseTimesMsec_;
     QVector<DigitalTwinRiskEvent> pendingRiskEvents_;

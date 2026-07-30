@@ -14,7 +14,14 @@ constexpr qint64 sourceTimestampRollbackResetMsec = 1000;
 constexpr qint64 objectRetentionMsec = 350;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
+constexpr qint64 positionFilterResetGapMsec = 500;
+constexpr qint64 minimumPositionFilterStepMsec = 16;
+constexpr qint64 maximumPositionFilterStepMsec = 100;
 constexpr qsizetype maximumHistorySize = 16;
+constexpr double maximumNormalizedSpeedPerSecond = 0.9;
+constexpr double smallMovementThreshold = 0.015;
+constexpr double smallMovementBlend = 0.55;
+constexpr double regularMovementBlend = 0.82;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -70,6 +77,8 @@ void RiskObjectTracker::reset() {
     retainedObjects_.clear();
     lastSeenSourceTimes_.clear();
     previousPositions_.clear();
+    stabilizedPositions_.clear();
+    stabilizedPositionTimesMsec_.clear();
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
@@ -177,7 +186,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     QSet<qint64> includedObjectIds;
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
-    const auto appendObject = [this, &snapshot, &currentPositions, &pairKeys,
+    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys,
                                &includedObjectIds](const RiskObjectData& sourceObject) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
@@ -188,7 +197,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
                                                                           : DigitalTwinObjectType::Vehicle;
-        object.position = normalizedWorldPosition(sourceObject.worldPosition);
+        const QPointF measuredPosition = normalizedWorldPosition(sourceObject.worldPosition);
+        object.position = stabilizedPosition(object.objectId, measuredPosition, localTimeMsec);
         object.channelIndex = channelIndexForPosition(object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
@@ -269,6 +279,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         }
     }
     previousPairRiskLevels_ = std::move(currentPairRiskLevels);
+    removeInactivePositionStates(currentPositions);
     previousPositions_ = std::move(currentPositions);
     return snapshot;
 }
@@ -390,4 +401,58 @@ QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition)
     const double sourceY = qBound(0.0, (worldPosition.y() - bounds.top()) / bounds.height(), 1.0);
     const double normalizedY = invertWorldY_ ? 1.0 - sourceY : sourceY;
     return QPointF(normalizedX, normalizedY);
+}
+
+/**
+ * @brief                   입력 좌표의 순간적인 튐을 제한하고 작은 위치 흔들림을 완화합니다.
+ * @param objectId          추적 객체 식별자
+ * @param measuredPosition  현재 프레임에서 계산한 정규화 좌표
+ * @param localTimeMsec     현재 로컬 시각
+ * @return                  화면에 사용할 안정화된 정규화 좌표
+ */
+QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPointF& measuredPosition,
+                                              qint64 localTimeMsec) {
+    const auto positionIterator = stabilizedPositions_.constFind(objectId);
+    const qint64 previousTimeMsec = stabilizedPositionTimesMsec_.value(objectId, 0);
+    if (positionIterator == stabilizedPositions_.cend() || previousTimeMsec <= 0 || localTimeMsec <= previousTimeMsec ||
+        localTimeMsec - previousTimeMsec > positionFilterResetGapMsec) {
+        stabilizedPositions_.insert(objectId, measuredPosition);
+        stabilizedPositionTimesMsec_.insert(objectId, localTimeMsec);
+        return measuredPosition;
+    }
+
+    const QPointF previousPosition = *positionIterator;
+    QPointF displacement = measuredPosition - previousPosition;
+    const double distance = std::hypot(displacement.x(), displacement.y());
+    const qint64 elapsedMsec =
+        qBound(minimumPositionFilterStepMsec, localTimeMsec - previousTimeMsec, maximumPositionFilterStepMsec);
+    const double maximumDistance = maximumNormalizedSpeedPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
+
+    double blend = distance <= smallMovementThreshold ? smallMovementBlend : regularMovementBlend;
+    if (distance > maximumDistance && distance > 0.0) {
+        displacement *= maximumDistance / distance;
+        blend = 1.0;
+    }
+
+    const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x() * blend, 1.0),
+                             qBound(0.0, previousPosition.y() + displacement.y() * blend, 1.0));
+    stabilizedPositions_.insert(objectId, stabilized);
+    stabilizedPositionTimesMsec_.insert(objectId, localTimeMsec);
+    return stabilized;
+}
+
+/**
+ * @brief                   현재 스냅샷에서 사라진 객체의 위치 보정 상태를 정리합니다.
+ * @param currentPositions  현재 화면에 표시 중인 객체 위치
+ */
+void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions) {
+    for (auto iterator = stabilizedPositions_.begin(); iterator != stabilizedPositions_.end();) {
+        if (currentPositions.contains(iterator.key())) {
+            ++iterator;
+            continue;
+        }
+
+        stabilizedPositionTimesMsec_.remove(iterator.key());
+        iterator = stabilizedPositions_.erase(iterator);
+    }
 }
