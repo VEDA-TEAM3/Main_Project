@@ -20,17 +20,19 @@ AffineLocalToWorldTransform::AffineLocalToWorldTransform(std::vector<CameraCalib
     std::size_t maxChannel = 0;
     bool any = false;
     for (const auto& c : calibrations) {
-        if (c.channelId < 0)
+        if (c.channelId < 0) {
             continue;
+        }
         maxChannel = std::max(maxChannel, static_cast<std::size_t>(c.channelId));
         any = true;
     }
-    if (any)
+    if (any) {
         byChannel_.resize(maxChannel + 1);
-
+    }
     for (const auto& c : calibrations) {
-        if (c.channelId < 0)
+        if (c.channelId < 0) {
             continue;
+        }
         auto& slot = byChannel_[static_cast<std::size_t>(c.channelId)];
         if (!slot.has_value()) {  // 중복 항목은 첫 번째를 사용 (기존 선형 탐색의 first-match 동작 보존)
             CompiledCalibration compiled;
@@ -72,8 +74,9 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
         const CompiledCalibration* cal = nullptr;
         if (frame.ch >= 0 && static_cast<std::size_t>(frame.ch) < byChannel_.size()) {
             const auto& slot = byChannel_[static_cast<std::size_t>(frame.ch)];
-            if (slot.has_value())
+            if (slot.has_value()) {
                 cal = &slot.value();
+            }
         }
 
         auto& observed = out[frameIndex];
@@ -93,9 +96,10 @@ void AffineLocalToWorldTransform::transform(const std::vector<veda::TopViewFrame
             }
             if (!dropUncalibrated_) {
                 observed.objects.reserve(frame.objects.size());
-                for (const auto& obj : frame.objects)
+                for (const auto& obj : frame.objects) {
                     observed.objects.push_back(
                         domain::WorldObservation{obj.id, obj.cls, domain::WorldPoint{obj.pos.x, obj.pos.y}});
+                }
             }
             continue;
         }

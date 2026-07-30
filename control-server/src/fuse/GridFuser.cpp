@@ -34,8 +34,9 @@ std::uint32_t cellHash(std::int32_t cx, std::int32_t cy, std::uint32_t mask) {
 
 /// @brief floor(value / cellSize)를 int32_t로 안전하게 표현할 수 있는지 확인한다.
 bool canRepresentCell(double value, double cellSize) {
-    if (!std::isfinite(value))
+    if (!std::isfinite(value)) {
         return false;
+    }
     const double coordinate = std::floor(value / cellSize);
     return std::isfinite(coordinate) &&
            coordinate >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
@@ -44,8 +45,9 @@ bool canRepresentCell(double value, double cellSize) {
 
 /// @brief 채널 비트. 64채널을 넘으면 마스크로 표현 못하므로 0을 돌려 병합을 막음 (ConcatFuser 와 동일)
 std::uint64_t channelBit(veda::ChannelId ch) {
-    if (ch < 0 || ch >= 64)
+    if (ch < 0 || ch >= 64) {
         return 0;
+    }
     return std::uint64_t{1} << ch;
 }
 
@@ -162,8 +164,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             const std::int32_t cx = cellCoord(candidates_[i].pos.x, cellSize_);
             const std::int32_t cy = cellCoord(candidates_[i].pos.y, cellSize_);
             const std::uint32_t b = cellHash(cx, cy, kBucketCount - 1);
-            if (buckets_[b].empty())
+            if (buckets_[b].empty()) {
                 touchedBuckets_.push_back(b);
+            }
             buckets_[b].push_back(i);
         }
 
@@ -186,8 +189,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                             break;
                         }
                     }
-                    if (dup)
+                    if (dup) {
                         continue;
+                    }
                     seenBuckets[seenCount++] = b;
 
                     for (std::uint32_t j : buckets_[b]) {
@@ -264,8 +268,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
     fusedObjects.reserve(clusters.size());
     fusedSourceIds.reserve(clusters.size());
     for (const auto& members : clusters) {
-        if (members.empty())
+        if (members.empty()) {
             continue;
+        }
 
         domain::WorldObject wObj;
         wObj.cls = candidates_[members.front()].cls;
@@ -300,19 +305,24 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         // 1순위: (channel, ObjectId) 가 idIndex_ 에 있으면 그 gid 를 그대로 물려받음
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
             for (const auto& sourceId : fusedSourceIds[c]) {
-                if (sourceId.second == 0)
+                if (sourceId.second == 0) {
                     continue;
+                }
                 auto idxIt = idIndex_.find(sourceId);
-                if (idxIt == idIndex_.end())
+                if (idxIt == idIndex_.end()) {
                     continue;
+                }
                 const veda::GlobalId gid = idxIt->second;
-                if (claimedGids.count(gid))
+                if (claimedGids.count(gid)) {
                     continue;
+                }
                 auto trackIt = byGid_.find(gid);
-                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls)
+                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls) {
                     continue;
-                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos) > trackMaxDistance_)
+                }
+                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos) > trackMaxDistance_) {
                     continue;
+                }
                 fusedObjects[c].gid = gid;
                 curMatched[c] = true;
                 claimedGids.insert(gid);
@@ -328,14 +338,17 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         };
         std::vector<MatchCandidate> matchCandidates;
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
-            if (curMatched[c])
+            if (curMatched[c]) {
                 continue;
+            }
             for (const auto& [gid, tracked] : byGid_) {
-                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls)
+                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls) {
                     continue;
+                }
                 const double dist = metric_->calculate(fusedObjects[c].pos, tracked.rawPos);
-                if (dist > trackMaxDistance_)
+                if (dist > trackMaxDistance_) {
                     continue;
+                }
                 matchCandidates.push_back({dist, c, gid});
             }
         }
@@ -343,8 +356,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                   [](const MatchCandidate& a, const MatchCandidate& b) { return a.dist < b.dist; });
 
         for (const auto& match : matchCandidates) {
-            if (curMatched[match.curIdx] || claimedGids.count(match.gid))
+            if (curMatched[match.curIdx] || claimedGids.count(match.gid)) {
                 continue;
+            }
             fusedObjects[match.curIdx].gid = match.gid;
             curMatched[match.curIdx] = true;
             claimedGids.insert(match.gid);
@@ -353,8 +367,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
 
     worldFrame.objects.reserve(fusedObjects.size());
     for (auto& wObj : fusedObjects) {
-        if (wObj.gid == 0)
+        if (wObj.gid == 0) {
             wObj.gid = nextGlobalId_.fetch_add(1, std::memory_order_relaxed);
+        }
         worldFrame.objects.push_back(std::move(wObj));
     }
     const std::size_t detectedCount = worldFrame.objects.size();
@@ -379,8 +394,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             entity.missedWindows = 0;
             touchedGids.insert(object.gid);
             for (const auto& sourceId : fusedSourceIds[i]) {
-                if (sourceId.second != 0)
+                if (sourceId.second != 0) {
                     idIndex_[sourceId] = object.gid;
+                }
             }
         }
 
@@ -397,16 +413,18 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         }
 
         for (auto it = idIndex_.begin(); it != idIndex_.end();) {
-            if (byGid_.find(it->second) == byGid_.end())
+            if (byGid_.find(it->second) == byGid_.end()) {
                 it = idIndex_.erase(it);
-            else
+            } else {
                 ++it;
+            }
         }
 
         // 유예 중(이번 윈도우엔 못 봤지만 아직 안 끊긴)인 실체는 마지막 좌표 그대로 채워 넣음(coast)
         for (const auto& [gid, entity] : byGid_) {
-            if (touchedGids.count(gid))
+            if (touchedGids.count(gid)) {
                 continue;
+            }
             domain::WorldObject coasted;
             coasted.gid = gid;
             coasted.cls = entity.cls;

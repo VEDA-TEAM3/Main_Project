@@ -75,7 +75,7 @@ std::string compareFrames(const domain::WorldFrame& expected, const domain::Worl
         if (!sameDouble(lhs.nearestDist, rhs.nearestDist)) {
             return prefix + "nearest distance mismatch";
         }
-        if (lhs.zoneId != rhs.zoneId) {
+        if (lhs.zoneId != rhs.zoneId) { 
             return prefix + "zone mismatch";
         }
         if (lhs.sourceChannels.count != rhs.sourceChannels.count ||
@@ -184,8 +184,9 @@ TEST(FuserEquivalenceTest, PreservesEdgeCaseSemantics) {
             frames[0].objects[0].pos.x += 0.1;
             frames[1].objects[0].id = 99;
         }
-        if (window >= 2)
+        if (window >= 2) {
             frames = {{120 + window, 0, {}}};
+        }
         expectEquivalent(baseline, optimized, frames);
     }
 }

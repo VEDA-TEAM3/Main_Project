@@ -168,8 +168,9 @@ bool verifyEquivalence() {
 }  // namespace
 
 int main() {
-    if (!verifyEquivalence())
+    if (!verifyEquivalence()) {
         return 1;
+    }
 
     struct Case {
         std::size_t totalObjects;
