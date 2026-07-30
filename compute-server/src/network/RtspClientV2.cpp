@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <random>
@@ -210,7 +211,7 @@ bool RtspClientV2::recvHeaders(std::string& out) {
         }
 
         out.append(buf, static_cast<size_t>(n));
-        if (out.size() > 65536) { // 하드 코딩..?
+        if (out.size() > 65536) {  // 하드 코딩..?
             return false;
         }
     }
@@ -273,8 +274,58 @@ bool RtspClientV2::setup() {
     }
 
     sessionId_ = res2.substr(sessPos + 9, res2.find_first_of(";\r\n", sessPos) - (sessPos + 9));
-    logSuccess(kIface, "인증 성공, 세션 ID: " + sessionId_);
+
+    // Session 헤더 '한 줄' 전체를 떼어 timeout= 을 읽는다.
+    // sessionId_ 는 ';' 에서 잘리므로 timeout 은 그 뒤에 남아 있고, 예전에는 통째로 버려졌다
+    const std::size_t sessLineEnd = res2.find("\r\n", sessPos);
+    deriveKeepAliveInterval(
+        res2.substr(sessPos, (sessLineEnd == std::string::npos ? res2.size() : sessLineEnd) - sessPos));
+
+    // 인터리브 채널은 '요청'이 아니라 '응답'이 확정한다.
+    // 응답을 무시하고 0 을 가정하면, 서버가 2-3 을 배정한 경우 메타데이터를 통째로 놓치거나
+    // (channel != 0 으로 전부 버림) 엉뚱한 트랙을 ONVIF 파서에 먹이게 된다
+    const std::size_t ilPos = res2.find("interleaved=");
+    if (ilPos != std::string::npos) {
+        const int announced = std::atoi(res2.c_str() + ilPos + 12);
+        if (announced >= 0 && announced <= 255) {
+            rtpChannel_ = announced;
+        }
+    }
+
+    logSuccess(kIface,
+               "인증 성공, 세션 ID: " + sessionId_ + ", 인터리브 채널=" + std::to_string(rtpChannel_) +
+                   ", 세션 타임아웃=" + (sessionTimeoutSec_ > 0 ? std::to_string(sessionTimeoutSec_) + "s" : "미통보") +
+                   ", keep-alive 주기=" + std::to_string(effectiveKeepAliveSec_) + "s");
     return true;
+}
+
+void RtspClientV2::deriveKeepAliveInterval(const std::string& sessionLine) {
+    sessionTimeoutSec_ = 0;
+
+    const std::size_t toPos = sessionLine.find("timeout=");
+    if (toPos != std::string::npos) {
+        sessionTimeoutSec_ = std::atoi(sessionLine.c_str() + toPos + 8);
+    }
+
+    // 통보가 없으면 설정값을 그대로 쓴다 (기존 동작)
+    effectiveKeepAliveSec_ = keepAliveIntervalSec_;
+
+    if (sessionTimeoutSec_ > 0) {
+        // 절반 주기: 한 번 유실돼도 다음 keep-alive 가 만료 전에 도착한다
+        const int safeInterval = sessionTimeoutSec_ / 2;
+        effectiveKeepAliveSec_ = std::min(keepAliveIntervalSec_, safeInterval);
+
+        if (effectiveKeepAliveSec_ < keepAliveIntervalSec_) {
+            logSuccess(kIface, "카메라가 세션 타임아웃 " + std::to_string(sessionTimeoutSec_) +
+                                   "s 를 통보 - keep-alive 주기를 설정값(" + std::to_string(keepAliveIntervalSec_) +
+                                   "s)에서 " + std::to_string(effectiveKeepAliveSec_) + "s 로 낮춤");
+        }
+    }
+
+    // 0 이면 keepAliveLoop 의 sleep 루프가 돌지 않아 폭주하므로 반드시 1 이상
+    if (effectiveKeepAliveSec_ < 1) {
+        effectiveKeepAliveSec_ = 1;
+    }
 }
 
 void RtspClientV2::play() {
@@ -308,6 +359,38 @@ void RtspClientV2::play() {
     keepaliveThread_ = std::thread(&RtspClientV2::keepAliveLoop, this);
 }
 
+std::size_t RtspClientV2::rtpHeaderLength(const std::uint8_t* packet, std::size_t packetLen) {
+    if (packetLen < static_cast<std::size_t>(kRtpHeaderSize)) {
+        return 0;
+    }
+
+    // 버전 검사: RTP 가 아니면(예: 스트림 desync 로 엉뚱한 바이트를 읽은 경우) 즉시 거른다
+    if (static_cast<std::uint8_t>((packet[0] >> 6) & 0x03) != kRtpVersion) {
+        return 0;
+    }
+
+    // 고정 헤더 + CSRC 목록 (첫 바이트 하위 4비트 = CSRC 개수, 항목당 4바이트)
+    std::size_t headerLen = static_cast<std::size_t>(kRtpHeaderSize) + 4u * static_cast<std::size_t>(packet[0] & 0x0F);
+    if (packetLen < headerLen) {
+        return 0;
+    }
+
+    // 확장 헤더 (X 비트): 4바이트 헤더 + (16비트 length 필드 x 4바이트)
+    if ((packet[0] & 0x10) != 0) {
+        if (packetLen < headerLen + 4u) {
+            return 0;
+        }
+        const std::size_t extWords =
+            (static_cast<std::size_t>(packet[headerLen + 2]) << 8) | static_cast<std::size_t>(packet[headerLen + 3]);
+        headerLen += 4u + 4u * extWords;
+        if (packetLen < headerLen) {
+            return 0;
+        }
+    }
+
+    return headerLen;
+}
+
 void RtspClientV2::run() {
     std::string metadataBuffer;
     metadataBuffer.reserve(8192);
@@ -319,42 +402,47 @@ void RtspClientV2::run() {
         if (!readByte(sync)) {
             break;
         }
-            
+
         if (sync != '$') {
             continue;
-        }            
+        }
 
         std::uint8_t header[3];
         if (!readBytes(header, 3)) {
             break;
         }
-            
+
         const int channel = header[0];
         const int payloadLen = (header[1] << 8) | header[2];
 
         if (static_cast<std::size_t>(payloadLen) > kMaxRtpPayloadSize) {
             break;
         }
-            
+
         if (!readBytes(rtpPacket_.data(), static_cast<std::size_t>(payloadLen))) {
             break;
         }
-            
-        if (channel != 0) {
+
+        // 메타데이터 트랙이 실린 채널만 통과시킨다. SETUP 응답이 배정한 값이며,
+        // 나머지(RTCP, 다른 트랙)는 여기서 버려야 ONVIF 파서에 비-메타데이터가 들어가지 않는다
+        if (channel != rtpChannel_) {
             continue;
         }
-            
-        if (payloadLen < kRtpHeaderSize) {
-            continue;
+
+        // RTP 헤더는 고정 12바이트가 아니다 -- CSRC/확장 헤더만큼 길어진다.
+        // 고정 12로 자르면 페이로드 앞에 이진 쓰레기가 붙어 XML 이 깨진다
+        const std::size_t rtpHeaderLen = rtpHeaderLength(rtpPacket_.data(), static_cast<std::size_t>(payloadLen));
+        if (rtpHeaderLen == 0 || static_cast<std::size_t>(payloadLen) <= rtpHeaderLen) {
+            continue;  // RTP 가 아니거나 페이로드가 비어 있음
         }
 
         if (metadataBuffer.empty()) {
             frameAssembleStart_ = std::chrono::steady_clock::now();
         }
-            
+
         const bool marker = (rtpPacket_[1] & 0x80) != 0;
-        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
-                              static_cast<size_t>(payloadLen - kRtpHeaderSize));
+        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + rtpHeaderLen),
+                              static_cast<size_t>(payloadLen) - rtpHeaderLen);
 
         if (metadataBuffer.size() > maxMetadataFrameSize_) {
             // marker bit가 누락됐거나 스트림이 손상된 것으로 간주 -> 무한정 쌓이기 전에
@@ -373,7 +461,7 @@ void RtspClientV2::run() {
             if (onPayloadReceived) {
                 onPayloadReceived(std::string_view(metadataBuffer));
             }
-                
+
             metadataBuffer.clear();
 
             reportMetricsIfDue();
@@ -427,7 +515,7 @@ std::string RtspClientV2::md5Hex(const std::string& input) {
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         snprintf(output + i * 2, 3, "%02x", hash[i]);
     }
-        
+
     return std::string(output);
 }
 
@@ -454,7 +542,7 @@ std::string RtspClientV2::buildDigestHeader(const std::string& method, const std
 void RtspClientV2::keepAliveLoop() {
     while (keepRunning_) {
         // 1초씩 쪼개서 자는 이유: 종료 요청(keepRunning_=false)에 최대 1초 안에 반응하기 위함
-        for (int i = 0; i < keepAliveIntervalSec_ && keepRunning_; ++i) {
+        for (int i = 0; i < effectiveKeepAliveSec_ && keepRunning_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         if (!keepRunning_) {

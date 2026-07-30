@@ -14,7 +14,7 @@ namespace {
 
 constexpr const char* kIface = "Sanitizer";
 
-/// @brief 한 프레임(단일 카메라)의 최대 객체 수 상한 
+/// @brief 한 프레임(단일 카메라)의 최대 객체 수 상한
 ///        drop 마스크를 스택 std::bitset 으로 두어
 ///        hot path에서 std::vector<bool> 힙 할당을 없애기 위한 컴파일타임 크기
 ///        compute-server는 채널당 1개 프로세스이고, 엣지 AI의 NMS 출력은 보통
@@ -37,7 +37,7 @@ double area(const domain::NormBox& box) {
     if (w <= 0.0 || h <= 0.0) {
         return 0.0;
     }
-        
+
     return w * h;
 }
 
@@ -55,7 +55,7 @@ double intersectionArea(const domain::NormBox& a, const domain::NormBox& b) {
     if (r <= l || bt <= t) {
         return 0.0;
     }
-        
+
     return (r - l) * (bt - t);
 }
 
@@ -71,7 +71,7 @@ double iou(const domain::NormBox& a, const domain::NormBox& b) {
     if (uni <= 0.0) {
         return 0.0;
     }
-    
+
     return inter / uni;
 }
 
@@ -90,7 +90,7 @@ double ioMin(const domain::NormBox& a, const domain::NormBox& b) {
     if (minArea <= 0.0) {
         return 0.0;
     }
-        
+
     return inter / minArea;
 }
 
@@ -109,8 +109,8 @@ ContainmentSanitizer::ContainmentSanitizer(double iouThresh, double containThres
     // HomographyTransform / AffineImageCoordinateMapper 와 동일한 규약: 구조적으로 잘못된
     // 설정은 생성자가 던지고 main 이 잡아 프로세스를 종료한다.
     if (iouThresh_ < 0.0 || iouThresh_ > 1.0) {
-        throw std::invalid_argument("sanitizerIouThresh must be within [0.0, 1.0] (got " +
-                                    std::to_string(iouThresh_) + ") - check config.json");
+        throw std::invalid_argument("sanitizerIouThresh must be within [0.0, 1.0] (got " + std::to_string(iouThresh_) +
+                                    ") - check config.json");
     }
     if (containThresh_ < 0.0 || containThresh_ > 1.0) {
         throw std::invalid_argument("sanitizerContainThresh must be within [0.0, 1.0] (got " +
@@ -143,7 +143,7 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             if (i == j) {
                 continue;
             }
-                
+
             const auto& y = frame.objects[j];
 
             // 규칙 A
@@ -177,11 +177,11 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
         if (drop[i]) {
             continue;
         }
-            
+
         if (writeIdx != i) {
             frame.objects[writeIdx] = std::move(frame.objects[i]);
         }
-            
+
         ++writeIdx;
     }
     frame.objects.resize(writeIdx);

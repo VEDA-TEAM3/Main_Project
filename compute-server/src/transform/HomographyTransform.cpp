@@ -61,8 +61,7 @@ HomographyTransform::HomographyTransform(std::array<double, 9> matrix, const Opt
         }
         for (double value : matrix_) {
             if (!std::isfinite(value)) {
-                throw std::invalid_argument(
-                    "homography matrix overflowed during pixel-to-normalized conversion");
+                throw std::invalid_argument("homography matrix overflowed during pixel-to-normalized conversion");
             }
         }
         logSuccess(kIface, "픽셀 좌표계 호모그래피를 정규화 좌표계로 환산함 (W=" + std::to_string(options_.imageWidth) +
@@ -93,8 +92,7 @@ HomographyTransform::HomographyTransform(std::array<double, 9> matrix, const Opt
     }
 
     const double normalizedDeterminant = determinant(matrix_);
-    if (!std::isfinite(normalizedDeterminant) ||
-        std::abs(normalizedDeterminant) < kMinNormalizedDeterminant) {
+    if (!std::isfinite(normalizedDeterminant) || std::abs(normalizedDeterminant) < kMinNormalizedDeterminant) {
         throw std::invalid_argument("homography matrix is singular (determinant ~= 0)");
     }
 
