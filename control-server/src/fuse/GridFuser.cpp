@@ -205,6 +205,10 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                         if (ci.cls != cj.cls) {
                             continue;
                         }
+                        if (!std::isfinite(ci.pos.x) || !std::isfinite(ci.pos.y) || !std::isfinite(cj.pos.x) ||
+                            !std::isfinite(cj.pos.y)) {
+                            continue;
+                        }
                         if (metric_->calculate(ci.pos, cj.pos) > dedupMergeDistance_) {
                             continue;  // 해시 충돌로 들어온 먼 후보는 여기서 걸러짐
                         }
@@ -238,6 +242,10 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                     continue;
                 }
                 if (candidates_[i].cls != candidates_[j].cls) {
+                    continue;
+                }
+                if (!std::isfinite(candidates_[i].pos.x) || !std::isfinite(candidates_[i].pos.y) ||
+                    !std::isfinite(candidates_[j].pos.x) || !std::isfinite(candidates_[j].pos.y)) {
                     continue;
                 }
                 if (metric_->calculate(candidates_[i].pos, candidates_[j].pos) > dedupMergeDistance_) {

@@ -351,8 +351,18 @@ TEST(GridFuserTest, NonFiniteCoordinatesDoNotCrash) {
 
     EXPECT_NO_THROW({
         const auto result = fuser.fuse(frames);
-        EXPECT_EQ(result.objects.size(), 1U);
-        EXPECT_TRUE(std::isnan(result.objects[0].pos.x) || std::isinf(result.objects[0].pos.x));
+        ASSERT_EQ(result.objects.size(), 2U);
+
+        EXPECT_TRUE(std::isnan(result.objects[0].pos.x));
+        EXPECT_DOUBLE_EQ(result.objects[0].pos.y, 0.0);
+        ASSERT_EQ(result.objects[0].sourceChannels.count, 1U);
+        EXPECT_EQ(result.objects[0].sourceChannels.ids[0], 0);
+
+        EXPECT_TRUE(std::isinf(result.objects[1].pos.x));
+        EXPECT_GT(result.objects[1].pos.x, 0.0);
+        EXPECT_DOUBLE_EQ(result.objects[1].pos.y, 0.0);
+        ASSERT_EQ(result.objects[1].sourceChannels.count, 1U);
+        EXPECT_EQ(result.objects[1].sourceChannels.ids[0], 1);
     });
 }
 

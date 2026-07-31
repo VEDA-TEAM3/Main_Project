@@ -1,6 +1,7 @@
 #include "fuse/ConcatFuser.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -114,6 +115,10 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
                 continue;
             }
             if (candidates[i].cls != candidates[j].cls) {
+                continue;
+            }
+            if (!std::isfinite(candidates[i].pos.x) || !std::isfinite(candidates[i].pos.y) ||
+                !std::isfinite(candidates[j].pos.x) || !std::isfinite(candidates[j].pos.y)) {
                 continue;
             }
 
