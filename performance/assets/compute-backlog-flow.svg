@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="430" viewBox="0 0 1100 430" role="img" aria-labelledby="title desc">
+  <title id="title">Compute Sink backlog processing comparison</title>
+  <desc id="desc">The previous FIFO flow publishes stale frames, while the latest flow coalesces backlog and publishes only the newest frame.</desc>
+  <defs>
+    <marker id="arrowGray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#10b981"/></marker>
+  </defs>
+  <rect width="1100" height="430" rx="18" fill="#0f172a"/>
+  <text x="55" y="54" fill="#f8fafc" font-family="sans-serif" font-size="28" font-weight="700">Compute Sink — 백로그 처리 구조</text>
+
+  <rect x="45" y="90" width="1010" height="125" rx="14" fill="#1e293b" stroke="#475569"/>
+  <text x="70" y="122" fill="#fca5a5" font-family="sans-serif" font-size="18" font-weight="700">이전 7f8688e · FIFO</text>
+  <g font-family="sans-serif" font-size="16" text-anchor="middle">
+    <rect x="90" y="145" width="130" height="44" rx="8" fill="#334155"/><text x="155" y="173" fill="#e2e8f0">Frame N</text>
+    <rect x="295" y="145" width="130" height="44" rx="8" fill="#334155"/><text x="360" y="173" fill="#e2e8f0">Frame N+1</text>
+    <rect x="500" y="145" width="130" height="44" rx="8" fill="#334155"/><text x="565" y="173" fill="#e2e8f0">Frame N+2</text>
+    <rect x="755" y="145" width="230" height="44" rx="8" fill="#7f1d1d"/><text x="870" y="173" fill="#fecaca">과거 프레임부터 발행</text>
+  </g>
+  <g stroke="#64748b" stroke-width="3" marker-end="url(#arrowGray)">
+    <line x1="220" y1="167" x2="290" y2="167"/>
+    <line x1="425" y1="167" x2="495" y2="167"/>
+    <line x1="630" y1="167" x2="750" y2="167"/>
+  </g>
+
+  <rect x="45" y="245" width="1010" height="140" rx="14" fill="#1e293b" stroke="#10b981"/>
+  <text x="70" y="278" fill="#6ee7b7" font-family="sans-serif" font-size="18" font-weight="700">최신 001216d · 최신 프레임 합류</text>
+  <g font-family="sans-serif" font-size="16" text-anchor="middle">
+    <rect x="90" y="305" width="130" height="44" rx="8" fill="#334155"/><text x="155" y="333" fill="#e2e8f0">Frame N</text>
+    <rect x="260" y="305" width="130" height="44" rx="8" fill="#334155"/><text x="325" y="333" fill="#e2e8f0">Frame N+1</text>
+    <rect x="430" y="305" width="130" height="44" rx="8" fill="#334155"/><text x="495" y="333" fill="#e2e8f0">Frame N+2</text>
+    <rect x="640" y="305" width="150" height="44" rx="8" fill="#065f46"/><text x="715" y="333" fill="#d1fae5">N, N+1 drop</text>
+    <rect x="840" y="305" width="150" height="44" rx="8" fill="#047857"/><text x="915" y="333" fill="#d1fae5">최신 N+2 발행</text>
+  </g>
+  <g stroke="#10b981" stroke-width="3" marker-end="url(#arrowGreen)">
+    <line x1="560" y1="327" x2="635" y2="327"/>
+    <line x1="790" y1="327" x2="835" y2="327"/>
+  </g>
+  <text x="550" y="410" fill="#94a3b8" text-anchor="middle" font-family="sans-serif" font-size="15">큐 8개 × 5fps의 약 1.6초 누적 지연이 화면 표시 지연으로 고정되는 문제를 방지</text>
+</svg>
