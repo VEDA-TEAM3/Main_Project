@@ -27,9 +27,9 @@
 #include <utility>
 
 #include "model/DigitalTwinTypes.h"
-#include "network/DeviceStatusGatewayFactory.h"
-#include "network/DeviceStatusService.h"
-#include "network/ReportGateway.h"
+#include "network/gateways/DeviceStatusGatewayFactory.h"
+#include "network/services/DeviceStatusService.h"
+#include "network/gateways/ReportGateway.h"
 #include "ui/ClickableVideoWidget.h"
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"

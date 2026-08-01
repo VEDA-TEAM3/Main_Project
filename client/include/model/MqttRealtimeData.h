@@ -14,6 +14,8 @@ struct RiskObjectData {
     QString objectClass;
     QPointF worldPosition;
     DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
+    int zoneId = -1;
+    bool hasZoneId = false;
     qint64 nearestId = 0;
     double distance = -1.0;
 };

@@ -261,7 +261,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
                                                                           : DigitalTwinObjectType::Vehicle;
         const QPointF measuredPosition = normalizedWorldPosition(sourceObject.worldPosition);
         object.position = stabilizedPosition(object.objectId, measuredPosition, localTimeMsec);
-        object.channelIndex = channelIndexForPosition(object.position);
+        object.channelIndex = sourceObject.hasZoneId ? sourceObject.zoneId : channelIndexForPosition(object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);

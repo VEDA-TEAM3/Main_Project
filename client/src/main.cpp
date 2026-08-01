@@ -11,8 +11,8 @@
 #include <utility>
 
 #include "config/ApplicationConfig.h"
-#include "network/MqttDeviceStatusGatewayFactory.h"
-#include "network/SlackReportGateway.h"
+#include "network/gateways/MqttDeviceStatusGatewayFactory.h"
+#include "network/gateways/SlackReportGateway.h"
 #include "ui/mainwindow.h"
 #include "ui/panels/DefaultDashboardPanelFactory.h"
 #include "video/GstStreamReceiverFactory.h"

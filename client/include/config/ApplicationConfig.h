@@ -3,7 +3,7 @@
 #include <QString>
 
 #include "model/DigitalTwinRuntimeConfig.h"
-#include "network/MqttRuntimeConfig.h"
+#include "network/transport/MqttRuntimeConfig.h"
 #include "video/VideoRuntimeConfig.h"
 
 struct ApplicationWindowConfig {

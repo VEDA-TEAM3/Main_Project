@@ -3,7 +3,7 @@
 #include <QDateTime>
 #include <utility>
 
-#include "network/DeviceStatusService.h"
+#include "network/services/DeviceStatusService.h"
 #include "ui/panels/DeviceStatusPanel.h"
 #include "ui/panels/EventLogPanel.h"
 #include "ui/panels/ObjectListPanel.h"

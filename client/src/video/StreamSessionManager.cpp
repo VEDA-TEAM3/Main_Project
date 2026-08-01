@@ -6,7 +6,7 @@
 #include <QTimer>
 #include <utility>
 
-#include "network/LatestBlurFrameBuffer.h"
+#include "network/realtime/LatestBlurFrameBuffer.h"
 #include "video/StreamReceiver.h"
 #include "video/StreamReceiverFactory.h"
 
