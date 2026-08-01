@@ -62,7 +62,8 @@ const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
 MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFactory,
                        std::shared_ptr<DeviceStatusGatewayFactory> deviceStatusGatewayFactory,
                        std::shared_ptr<DashboardPanelFactory> dashboardPanelFactory,
-                       std::shared_ptr<ReportGateway> reportGateway, VideoRuntimeConfig videoConfig, QWidget* parent)
+                       std::shared_ptr<ReportGateway> reportGateway, VideoRuntimeConfig videoConfig,
+                       DigitalTwinRuntimeConfig digitalTwinConfig, QWidget* parent)
     : QMainWindow(parent),
       ui_(std::make_shared<Ui::MainWindow>()),
       deviceStatusGatewayFactory_(std::move(deviceStatusGatewayFactory)),
@@ -70,6 +71,9 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
       reportGateway_(std::move(reportGateway)),
       videoConfig_(std::move(videoConfig)) {
     ui_->setupUi(this);
+    if (ui_->digitalTwinMapWidget) {
+        ui_->digitalTwinMapWidget->configureLiveTracking(digitalTwinConfig);
+    }
 
     streamConfigs_ = videoConfig_.streams;
     videoPreprocessingSettingsByChannel_.fill(videoConfig_.receiver.preprocessing, requiredCctvChannelCount);
@@ -670,6 +674,11 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
     streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
 
+    if (ui_->digitalTwinMapWidget) {
+        connect(streamSessionManager_, &StreamSessionManager::displayedVideoTimestampsChanged,
+                ui_->digitalTwinMapWidget, &DigitalTwinMapWidget::applyDisplayedVideoTimestamps, Qt::QueuedConnection);
+    }
+
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,
                 &StreamSessionManager::submitBlurFrame, Qt::AutoConnection);
@@ -808,6 +817,7 @@ void MainWindow::expandVideo(QWidget* targetWidget) {
     targetFrame->raise();
 
     expandedWidget_ = targetWidget;
+    ui_->digitalTwinMapWidget->setPreferredVideoChannel(static_cast<int>(targetIndex));
 }
 
 /**
@@ -847,4 +857,5 @@ void MainWindow::restoreVideoGrid() {
     }
 
     expandedWidget_ = nullptr;
+    ui_->digitalTwinMapWidget->setPreferredVideoChannel(-1);
 }

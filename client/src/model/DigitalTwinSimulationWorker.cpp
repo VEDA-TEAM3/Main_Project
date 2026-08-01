@@ -8,15 +8,26 @@
 #include "model/DigitalTwinRiskPolicy.h"
 
 namespace {
-constexpr int updateIntervalMsec = 100;
+constexpr int updateIntervalMsec = 50;
 constexpr double objectMinY = 0.14;
 constexpr double objectMaxY = 0.86;
 constexpr double horizontalEdgeTransitionPadding = 0.02;
-constexpr double maxVelocityPerTick = 0.013;
-constexpr double minimumHorizontalVelocity = 0.0038;
-constexpr int warningPulseRepeatTicks = 12;
-constexpr int dangerPulseRepeatTicks = 15;
+constexpr double maximumVelocityPerSecond = 0.13;
+constexpr double minimumHorizontalVelocityPerSecond = 0.038;
+constexpr double horizontalVelocityJitterPerSecond = 0.01;
+constexpr double verticalVelocityJitterPerSecond = 0.02;
+constexpr int directionChangeProbabilityPercent = 12;
+constexpr int warningPulseRepeatMsec = 1200;
+constexpr int dangerPulseRepeatMsec = 1500;
+constexpr int fadeInDurationMsec = 120;
 constexpr int initialObjectCount = 5;
+
+constexpr double secondsPerUpdate = static_cast<double>(updateIntervalMsec) / 1000.0;
+constexpr double maxVelocityPerTick = maximumVelocityPerSecond * secondsPerUpdate;
+constexpr double minimumHorizontalVelocity = minimumHorizontalVelocityPerSecond * secondsPerUpdate;
+constexpr double horizontalVelocityJitter = horizontalVelocityJitterPerSecond * secondsPerUpdate;
+constexpr double verticalVelocityJitter = verticalVelocityJitterPerSecond * secondsPerUpdate;
+constexpr double opacityIncrementPerTick = static_cast<double>(updateIntervalMsec) / fadeInDurationMsec;
 
 /**
  * @brief           정규화 좌표를 2x2 구역으로 나눠 CCTV 채널을 계산합니다.
@@ -94,11 +105,11 @@ int riskPriority(DigitalTwinRiskLevel riskLevel) {
  */
 int pulseRepeatTicksForRiskLevel(DigitalTwinRiskLevel riskLevel) {
     if (riskLevel == DigitalTwinRiskLevel::Danger) {
-        return dangerPulseRepeatTicks;
+        return (dangerPulseRepeatMsec + updateIntervalMsec - 1) / updateIntervalMsec;
     }
 
     if (riskLevel == DigitalTwinRiskLevel::Warning) {
-        return warningPulseRepeatTicks;
+        return (warningPulseRepeatMsec + updateIntervalMsec - 1) / updateIntervalMsec;
     }
 
     return 0;
@@ -220,6 +231,7 @@ void DigitalTwinSimulationWorker::setupDemoObjects() {
     objects_ = objectSpawner_->createInitialObjects(initialObjectCount);
     for (DigitalTwinObject& object : objects_) {
         object.channelIndex = channelIndexForPosition(object.position);
+        object.opacity = 1.0;
     }
 
     previousPairRiskLevels_.clear();
@@ -251,12 +263,14 @@ void DigitalTwinSimulationWorker::updateObjectMotion(DigitalTwinObject* object) 
         return;
     }
 
-    if (QRandomGenerator::global()->bounded(100) < 24) {
+    if (QRandomGenerator::global()->bounded(100) < directionChangeProbabilityPercent) {
         const double horizontalDirection = directionSign(object->velocity.x());
-        const double horizontalSpeed = std::max(
-            minimumHorizontalVelocity, simulationAbsoluteValue(object->velocity.x()) + randomRange(-0.001, 0.001));
+        const double horizontalSpeed =
+            std::max(minimumHorizontalVelocity, simulationAbsoluteValue(object->velocity.x()) +
+                                                    randomRange(-horizontalVelocityJitter, horizontalVelocityJitter));
         object->velocity = limitedVelocity(
-            QPointF(horizontalDirection * horizontalSpeed, object->velocity.y() + randomRange(-0.002, 0.002)));
+            QPointF(horizontalDirection * horizontalSpeed,
+                    object->velocity.y() + randomRange(-verticalVelocityJitter, verticalVelocityJitter)));
     }
 
     QPointF nextPosition = object->position + object->velocity;
@@ -268,6 +282,17 @@ void DigitalTwinSimulationWorker::updateObjectMotion(DigitalTwinObject* object) 
 
     object->position = nextPosition;
     object->channelIndex = channelIndexForPosition(object->position);
+
+    const double fadeInOpacity = std::min(1.0, object->opacity + opacityIncrementPerTick);
+    double edgeOpacity = 1.0;
+    if (object->position.x() < 0.0) {
+        edgeOpacity = std::clamp(
+            (object->position.x() + horizontalEdgeTransitionPadding) / horizontalEdgeTransitionPadding, 0.0, 1.0);
+    } else if (object->position.x() > 1.0) {
+        edgeOpacity = std::clamp(
+            (1.0 + horizontalEdgeTransitionPadding - object->position.x()) / horizontalEdgeTransitionPadding, 0.0, 1.0);
+    }
+    object->opacity = std::min(fadeInOpacity, edgeOpacity);
 }
 
 /**
@@ -299,6 +324,7 @@ void DigitalTwinSimulationWorker::spawnObjectIfNeeded() {
 
     DigitalTwinObject object = objectSpawner_->createEnteringObject();
     object.channelIndex = channelIndexForPosition(object.position);
+    object.opacity = 0.0;
     objects_.append(std::move(object));
     scheduleNextSpawn();
 }

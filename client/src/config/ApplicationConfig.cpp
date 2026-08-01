@@ -133,6 +133,66 @@ bool parseWindow(const QJsonObject& root, ApplicationWindowConfig& config, QStri
            readInt(application, QStringLiteral("windowHeight"), 600, 4320, config.height, error);
 }
 
+bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config, QString& error) {
+    if (!root.contains(QStringLiteral("digitalTwin"))) {
+        return true;
+    }
+
+    QJsonObject digitalTwin;
+    QJsonObject world;
+    qint64 maximumHistorySize = 0;
+    if (!readObject(root, QStringLiteral("digitalTwin"), digitalTwin, error) ||
+        !readInt(digitalTwin, QStringLiteral("renderIntervalMs"), 10, 1000, config.renderIntervalMsec, error) ||
+        !readInt(digitalTwin, QStringLiteral("snapshotPublishIntervalMs"), 10, 5000, config.snapshotPublishIntervalMsec,
+                 error) ||
+        !readInt(digitalTwin, QStringLiteral("frameExpiryMs"), 100, 120000, config.frameExpiryMsec, error) ||
+        !readInt(digitalTwin, QStringLiteral("frameExpiryPollMs"), 50, 60000, config.frameExpiryPollMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("renderDelayMs"), 0, 5000, config.renderDelayMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("videoSyncCorrectionMs"), -5000, 5000, config.videoSyncCorrectionMsec,
+                     error) ||
+        !readInteger(digitalTwin, QStringLiteral("maximumVideoClockSkewMs"), 100, 60000,
+                     config.maximumVideoClockSkewMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("videoTimestampTimeoutMs"), 100, 5000,
+                     config.videoTimestampTimeoutMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("channelTimestampOutlierMs"), 50, 5000,
+                     config.channelTimestampOutlierMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("fadeInMs"), 0, 5000, config.fadeInMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("missingGraceMs"), 0, 5000, config.missingGraceMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("fadeOutMs"), 0, 5000, config.fadeOutMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("maximumHistorySize"), 2, 128, maximumHistorySize, error) ||
+        !readInt(digitalTwin, QStringLiteral("diagnosticsIntervalMs"), 0, 600000, config.diagnosticsIntervalMsec,
+                 error) ||
+        !readObject(digitalTwin, QStringLiteral("world"), world, error) ||
+        !readBoolean(world, QStringLiteral("fixedBoundsEnabled"), config.world.fixedBoundsEnabled, error) ||
+        !readBoolean(world, QStringLiteral("invertY"), config.world.invertY, error)) {
+        error = QStringLiteral("digitalTwin: %1").arg(error);
+        return false;
+    }
+
+    if (digitalTwin.contains(QStringLiteral("syncWithVideo")) &&
+        !readBoolean(digitalTwin, QStringLiteral("syncWithVideo"), config.syncWithVideo, error)) {
+        error = QStringLiteral("digitalTwin: %1").arg(error);
+        return false;
+    }
+
+    double minX = 0.0;
+    double minY = 0.0;
+    double maxX = 0.0;
+    double maxY = 0.0;
+    if (!readDouble(world, QStringLiteral("minX"), -1000000000.0, 1000000000.0, minX, error) ||
+        !readDouble(world, QStringLiteral("minY"), -1000000000.0, 1000000000.0, minY, error) ||
+        !readDouble(world, QStringLiteral("maxX"), -1000000000.0, 1000000000.0, maxX, error) ||
+        !readDouble(world, QStringLiteral("maxY"), -1000000000.0, 1000000000.0, maxY, error) || maxX <= minX ||
+        maxY <= minY) {
+        error = QStringLiteral("digitalTwin.world bounds are invalid: %1").arg(error);
+        return false;
+    }
+
+    config.maximumHistorySize = static_cast<qsizetype>(maximumHistorySize);
+    config.world.bounds = QRectF(minX, minY, maxX - minX, maxY - minY);
+    return true;
+}
+
 bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QString& error) {
     const QJsonValue streamValue = video.value(QStringLiteral("streams"));
     if (!streamValue.isArray() || streamValue.toArray().size() != requiredChannelCount) {
@@ -488,6 +548,7 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
     QString clientIdPrefix;
     const QJsonObject root = document.object();
     if (!parseWindow(root, result.config.window, result.error) ||
+        !parseDigitalTwin(root, result.config.digitalTwin, result.error) ||
         !parseVideo(root, result.config.video, result.error) ||
         !parseMqtt(root, result.config.mqtt, clientIdPrefix, result.error)) {
         return result;

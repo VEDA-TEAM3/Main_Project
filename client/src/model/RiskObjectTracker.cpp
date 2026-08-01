@@ -1,5 +1,6 @@
 #include "model/RiskObjectTracker.h"
 
+#include <QDebug>
 #include <QHash>
 #include <QProcessEnvironment>
 #include <QSet>
@@ -8,20 +9,15 @@
 #include <utility>
 
 namespace {
-constexpr qint64 riskSyncOffsetMsec = 100;
 constexpr qint64 sourceRestartGapMsec = 5000;
 constexpr qint64 sourceTimestampRollbackResetMsec = 1000;
-constexpr qint64 objectRetentionMsec = 350;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
 constexpr qint64 maximumPositionFilterStepMsec = 100;
-constexpr qsizetype maximumHistorySize = 16;
 constexpr double maximumNormalizedSpeedPerSecond = 0.9;
-constexpr double smallMovementThreshold = 0.015;
-constexpr double smallMovementBlend = 0.55;
-constexpr double regularMovementBlend = 0.82;
+constexpr qsizetype maximumClockOffsetSampleCount = 15;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -66,9 +62,16 @@ QPointF interpolatePosition(const QPointF& first, const QPointF& second, double 
 }  // namespace
 
 /** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다. */
-RiskObjectTracker::RiskObjectTracker() {
+RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(std::move(config)) {
+    if (config_.world.fixedBoundsEnabled && config_.world.bounds.width() > 0.0 && config_.world.bounds.height() > 0.0) {
+        configuredWorldBounds_ = config_.world.bounds;
+        hasConfiguredWorldBounds_ = true;
+        invertWorldY_ = config_.world.invertY;
+        return;
+    }
+
     hasConfiguredWorldBounds_ = readConfiguredWorldBounds(configuredWorldBounds_);
-    invertWorldY_ = readInvertWorldY();
+    invertWorldY_ = hasConfiguredWorldBounds_ ? readInvertWorldY() : config_.world.invertY;
 }
 
 /** @brief 수신 이력과 객체 이동 이력을 초기화합니다. */
@@ -76,16 +79,20 @@ void RiskObjectTracker::reset() {
     history_.clear();
     retainedObjects_.clear();
     lastSeenSourceTimes_.clear();
+    renderedOpacities_.clear();
+    opacityUpdateTimesMsec_.clear();
     previousPositions_.clear();
     stabilizedPositions_.clear();
     stabilizedPositionTimesMsec_.clear();
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
+    sourceClockOffsetSamples_.clear();
     automaticWorldBounds_ = {};
     lastArrivalTimeMsec_ = 0;
     sourceClockOffsetMsec_ = 0;
     lastRenderSourceTimestamp_ = 0;
+    lastDiagnosticsMsec_ = 0;
     hasAutomaticWorldBounds_ = false;
 }
 
@@ -115,17 +122,20 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     }
 
     const qint64 measuredClockOffsetMsec = arrivalTimeMsec - frame.sourceTimestamp;
-    if (history_.isEmpty()) {
-        sourceClockOffsetMsec_ = measuredClockOffsetMsec;
-    } else {
-        sourceClockOffsetMsec_ = (sourceClockOffsetMsec_ * 7 + measuredClockOffsetMsec) / 8;
+    sourceClockOffsetSamples_.append(measuredClockOffsetMsec);
+    while (sourceClockOffsetSamples_.size() > maximumClockOffsetSampleCount) {
+        sourceClockOffsetSamples_.removeFirst();
     }
+    QVector<qint64> sortedOffsets = sourceClockOffsetSamples_;
+    std::sort(sortedOffsets.begin(), sortedOffsets.end());
+    sourceClockOffsetMsec_ = sortedOffsets[sortedOffsets.size() / 2];
 
     for (const RiskObjectData& object : frame.objects) {
         retainedObjects_.insert(object.globalId, object);
         lastSeenSourceTimes_.insert(object.globalId, frame.sourceTimestamp);
     }
 
+    const qint64 objectRetentionMsec = config_.missingGraceMsec + config_.fadeOutMsec;
     for (auto iterator = lastSeenSourceTimes_.begin(); iterator != lastSeenSourceTimes_.end();) {
         if (frame.sourceTimestamp - iterator.value() <= objectRetentionMsec) {
             ++iterator;
@@ -137,7 +147,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     }
 
     history_.append(std::move(frame));
-    while (history_.size() > maximumHistorySize) {
+    while (history_.size() > config_.maximumHistorySize) {
         history_.removeFirst();
     }
     return true;
@@ -166,19 +176,71 @@ bool RiskObjectTracker::hasFrame() const { return !history_.isEmpty(); }
  * @param localTimeMsec  현재 로컬 시각
  * @return               UI 렌더링용 디지털 트윈 스냅샷
  */
-DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
+DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
+                                                     const std::optional<VideoFrameTimestamp>& videoTimestamp) {
     pendingRiskEvents_.clear();
     if (history_.isEmpty()) {
         return {};
     }
 
     updateAutomaticWorldBounds(history_.constLast());
-    const qint64 calculatedSourceTimestamp = localTimeMsec - sourceClockOffsetMsec_ - riskSyncOffsetMsec;
+    const qint64 estimatedSourceTimestamp = localTimeMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
+    qint64 calculatedSourceTimestamp = estimatedSourceTimestamp;
+    QString clockSource = QStringLiteral("arrival-offset");
+    if (videoTimestamp.has_value() && videoTimestamp->isValid() &&
+        localTimeMsec - videoTimestamp->observedLocalMsec <= config_.videoTimestampTimeoutMsec) {
+        const qint64 videoBasedTimestamp =
+            videoTimestamp->senderClock ? videoTimestamp->utcMsec - config_.videoSyncCorrectionMsec
+                                        : videoTimestamp->utcMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
+        if (qAbs(videoBasedTimestamp - estimatedSourceTimestamp) <= config_.maximumVideoClockSkewMsec) {
+            calculatedSourceTimestamp = videoBasedTimestamp;
+            clockSource =
+                videoTimestamp->senderClock ? QStringLiteral("video-sender-clock") : QStringLiteral("video-pts-anchor");
+        } else {
+            clockSource = QStringLiteral("video-clock-rejected");
+        }
+    }
+
     const qint64 latestSourceTimestamp = history_.constLast().sourceTimestamp;
     const qint64 targetSourceTimestamp =
         qMin(latestSourceTimestamp, qMax(calculatedSourceTimestamp, lastRenderSourceTimestamp_));
     lastRenderSourceTimestamp_ = targetSourceTimestamp;
-    const RiskFrameData frame = interpolatedFrame(targetSourceTimestamp);
+    RiskFrameData frame = interpolatedFrame(targetSourceTimestamp);
+
+    QHash<qint64, const RiskObjectData*> latestObjects;
+    latestObjects.reserve(history_.constLast().objects.size());
+    for (const RiskObjectData& object : history_.constLast().objects) {
+        latestObjects.insert(object.globalId, &object);
+    }
+    for (RiskObjectData& object : frame.objects) {
+        const auto latestObject = latestObjects.constFind(object.globalId);
+        if (latestObject == latestObjects.cend()) {
+            continue;
+        }
+        object.riskLevel = (*latestObject)->riskLevel;
+        object.nearestId = (*latestObject)->nearestId;
+        object.distance = (*latestObject)->distance;
+    }
+
+    if (config_.diagnosticsIntervalMsec > 0 &&
+        localTimeMsec - lastDiagnosticsMsec_ >= config_.diagnosticsIntervalMsec) {
+        const qint64 videoUtcMsec = videoTimestamp.has_value() ? videoTimestamp->utcMsec : 0;
+        const int referenceChannel = videoTimestamp.has_value() ? videoTimestamp->channelIndex + 1 : 0;
+        const bool senderClock = videoTimestamp.has_value() && videoTimestamp->senderClock;
+        qInfo().noquote() << QStringLiteral(
+                                 "[TOPVIEW SYNC] clock=%1 channel=%2 videoTs=%3 senderClock=%4 targetTs=%5 "
+                                 "latestRiskTs=%6 buffered=%7ms offset=%8ms history=%9")
+                                 .arg(clockSource)
+                                 .arg(referenceChannel)
+                                 .arg(videoUtcMsec)
+                                 .arg(senderClock)
+                                 .arg(targetSourceTimestamp)
+                                 .arg(latestSourceTimestamp)
+                                 .arg(latestSourceTimestamp - targetSourceTimestamp)
+                                 .arg(sourceClockOffsetMsec_)
+                                 .arg(history_.size());
+        lastDiagnosticsMsec_ = localTimeMsec;
+    }
 
     DigitalTwinSnapshot snapshot;
     QHash<QString, QPointF> currentPositions;
@@ -186,8 +248,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     QSet<qint64> includedObjectIds;
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
-    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys,
-                               &includedObjectIds](const RiskObjectData& sourceObject) {
+    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys, &includedObjectIds](
+                                  const RiskObjectData& sourceObject, qreal opacity) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
         }
@@ -202,6 +264,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         object.channelIndex = channelIndexForPosition(object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
+        object.opacity = qBound(0.0, opacity, 1.0);
         snapshot.objects.append(object);
         currentPositions.insert(object.objectId, object.position);
 
@@ -225,13 +288,17 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     };
 
     for (const RiskObjectData& sourceObject : frame.objects) {
-        appendObject(sourceObject);
+        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec));
     }
 
     for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
-        if (latestSourceTimestamp - lastSeenSourceTimes_.value(iterator.key()) <= objectRetentionMsec) {
-            appendObject(iterator.value());
+        const qint64 lastSeenSourceTimestamp = lastSeenSourceTimes_.value(iterator.key());
+        const qint64 missingAgeMsec = targetSourceTimestamp - lastSeenSourceTimestamp;
+        if (missingAgeMsec < 0 || missingAgeMsec > config_.missingGraceMsec + config_.fadeOutMsec) {
+            continue;
         }
+
+        appendObject(iterator.value(), lifecycleOpacity(iterator.key(), false, missingAgeMsec, localTimeMsec));
     }
 
     QHash<QString, DigitalTwinRiskLevel> currentPairRiskLevels;
@@ -309,6 +376,9 @@ RiskFrameData RiskObjectTracker::interpolatedFrame(qint64 sourceTimestamp) const
     if (after == history_.cend()) {
         return history_.constLast();
     }
+    if (after->sourceTimestamp == sourceTimestamp) {
+        return *after;
+    }
 
     const RiskFrameData& nextFrame = *after;
     const RiskFrameData& previousFrame = *std::prev(after);
@@ -320,8 +390,7 @@ RiskFrameData RiskObjectTracker::interpolatedFrame(qint64 sourceTimestamp) const
     const double ratio = std::clamp(
         static_cast<double>(sourceTimestamp - previousFrame.sourceTimestamp) / static_cast<double>(durationMsec), 0.0,
         1.0);
-    const RiskFrameData& membershipFrame = ratio < 0.5 ? previousFrame : nextFrame;
-    RiskFrameData result = membershipFrame;
+    RiskFrameData result = previousFrame;
     result.sourceTimestamp = sourceTimestamp;
 
     QHash<qint64, const RiskObjectData*> previousObjects;
@@ -428,17 +497,43 @@ QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPo
         qBound(minimumPositionFilterStepMsec, localTimeMsec - previousTimeMsec, maximumPositionFilterStepMsec);
     const double maximumDistance = maximumNormalizedSpeedPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
 
-    double blend = distance <= smallMovementThreshold ? smallMovementBlend : regularMovementBlend;
     if (distance > maximumDistance && distance > 0.0) {
         displacement *= maximumDistance / distance;
-        blend = 1.0;
     }
 
-    const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x() * blend, 1.0),
-                             qBound(0.0, previousPosition.y() + displacement.y() * blend, 1.0));
+    const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x(), 1.0),
+                             qBound(0.0, previousPosition.y() + displacement.y(), 1.0));
     stabilizedPositions_.insert(objectId, stabilized);
     stabilizedPositionTimesMsec_.insert(objectId, localTimeMsec);
     return stabilized;
+}
+
+/**
+ * @brief                  gid별 표시 투명도를 단조롭게 갱신해 재등장 시에도 같은 item을 부드럽게 복구합니다.
+ * @param objectId         통합 객체 ID
+ * @param present          현재 보간 프레임에 객체가 있으면 true
+ * @param missingAgeMsec   마지막 source frame 이후 누락 시간
+ * @param localTimeMsec    현재 로컬 렌더 시각
+ * @return                 0.0~1.0 범위의 표시 투명도
+ */
+qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec) {
+    const bool knownObject = renderedOpacities_.contains(objectId);
+    qreal opacity = renderedOpacities_.value(objectId, 0.0);
+    const qint64 previousUpdateMsec = opacityUpdateTimesMsec_.value(objectId, localTimeMsec);
+    const qint64 elapsedMsec = qBound<qint64>(0LL, localTimeMsec - previousUpdateMsec, 100LL);
+
+    if (present) {
+        opacity = config_.fadeInMsec <= 0
+                      ? 1.0
+                      : qMin(1.0, opacity + static_cast<qreal>(knownObject ? elapsedMsec : 0) / config_.fadeInMsec);
+    } else if (missingAgeMsec > config_.missingGraceMsec) {
+        opacity =
+            config_.fadeOutMsec <= 0 ? 0.0 : qMax(0.0, opacity - static_cast<qreal>(elapsedMsec) / config_.fadeOutMsec);
+    }
+
+    renderedOpacities_.insert(objectId, opacity);
+    opacityUpdateTimesMsec_.insert(objectId, localTimeMsec);
+    return opacity;
 }
 
 /**
@@ -453,6 +548,12 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
         }
 
         stabilizedPositionTimesMsec_.remove(iterator.key());
+        bool objectIdOk = false;
+        const qint64 objectId = iterator.key().mid(2).toLongLong(&objectIdOk);
+        if (objectIdOk) {
+            renderedOpacities_.remove(objectId);
+            opacityUpdateTimesMsec_.remove(objectId);
+        }
         iterator = stabilizedPositions_.erase(iterator);
     }
 }

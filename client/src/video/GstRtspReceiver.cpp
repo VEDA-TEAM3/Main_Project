@@ -5,6 +5,7 @@
 #include <gst/video/videooverlay.h>
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QThread>
@@ -214,6 +215,15 @@ void GstRtspReceiver::moveInternalObjectsToThread(QThread* thread) {
     }
 }
 
+/** @brief framewatch에서 마지막으로 관찰한 표시 직전 영상 시각을 원자적으로 반환합니다. */
+VideoFrameTimestamp GstRtspReceiver::latestDisplayedFrameTimestamp() const {
+    VideoFrameTimestamp timestamp;
+    timestamp.utcMsec = latestDisplayedUtcMsec_.load(std::memory_order_acquire);
+    timestamp.observedLocalMsec = latestDisplayedObservedLocalMsec_.load(std::memory_order_acquire);
+    timestamp.senderClock = latestDisplayedUsesSenderClock_.load(std::memory_order_acquire);
+    return timestamp;
+}
+
 /**
  * @brief   수동 정지 상태를 해제하고 pipeline 시작을 요청합니다.
  */
@@ -260,6 +270,9 @@ void GstRtspReceiver::startPipeline() {
 
     gotAnyPacket_.store(false, std::memory_order_relaxed);
     gotAnyFrame_.store(false, std::memory_order_relaxed);
+    latestDisplayedUtcMsec_.store(0, std::memory_order_relaxed);
+    latestDisplayedObservedLocalMsec_.store(0, std::memory_order_relaxed);
+    latestDisplayedUsesSenderClock_.store(false, std::memory_order_relaxed);
 
     const gint64 startTimeUsec = g_get_monotonic_time();
 
@@ -708,7 +721,7 @@ void GstRtspReceiver::checkStall() {
  * @param userData   GstRtspReceiver 포인터
  * @return           pad probe 처리 결과
  */
-GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo*, gpointer userData) {
+GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo* info, gpointer userData) {
     auto* receiver = static_cast<GstRtspReceiver*>(userData);
 
     if (!receiver) {
@@ -716,6 +729,15 @@ GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo*, gpoin
     }
 
     receiver->lastFrameTimeUsec_.store(g_get_monotonic_time(), std::memory_order_relaxed);
+
+    GstBuffer* buffer = info ? gst_pad_probe_info_get_buffer(info) : nullptr;
+    const std::optional<VideoUtcTimestamp> timestamp = receiver->blurProcessor_.timestampForVideoBuffer(buffer);
+    if (timestamp.has_value()) {
+        receiver->latestDisplayedUtcMsec_.store(timestamp->utcMsec, std::memory_order_release);
+        receiver->latestDisplayedUsesSenderClock_.store(timestamp->senderClock, std::memory_order_release);
+        receiver->latestDisplayedObservedLocalMsec_.store(QDateTime::currentMSecsSinceEpoch(),
+                                                          std::memory_order_release);
+    }
 
     bool expected = false;
     if (receiver->gotAnyFrame_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,

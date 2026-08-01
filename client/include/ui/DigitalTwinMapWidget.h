@@ -8,10 +8,13 @@
 #include <QTimer>
 #include <QVector>
 #include <memory>
+#include <optional>
 
 #include "model/DigitalTwinMapDisplaySettings.h"
+#include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
 #include "model/MqttRealtimeData.h"
+#include "model/VideoFrameTimestamp.h"
 #include "overlays/DeviceStatusMapOverlay.h"
 #include "overlays/OverlayManager.h"
 
@@ -36,12 +39,15 @@ public:
     void startDemo();
     void stopDemo();
     void applyDisplaySettings(const DigitalTwinMapDisplaySettings& settings);
+    void configureLiveTracking(const DigitalTwinRuntimeConfig& config);
+    void setPreferredVideoChannel(int channelIndex);
 
 public slots:
     void applyRiskFrame(RiskFrameData frame);
     void applyCentralEvent(CentralEventData event);
     void applyDeviceChannelStatuses(QVector<DeviceChannelStatus> statuses);
     void setDeviceSignalAvailable(bool available);
+    void applyDisplayedVideoTimestamps(QVector<VideoFrameTimestamp> timestamps);
 
 signals:
     void liveRiskStreamActivated();
@@ -80,12 +86,14 @@ private:
     QPointF scenePointFromNormalized(const QPointF& normalizedPosition) const;
     QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
     void fitMapInView();
+    std::optional<VideoFrameTimestamp> representativeVideoTimestamp(qint64 currentTimeMsec) const;
 
     QGraphicsScene scene_;
     QThread simulationThread_;
     OverlayManager overlayManager_;
     DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
+    DigitalTwinRuntimeConfig liveConfig_;
     DangerAlertOverlay* dangerAlertOverlay_ = nullptr;
     std::shared_ptr<DigitalTwinMapSceneBuilder> sceneBuilder_;
     std::shared_ptr<DigitalTwinObjectStyleProvider> objectStyleProvider_;
@@ -95,9 +103,11 @@ private:
     QHash<QString, qsizetype> visualItemIndexes_;
     QHash<QString, qint64> latestCentralEventSourceTimes_;
     QHash<QString, CentralEventData> activeCentralEvents_;
+    QVector<VideoFrameTimestamp> displayedVideoTimestamps_;
     QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
+    int preferredVideoChannelIndex_ = -1;
     QRectF mapRect_;
     bool liveMode_ = false;
 };

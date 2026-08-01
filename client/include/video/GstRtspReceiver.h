@@ -27,6 +27,7 @@ public:
     void setBlurFrame(BlurFrameData frame) override;
     void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) override;
     void moveInternalObjectsToThread(QThread* thread) override;
+    VideoFrameTimestamp latestDisplayedFrameTimestamp() const override;
     void start() override;
     void stop() override;
     void markFirstFrame();
@@ -72,6 +73,9 @@ private:
     std::atomic<gint64> firstPacketTimeUsec_{0};
     std::atomic<gint64> lastPacketTimeUsec_{0};
     std::atomic<gint64> lastFrameTimeUsec_{0};
+    std::atomic<qint64> latestDisplayedUtcMsec_{0};
+    std::atomic<qint64> latestDisplayedObservedLocalMsec_{0};
+    std::atomic_bool latestDisplayedUsesSenderClock_{false};
     std::atomic_bool gotAnyPacket_{false};
     std::atomic_bool gotAnyFrame_{false};
 

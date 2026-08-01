@@ -88,6 +88,8 @@ qt_add_executable(Qtcctvclient
     src/video/BlurVideoFilter.cpp
 
     include/model/DigitalTwinTypes.h
+    include/model/DigitalTwinRuntimeConfig.h
+    include/model/VideoFrameTimestamp.h
     include/model/DigitalTwinMapDisplaySettings.h
     include/model/DeviceStatus.h
     include/model/DeviceStatusReport.h

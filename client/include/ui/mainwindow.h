@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "model/DigitalTwinMapDisplaySettings.h"
+#include "model/DigitalTwinRuntimeConfig.h"
 #include "model/StreamConfig.h"
 #include "model/VideoPreprocessingSettings.h"
 #include "video/VideoRuntimeConfig.h"
@@ -47,7 +48,7 @@ public:
                         std::shared_ptr<DeviceStatusGatewayFactory> deviceStatusGatewayFactory,
                         std::shared_ptr<DashboardPanelFactory> dashboardPanelFactory,
                         std::shared_ptr<ReportGateway> reportGateway, VideoRuntimeConfig videoConfig,
-                        QWidget* parent = nullptr);
+                        DigitalTwinRuntimeConfig digitalTwinConfig, QWidget* parent = nullptr);
     ~MainWindow() override;
 
 protected:

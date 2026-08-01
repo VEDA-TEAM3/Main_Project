@@ -13,9 +13,9 @@ constexpr double spawnerObjectMaxY = 0.86;
 constexpr double edgeEntryPadding = 0.02;
 constexpr double entryLeftX = -edgeEntryPadding;
 constexpr double entryRightX = 1.0 + edgeEntryPadding;
-constexpr double spawnerMinimumHorizontalVelocity = 0.0045;
-constexpr double spawnerMaximumHorizontalVelocity = 0.0085;
-constexpr double spawnerMaximumVerticalVelocity = 0.0022;
+constexpr double spawnerMinimumHorizontalVelocity = 0.00225;
+constexpr double spawnerMaximumHorizontalVelocity = 0.00425;
+constexpr double spawnerMaximumVerticalVelocity = 0.0011;
 
 /**
  * @brief               지정 범위 안의 난수를 생성합니다.

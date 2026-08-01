@@ -6,6 +6,7 @@
 #include <QRectF>
 #include <QVector>
 #include <atomic>
+#include <optional>
 #include <vector>
 
 #include "model/MqttRealtimeData.h"
@@ -19,6 +20,7 @@ public:
     void setTargetsEnabled(bool faceEnabled, bool licensePlateEnabled);
     void submitFrame(BlurFrameData frame);
     void observeVideoBuffer(const GstBuffer* buffer);
+    std::optional<VideoUtcTimestamp> timestampForVideoBuffer(const GstBuffer* buffer);
     void clear();
     void apply(GstVideoFrame& frame);
 

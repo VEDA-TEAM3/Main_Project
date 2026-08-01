@@ -3,6 +3,31 @@
         "windowWidth": 1680,
         "windowHeight": 945
     },
+    "digitalTwin": {
+        "renderIntervalMs": 33,
+        "snapshotPublishIntervalMs": 50,
+        "frameExpiryMs": 5000,
+        "frameExpiryPollMs": 1000,
+        "renderDelayMs": 100,
+        "syncWithVideo": true,
+        "videoSyncCorrectionMs": 0,
+        "maximumVideoClockSkewMs": 3000,
+        "videoTimestampTimeoutMs": 500,
+        "channelTimestampOutlierMs": 500,
+        "fadeInMs": 120,
+        "missingGraceMs": 100,
+        "fadeOutMs": 180,
+        "maximumHistorySize": 16,
+        "diagnosticsIntervalMs": 1000,
+        "world": {
+            "fixedBoundsEnabled": true,
+            "invertY": true,
+            "minX": 0.0,
+            "minY": 0.0,
+            "maxX": 100.0,
+            "maxY": 100.0
+        }
+    },
     "video": {
         "initialStartDelayMs": 1000,
         "receiverStartSpacingMs": 3000,
@@ -102,7 +127,7 @@
             "centralStatus": { "filter": "veda/hw/status", "qos": 1 },
             "sensorAlive": { "filter": "veda/ch/+/alive", "qos": 1 },
             "centralEvent": { "filter": "veda/qt/event", "qos": 1 },
-            "risk": { "filter": "veda/risk", "qos": 1 },
+            "risk": { "filter": "veda/risk", "qos": 0 },
             "blur": { "filter": "veda/ch/+/blur", "qos": 0 }
         },
         "dispatcher": {

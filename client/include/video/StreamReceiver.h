@@ -6,6 +6,7 @@
 #include <QString>
 
 #include "model/MqttRealtimeData.h"
+#include "model/VideoFrameTimestamp.h"
 #include "model/VideoPreprocessingSettings.h"
 
 class QThread;
@@ -22,6 +23,7 @@ public:
     virtual void setBlurFrame(BlurFrameData frame) = 0;
     virtual void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) = 0;
     virtual void moveInternalObjectsToThread(QThread* thread) = 0;
+    virtual VideoFrameTimestamp latestDisplayedFrameTimestamp() const = 0;
     virtual void start() = 0;
     virtual void stop() = 0;
 
