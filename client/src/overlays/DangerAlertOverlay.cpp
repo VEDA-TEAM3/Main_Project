@@ -5,6 +5,7 @@
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QSize>
+#include <QTimer>
 #include <QtGlobal>
 
 namespace {
@@ -15,6 +16,7 @@ constexpr int alertMaximumWidth = 300;
 constexpr int alertWidthPercent = 31;
 constexpr int opacityAnimationDurationMsec = 1300;
 constexpr int fadeOutAnimationDurationMsec = 380;
+constexpr int minimumVisibleDurationMsec = 2000;
 constexpr qreal alertMaximumOpacity = 0.92;
 constexpr qreal alertMinimumOpacity = 0.48;
 }  // namespace
@@ -51,6 +53,20 @@ DangerAlertOverlay::DangerAlertOverlay(QWidget* parent)
         }
     });
 
+    minimumVisibleTimer_ = new QTimer(this);
+    minimumVisibleTimer_->setSingleShot(true);
+    connect(minimumVisibleTimer_, &QTimer::timeout, this, [this]() {
+        if (active_) {
+            return;
+        }
+
+        opacityAnimation_->stop();
+        fadeOutAnimation_->stop();
+        fadeOutAnimation_->setStartValue(opacityEffect_->opacity());
+        fadeOutAnimation_->setEndValue(0.0);
+        fadeOutAnimation_->start();
+    });
+
     hide();
 }
 
@@ -66,6 +82,10 @@ void DangerAlertOverlay::setActive(bool active) {
     active_ = active;
 
     if (!active_) {
+        if (minimumVisibleTimer_->isActive()) {
+            return;
+        }
+
         opacityAnimation_->stop();
         fadeOutAnimation_->stop();
         fadeOutAnimation_->setStartValue(opacityEffect_->opacity());
@@ -78,6 +98,7 @@ void DangerAlertOverlay::setActive(bool active) {
     opacityEffect_->setOpacity(alertMaximumOpacity);
     show();
     raise();
+    minimumVisibleTimer_->start(minimumVisibleDurationMsec);
     opacityAnimation_->start(QAbstractAnimation::KeepWhenStopped);
 }
 
