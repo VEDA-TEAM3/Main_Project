@@ -8,9 +8,6 @@
 
 namespace {
 constexpr int riskProtocolVersion = 1;
-constexpr int minimumZoneId = -1;
-constexpr int maximumZoneId = 3;
-
 bool readInteger(const QJsonObject& object, const QString& name, qint64& value) {
     const QJsonValue jsonValue = object.value(name);
     if (!jsonValue.isDouble()) {
@@ -108,7 +105,6 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
         const QJsonValue positionValue = sourceObject.value(QStringLiteral("pos"));
         qint64 objectId = 0;
         qint64 nearestId = 0;
-        qint64 zoneId = minimumZoneId;
         double distance = 0.0;
         DigitalTwinRiskLevel objectRiskLevel = DigitalTwinRiskLevel::Normal;
         if (!readInteger(sourceObject, QStringLiteral("gid"), objectId) || objectId <= 0 || !classValue.isString() ||
@@ -117,13 +113,6 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
             !readInteger(sourceObject, QStringLiteral("nearest"), nearestId) || nearestId < 0 ||
             !readFiniteNumber(sourceObject, QStringLiteral("dist"), distance)) {
             error = QStringLiteral("Invalid RiskObject fields on %1").arg(topic);
-            return false;
-        }
-
-        const bool hasZoneId = sourceObject.contains(QStringLiteral("zoneId"));
-        if (hasZoneId && (!readInteger(sourceObject, QStringLiteral("zoneId"), zoneId) || zoneId < minimumZoneId ||
-                          zoneId > maximumZoneId)) {
-            error = QStringLiteral("Invalid RiskObject zoneId on %1").arg(topic);
             return false;
         }
 
@@ -147,8 +136,6 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
         parsedObject.objectClass = objectClass;
         parsedObject.worldPosition = QPointF(x, y);
         parsedObject.riskLevel = objectRiskLevel;
-        parsedObject.zoneId = static_cast<int>(zoneId);
-        parsedObject.hasZoneId = hasZoneId;
         parsedObject.nearestId = nearestId;
         parsedObject.distance = distance;
         frame.objects.append(std::move(parsedObject));
