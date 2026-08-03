@@ -16,7 +16,11 @@ constexpr qint64 dangerPulseRepeatMsec = 1500;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
 constexpr qint64 maximumPositionFilterStepMsec = 100;
-constexpr double maximumNormalizedSpeedPerSecond = 0.9;
+constexpr double maximumNormalizedSpeedPerSecond = 0.45;
+constexpr double positionDeadband = 0.0015;
+constexpr double smallMovementThreshold = 0.015;
+constexpr double positionSmoothingTimeConstantMsec = 90.0;
+constexpr double maximumPositionBlend = 0.65;
 constexpr qsizetype maximumClockOffsetSampleCount = 15;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
@@ -499,10 +503,23 @@ QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPo
     const double distance = std::hypot(displacement.x(), displacement.y());
     const qint64 elapsedMsec =
         qBound(minimumPositionFilterStepMsec, localTimeMsec - previousTimeMsec, maximumPositionFilterStepMsec);
+
+    if (distance <= positionDeadband) {
+        stabilizedPositionTimesMsec_.insert(objectId, localTimeMsec);
+        return previousPosition;
+    }
+
+    const double timeBasedBlend = 1.0 - std::exp(-static_cast<double>(elapsedMsec) /
+                                                 positionSmoothingTimeConstantMsec);
+    const double movementScale = qBound(0.0, distance / smallMovementThreshold, 1.0);
+    const double blend = qMin(maximumPositionBlend, timeBasedBlend + movementScale * 0.20);
+    displacement *= blend;
+
+    const double blendedDistance = std::hypot(displacement.x(), displacement.y());
     const double maximumDistance = maximumNormalizedSpeedPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
 
-    if (distance > maximumDistance && distance > 0.0) {
-        displacement *= maximumDistance / distance;
+    if (blendedDistance > maximumDistance) {
+        displacement *= maximumDistance / blendedDistance;
     }
 
     const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x(), 1.0),

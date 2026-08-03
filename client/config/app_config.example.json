@@ -104,9 +104,9 @@
                 "sourceTimestampRestartThresholdMs": 2000,
                 "paddingRatio": 0.18,
                 "maximumCornerRadius": 28,
-                "radiusDivisor": 4,
+                "radiusDivisor": 3,
                 "minimumRadius": 4,
-                "maximumRadius": 18,
+                "maximumRadius": 28,
                 "debugLogIntervalMs": 1000
             }
         }

@@ -235,6 +235,7 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     displayedVideoTimestamps_.clear();
+    synchronizedVideoChannelIndex_ = -1;
     lastLiveSnapshotPublishMsec_ = 0;
 }
 
@@ -244,6 +245,7 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
  */
 void DigitalTwinMapWidget::setPreferredVideoChannel(int channelIndex) {
     preferredVideoChannelIndex_ = channelIndex >= 0 && channelIndex < digitalTwinChannelCount ? channelIndex : -1;
+    synchronizedVideoChannelIndex_ = -1;
 }
 
 /**
@@ -796,12 +798,13 @@ void DigitalTwinMapWidget::fitMapInView() {
 }
 
 /**
- * @brief                 최근 채널 영상 시각 중 이상치에 덜 민감한 중앙값을 선택합니다.
+ * @brief                 최근 영상 시각 중 이상치를 제외하고 정상인 기존 기준 채널을 유지합니다.
  * @param currentTimeMsec 현재 로컬 UTC millisecond
  * @return                sender clock을 우선한 대표 영상 시각
  */
-std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTimestamp(qint64 currentTimeMsec) const {
+std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTimestamp(qint64 currentTimeMsec) {
     if (!liveConfig_.syncWithVideo) {
+        synchronizedVideoChannelIndex_ = -1;
         return std::nullopt;
     }
 
@@ -823,6 +826,7 @@ std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTime
                                                 return timestamp.channelIndex == preferredVideoChannelIndex_;
                                             });
         if (preferred != freshTimestamps.cend()) {
+            synchronizedVideoChannelIndex_ = preferred->channelIndex;
             return *preferred;
         }
     }
@@ -847,5 +851,16 @@ std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTime
                                                     liveConfig_.channelTimestampOutlierMsec;
                                          }),
                           freshTimestamps.end());
-    return freshTimestamps[freshTimestamps.size() / 2];
+
+    const auto synchronized = std::find_if(freshTimestamps.cbegin(), freshTimestamps.cend(),
+                                           [this](const VideoFrameTimestamp& timestamp) {
+                                               return timestamp.channelIndex == synchronizedVideoChannelIndex_;
+                                           });
+    if (synchronized != freshTimestamps.cend()) {
+        return *synchronized;
+    }
+
+    const VideoFrameTimestamp selectedTimestamp = freshTimestamps[freshTimestamps.size() / 2];
+    synchronizedVideoChannelIndex_ = selectedTimestamp.channelIndex;
+    return selectedTimestamp;
 }

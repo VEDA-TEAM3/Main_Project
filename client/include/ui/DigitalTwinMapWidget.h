@@ -86,7 +86,7 @@ private:
     QPointF scenePointFromNormalized(const QPointF& normalizedPosition) const;
     QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
     void fitMapInView();
-    std::optional<VideoFrameTimestamp> representativeVideoTimestamp(qint64 currentTimeMsec) const;
+    std::optional<VideoFrameTimestamp> representativeVideoTimestamp(qint64 currentTimeMsec);
 
     QGraphicsScene scene_;
     QThread simulationThread_;
@@ -108,6 +108,7 @@ private:
     QTimer liveFrameRenderTimer_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
     int preferredVideoChannelIndex_ = -1;
+    int synchronizedVideoChannelIndex_ = -1;
     QRectF mapRect_;
     bool liveMode_ = false;
 };
