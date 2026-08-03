@@ -7,6 +7,11 @@ struct DigitalTwinWorldConfig {
     QRectF bounds = QRectF(0.0, 0.0, 100.0, 100.0);
     bool fixedBoundsEnabled = false;
     bool invertY = true;
+    int automaticBoundsWarmupMsec = 500;
+    qsizetype automaticBoundsMinimumSamples = 12;
+    qsizetype automaticBoundsMaximumSamples = 512;
+    double automaticBoundsPaddingRatio = 0.08;
+    double automaticBoundsOutlierFraction = 0.05;
 };
 
 struct DigitalTwinRuntimeConfig {
