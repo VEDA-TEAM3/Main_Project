@@ -63,7 +63,6 @@ private:
         QGraphicsPixmapItem* marker = nullptr;
         QGraphicsSimpleTextItem* label = nullptr;
         QGraphicsPathItem* trail = nullptr;
-        QGraphicsPathItem* trailArrow = nullptr;
         QVector<QPointF> recentPositions;
         DigitalTwinRiskLevel visibleRiskLevel = DigitalTwinRiskLevel::Normal;
     };
@@ -86,7 +85,6 @@ private:
     void rebuildVisualItemIndexes();
     QPointF scenePointFromNormalized(const QPointF& normalizedPosition) const;
     QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
-    QPainterPath createTrailArrowPath(const QVector<QPointF>& positions, double tipOffset) const;
     void fitMapInView();
     std::optional<VideoFrameTimestamp> representativeVideoTimestamp(qint64 currentTimeMsec) const;
 

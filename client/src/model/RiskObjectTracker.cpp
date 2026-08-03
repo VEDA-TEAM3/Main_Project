@@ -189,9 +189,12 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
     QString clockSource = QStringLiteral("arrival-offset");
     if (videoTimestamp.has_value() && videoTimestamp->isValid() &&
         localTimeMsec - videoTimestamp->observedLocalMsec <= config_.videoTimestampTimeoutMsec) {
+        const qint64 elapsedSinceVideoObservationMsec =
+            qMax<qint64>(0, localTimeMsec - videoTimestamp->observedLocalMsec);
+        const qint64 progressingVideoUtcMsec = videoTimestamp->utcMsec + elapsedSinceVideoObservationMsec;
         const qint64 videoBasedTimestamp =
-            videoTimestamp->senderClock ? videoTimestamp->utcMsec - config_.videoSyncCorrectionMsec
-                                        : videoTimestamp->utcMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
+            videoTimestamp->senderClock ? progressingVideoUtcMsec - config_.videoSyncCorrectionMsec
+                                        : progressingVideoUtcMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
         if (qAbs(videoBasedTimestamp - estimatedSourceTimestamp) <= config_.maximumVideoClockSkewMsec) {
             calculatedSourceTimestamp = videoBasedTimestamp;
             clockSource =

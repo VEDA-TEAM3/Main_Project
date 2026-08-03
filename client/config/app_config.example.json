@@ -135,7 +135,7 @@
             "blurMaximumPendingFramesPerChannel": 32,
             "blurSourceRestartGapMs": 5000,
             "blurTimestampRestartThresholdMs": 2000,
-            "riskFlushIntervalMs": 50,
+            "riskFlushIntervalMs": 10,
             "riskSourceRestartGapMs": 5000,
             "riskTimestampRollbackResetMs": 1000
         }

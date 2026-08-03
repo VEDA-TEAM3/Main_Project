@@ -1,6 +1,5 @@
 #include "ui/DigitalTwinMapWidget.h"
 
-#include <QBrush>
 #include <QDateTime>
 #include <QDebug>
 #include <QFrame>
@@ -32,10 +31,6 @@
 namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maxTrailSceneLength = 240.0;
-constexpr double minimumTrailArrowTipOffset = 20.0;
-constexpr double trailArrowMarkerMargin = 6.0;
-constexpr double trailArrowLength = 11.0;
-constexpr double trailArrowHalfWidth = 5.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
 constexpr int digitalTwinChannelCount = 4;
 
@@ -311,9 +306,6 @@ void DigitalTwinMapWidget::applyDisplaySettings(const DigitalTwinMapDisplaySetti
     for (DemoVisualItem& visualItem : demoItems_) {
         if (visualItem.trail) {
             visualItem.trail->setVisible(settings.showMovementTrails);
-        }
-        if (visualItem.trailArrow) {
-            visualItem.trailArrow->setVisible(settings.showMovementTrails);
         }
     }
 }
@@ -599,13 +591,6 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
     visualItem.trail->setZValue(3.0);
     visualItem.trail->setVisible(displaySettings_.showMovementTrails);
 
-    QPen trailArrowPen(visualStyle.trailColor, 1.0, Qt::SolidLine);
-    trailArrowPen.setCosmetic(true);
-    visualItem.trailArrow = scene_.addPath(QPainterPath(), trailArrowPen, QBrush(visualStyle.trailColor));
-    visualItem.trailArrow->setOpacity(0.72);
-    visualItem.trailArrow->setZValue(3.1);
-    visualItem.trailArrow->setVisible(displaySettings_.showMovementTrails);
-
     visualItem.label = scene_.addSimpleText(object.objectId);
     visualItem.label->setScale(0.9);
     visualItem.label->setZValue(5.0);
@@ -622,8 +607,7 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
  * @param visualItem  갱신할 scene 표시 항목
  */
 void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
-    if (!visualItem || !visualItem->marker || !visualItem->label || !visualItem->trail ||
-        !visualItem->trailArrow) {
+    if (!visualItem || !visualItem->marker || !visualItem->label || !visualItem->trail) {
         return;
     }
 
@@ -653,17 +637,11 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     visualItem->marker->setOpacity(objectOpacity);
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);
-    visualItem->trailArrow->setOpacity(0.72 * visualItem->object.opacity);
 
     visualItem->recentPositions.append(scenePosition);
     trimTrailPositions(&visualItem->recentPositions);
 
     visualItem->trail->setPath(createTrailPath(visualItem->recentPositions));
-    const double trailArrowTipOffset =
-        qMax(minimumTrailArrowTipOffset,
-             static_cast<double>(qMax(visualStyle.iconSize.width(), visualStyle.iconSize.height())) * 0.5 +
-                 trailArrowMarkerMargin);
-    visualItem->trailArrow->setPath(createTrailArrowPath(visualItem->recentPositions, trailArrowTipOffset));
 }
 
 /**
@@ -734,7 +712,6 @@ void DigitalTwinMapWidget::removeVisualItemAt(qsizetype visualIndex) {
     releaseSceneItem(&scene_, visualItem.marker);
     releaseSceneItem(&scene_, visualItem.label);
     releaseSceneItem(&scene_, visualItem.trail);
-    releaseSceneItem(&scene_, visualItem.trailArrow);
 
     demoItems_.removeAt(visualIndex);
 }
@@ -804,42 +781,6 @@ QPainterPath DigitalTwinMapWidget::createTrailPath(const QVector<QPointF>& posit
         path.lineTo(visiblePositions[index]);
     }
 
-    return path;
-}
-
-/**
- * @brief           최근 이동 방향을 나타내는 화살촉 경로를 생성합니다.
- * @param positions scene 좌표 기준 최근 위치 목록
- * @return          객체 뒤쪽에 표시할 화살촉 경로
- */
-QPainterPath DigitalTwinMapWidget::createTrailArrowPath(const QVector<QPointF>& positions, double tipOffset) const {
-    QPainterPath path;
-    if (positions.size() < 2 || trailLength(positions) <= tipOffset + trailArrowLength) {
-        return path;
-    }
-
-    QPointF direction;
-    for (qsizetype index = positions.size() - 1; index > 0; --index) {
-        const QPointF candidate = positions[index] - positions[index - 1];
-        const double candidateLength = std::hypot(candidate.x(), candidate.y());
-        if (!qFuzzyIsNull(candidateLength)) {
-            direction = candidate / candidateLength;
-            break;
-        }
-    }
-
-    if (qFuzzyIsNull(direction.x()) && qFuzzyIsNull(direction.y())) {
-        return path;
-    }
-
-    const QPointF arrowTip = positions.last() - direction * tipOffset;
-    const QPointF arrowBaseCenter = arrowTip - direction * trailArrowLength;
-    const QPointF perpendicular(-direction.y(), direction.x());
-
-    path.moveTo(arrowTip);
-    path.lineTo(arrowBaseCenter + perpendicular * trailArrowHalfWidth);
-    path.lineTo(arrowBaseCenter - perpendicular * trailArrowHalfWidth);
-    path.closeSubpath();
     return path;
 }
 
