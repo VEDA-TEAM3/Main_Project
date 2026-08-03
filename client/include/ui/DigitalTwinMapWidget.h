@@ -64,8 +64,6 @@ private:
         QGraphicsSimpleTextItem* label = nullptr;
         QGraphicsPathItem* trail = nullptr;
         QVector<QPointF> recentPositions;
-        qreal headingDegrees = 0.0;
-        bool headingInitialized = false;
         DigitalTwinRiskLevel visibleRiskLevel = DigitalTwinRiskLevel::Normal;
     };
 

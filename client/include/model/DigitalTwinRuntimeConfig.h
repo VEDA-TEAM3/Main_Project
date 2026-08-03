@@ -20,9 +20,9 @@ struct DigitalTwinRuntimeConfig {
     qint64 maximumVideoClockSkewMsec = 3000;
     qint64 videoTimestampTimeoutMsec = 500;
     qint64 channelTimestampOutlierMsec = 500;
-    qint64 fadeInMsec = 0;
+    qint64 fadeInMsec = 120;
     qint64 missingGraceMsec = 350;
-    qint64 fadeOutMsec = 0;
+    qint64 fadeOutMsec = 180;
     qsizetype maximumHistorySize = 16;
     int diagnosticsIntervalMsec = 1000;
     DigitalTwinWorldConfig world;

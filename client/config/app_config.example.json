@@ -14,9 +14,9 @@
         "maximumVideoClockSkewMs": 3000,
         "videoTimestampTimeoutMs": 500,
         "channelTimestampOutlierMs": 500,
-        "fadeInMs": 0,
+        "fadeInMs": 120,
         "missingGraceMs": 350,
-        "fadeOutMs": 0,
+        "fadeOutMs": 180,
         "maximumHistorySize": 16,
         "diagnosticsIntervalMs": 1000,
         "world": {

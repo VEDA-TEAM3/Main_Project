@@ -32,8 +32,6 @@ namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maxTrailSceneLength = 240.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
-constexpr double headingMeasurementDistance = 8.0;
-constexpr double headingSmoothingRatio = 0.28;
 constexpr int digitalTwinChannelCount = 4;
 
 QString centralEventKey(const CentralEventData& event) {
@@ -101,32 +99,6 @@ double approximateRotationDegrees(const QPointF& velocity) {
     }
 
     return velocity.x() < 0.0 ? 225.0 : 315.0;
-}
-
-double shortestAngleDifference(double targetDegrees, double currentDegrees) {
-    double difference = targetDegrees - currentDegrees;
-    while (difference > 180.0) {
-        difference -= 360.0;
-    }
-    while (difference < -180.0) {
-        difference += 360.0;
-    }
-    return difference;
-}
-
-QPointF stableTrailDirection(const QVector<QPointF>& positions) {
-    if (positions.size() < 2) {
-        return {};
-    }
-
-    const QPointF currentPosition = positions.constLast();
-    for (qsizetype index = positions.size() - 2; index >= 0; --index) {
-        const QPointF direction = currentPosition - positions[index];
-        if (std::hypot(direction.x(), direction.y()) >= headingMeasurementDistance) {
-            return direction;
-        }
-    }
-    return {};
 }
 
 /**
@@ -648,24 +620,14 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     const QPointF scenePosition = scenePointFromNormalized(visualItem->object.position);
     visualItem->marker->setPos(scenePosition);
 
-    visualItem->recentPositions.append(scenePosition);
-    trimTrailPositions(&visualItem->recentPositions);
+    const bool isMoving =
+        !qFuzzyIsNull(visualItem->object.velocity.x()) || !qFuzzyIsNull(visualItem->object.velocity.y());
 
     if (visualItem->object.type == DigitalTwinObjectType::Pedestrian) {
         visualItem->marker->setRotation(0.0);
-    } else {
-        const QPointF direction = stableTrailDirection(visualItem->recentPositions);
-        if (!qFuzzyIsNull(direction.x()) || !qFuzzyIsNull(direction.y())) {
-            const double targetHeading = approximateRotationDegrees(direction) + movingIconRotationOffsetDegrees;
-            if (!visualItem->headingInitialized) {
-                visualItem->headingDegrees = targetHeading;
-                visualItem->headingInitialized = true;
-            } else {
-                visualItem->headingDegrees += shortestAngleDifference(targetHeading, visualItem->headingDegrees) *
-                                              headingSmoothingRatio;
-            }
-            visualItem->marker->setRotation(visualItem->headingDegrees);
-        }
+    } else if (isMoving) {
+        visualItem->marker->setRotation(approximateRotationDegrees(visualItem->object.velocity) +
+                                        movingIconRotationOffsetDegrees);
     }
 
     const DigitalTwinObjectVisualStyle visualStyle = objectStyleProvider_->styleFor(visualItem->object);
@@ -678,6 +640,8 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);
 
+    visualItem->recentPositions.append(scenePosition);
+    trimTrailPositions(&visualItem->recentPositions);
     visualItem->trail->setPath(createTrailPath(visualItem->recentPositions));
 }
 
@@ -887,10 +851,10 @@ std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTime
                                          }),
                           freshTimestamps.end());
 
-    const auto synchronized = std::find_if(freshTimestamps.cbegin(), freshTimestamps.cend(),
-                                           [this](const VideoFrameTimestamp& timestamp) {
-                                               return timestamp.channelIndex == synchronizedVideoChannelIndex_;
-                                           });
+    const auto synchronized =
+        std::find_if(freshTimestamps.cbegin(), freshTimestamps.cend(), [this](const VideoFrameTimestamp& timestamp) {
+            return timestamp.channelIndex == synchronizedVideoChannelIndex_;
+        });
     if (synchronized != freshTimestamps.cend()) {
         return *synchronized;
     }
