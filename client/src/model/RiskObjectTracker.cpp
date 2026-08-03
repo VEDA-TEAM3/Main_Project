@@ -11,19 +11,13 @@
 namespace {
 constexpr qint64 sourceRestartGapMsec = 5000;
 constexpr qint64 sourceTimestampRollbackResetMsec = 1000;
-constexpr qint64 objectMissingGraceMsec = 350;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
 constexpr qint64 maximumPositionFilterStepMsec = 100;
 constexpr double maximumNormalizedSpeedPerSecond = 0.9;
-constexpr double smallMovementThreshold = 0.015;
-constexpr double smallMovementBlend = 0.55;
-constexpr double regularMovementBlend = 0.82;
-constexpr qsizetype maximumTimelineOffsetSampleCount = 15;
-constexpr qsizetype timelineOffsetWarmupSampleCount = 5;
-constexpr qint64 maximumTimelineOffsetAdjustmentMsec = 2;
+constexpr qsizetype maximumClockOffsetSampleCount = 15;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -65,17 +59,6 @@ int channelIndexForPosition(const QPointF& position) {
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
     return first + (second - first) * ratio;
 }
-
-double percentile(QVector<double> values, double fraction) {
-    if (values.isEmpty()) {
-        return 0.0;
-    }
-
-    std::sort(values.begin(), values.end());
-    const double boundedFraction = qBound(0.0, fraction, 1.0);
-    const qsizetype index = static_cast<qsizetype>(boundedFraction * static_cast<double>(values.size() - 1));
-    return values[index];
-}
 }  // namespace
 
 /** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다. */
@@ -104,12 +87,10 @@ void RiskObjectTracker::reset() {
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
-    sourceToLocalOffsetSamples_.clear();
+    sourceClockOffsetSamples_.clear();
     automaticWorldBounds_ = {};
-    automaticWorldSamples_.clear();
-    automaticBoundsStartSourceTimestamp_ = 0;
     lastArrivalTimeMsec_ = 0;
-    sourceToLocalOffsetMsec_ = 0;
+    sourceClockOffsetMsec_ = 0;
     lastRenderSourceTimestamp_ = 0;
     lastDiagnosticsMsec_ = 0;
     hasAutomaticWorldBounds_ = false;
@@ -140,31 +121,21 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
-    const qint64 measuredSourceToLocalOffsetMsec = arrivalTimeMsec - frame.sourceTimestamp;
-    sourceToLocalOffsetSamples_.append(measuredSourceToLocalOffsetMsec);
-    while (sourceToLocalOffsetSamples_.size() > maximumTimelineOffsetSampleCount) {
-        sourceToLocalOffsetSamples_.removeFirst();
+    const qint64 measuredClockOffsetMsec = arrivalTimeMsec - frame.sourceTimestamp;
+    sourceClockOffsetSamples_.append(measuredClockOffsetMsec);
+    while (sourceClockOffsetSamples_.size() > maximumClockOffsetSampleCount) {
+        sourceClockOffsetSamples_.removeFirst();
     }
-    QVector<qint64> sortedOffsets = sourceToLocalOffsetSamples_;
+    QVector<qint64> sortedOffsets = sourceClockOffsetSamples_;
     std::sort(sortedOffsets.begin(), sortedOffsets.end());
-    const qint64 medianOffsetMsec = sortedOffsets[sortedOffsets.size() / 2];
-    if (sourceToLocalOffsetSamples_.size() <= timelineOffsetWarmupSampleCount) {
-        sourceToLocalOffsetMsec_ = medianOffsetMsec;
-    } else {
-        const qint64 adjustmentMsec =
-            qBound(-maximumTimelineOffsetAdjustmentMsec, medianOffsetMsec - sourceToLocalOffsetMsec_,
-                   maximumTimelineOffsetAdjustmentMsec);
-        sourceToLocalOffsetMsec_ += adjustmentMsec;
-    }
-
-    updateAutomaticWorldBounds(frame);
+    sourceClockOffsetMsec_ = sortedOffsets[sortedOffsets.size() / 2];
 
     for (const RiskObjectData& object : frame.objects) {
         retainedObjects_.insert(object.globalId, object);
         lastSeenSourceTimes_.insert(object.globalId, frame.sourceTimestamp);
     }
 
-    const qint64 objectRetentionMsec = qMax(objectMissingGraceMsec, config_.missingGraceMsec) + config_.fadeOutMsec;
+    const qint64 objectRetentionMsec = config_.missingGraceMsec + config_.fadeOutMsec;
     for (auto iterator = lastSeenSourceTimes_.begin(); iterator != lastSeenSourceTimes_.end();) {
         if (frame.sourceTimestamp - iterator.value() <= objectRetentionMsec) {
             ++iterator;
@@ -205,19 +176,34 @@ bool RiskObjectTracker::hasFrame() const { return !history_.isEmpty(); }
  * @param localTimeMsec  현재 로컬 시각
  * @return               UI 렌더링용 디지털 트윈 스냅샷
  */
-DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
+DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
+                                                     const std::optional<VideoFrameTimestamp>& videoTimestamp) {
     pendingRiskEvents_.clear();
     if (history_.isEmpty()) {
         return {};
     }
 
-    if (!worldBoundsReady()) {
-        return {};
+    updateAutomaticWorldBounds(history_.constLast());
+    const qint64 estimatedSourceTimestamp = localTimeMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
+    qint64 calculatedSourceTimestamp = estimatedSourceTimestamp;
+    QString clockSource = QStringLiteral("arrival-offset");
+    if (videoTimestamp.has_value() && videoTimestamp->isValid() &&
+        localTimeMsec - videoTimestamp->observedLocalMsec <= config_.videoTimestampTimeoutMsec) {
+        const qint64 videoBasedTimestamp =
+            videoTimestamp->senderClock ? videoTimestamp->utcMsec - config_.videoSyncCorrectionMsec
+                                        : videoTimestamp->utcMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
+        if (qAbs(videoBasedTimestamp - estimatedSourceTimestamp) <= config_.maximumVideoClockSkewMsec) {
+            calculatedSourceTimestamp = videoBasedTimestamp;
+            clockSource =
+                videoTimestamp->senderClock ? QStringLiteral("video-sender-clock") : QStringLiteral("video-pts-anchor");
+        } else {
+            clockSource = QStringLiteral("video-clock-rejected");
+        }
     }
+
     const qint64 latestSourceTimestamp = history_.constLast().sourceTimestamp;
-    const qint64 estimatedSourceTimestamp = localTimeMsec - sourceToLocalOffsetMsec_ - config_.renderDelayMsec;
-    const qint64 desiredSourceTimestamp = qMin(latestSourceTimestamp, estimatedSourceTimestamp);
-    const qint64 targetSourceTimestamp = qMax(desiredSourceTimestamp, lastRenderSourceTimestamp_);
+    const qint64 targetSourceTimestamp =
+        qMin(latestSourceTimestamp, qMax(calculatedSourceTimestamp, lastRenderSourceTimestamp_));
     lastRenderSourceTimestamp_ = targetSourceTimestamp;
     RiskFrameData frame = interpolatedFrame(targetSourceTimestamp);
 
@@ -238,15 +224,20 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
 
     if (config_.diagnosticsIntervalMsec > 0 &&
         localTimeMsec - lastDiagnosticsMsec_ >= config_.diagnosticsIntervalMsec) {
+        const qint64 videoUtcMsec = videoTimestamp.has_value() ? videoTimestamp->utcMsec : 0;
+        const int referenceChannel = videoTimestamp.has_value() ? videoTimestamp->channelIndex + 1 : 0;
+        const bool senderClock = videoTimestamp.has_value() && videoTimestamp->senderClock;
         qInfo().noquote() << QStringLiteral(
-                                 "[TOPVIEW PLAYOUT] targetTs=%1 desiredTs=%2 latestRiskTs=%3 buffered=%4ms "
-                                 "sourceToLocalOffset=%5ms renderDelay=%6ms history=%7")
+                                 "[TOPVIEW SYNC] clock=%1 channel=%2 videoTs=%3 senderClock=%4 targetTs=%5 "
+                                 "latestRiskTs=%6 buffered=%7ms offset=%8ms history=%9")
+                                 .arg(clockSource)
+                                 .arg(referenceChannel)
+                                 .arg(videoUtcMsec)
+                                 .arg(senderClock)
                                  .arg(targetSourceTimestamp)
-                                 .arg(desiredSourceTimestamp)
                                  .arg(latestSourceTimestamp)
                                  .arg(latestSourceTimestamp - targetSourceTimestamp)
-                                 .arg(sourceToLocalOffsetMsec_)
-                                 .arg(config_.renderDelayMsec)
+                                 .arg(sourceClockOffsetMsec_)
                                  .arg(history_.size());
         lastDiagnosticsMsec_ = localTimeMsec;
     }
@@ -257,8 +248,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     QSet<qint64> includedObjectIds;
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
-    const auto appendObject = [this, localTimeMsec, targetSourceTimestamp, &snapshot, &currentPositions, &pairKeys,
-                               &includedObjectIds](const RiskObjectData& sourceObject, qreal opacity) {
+    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys, &includedObjectIds](
+                                  const RiskObjectData& sourceObject, qreal opacity) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
         }
@@ -399,8 +390,7 @@ RiskFrameData RiskObjectTracker::interpolatedFrame(qint64 sourceTimestamp) const
     const double ratio = std::clamp(
         static_cast<double>(sourceTimestamp - previousFrame.sourceTimestamp) / static_cast<double>(durationMsec), 0.0,
         1.0);
-    const RiskFrameData& membershipFrame = ratio < 0.5 ? previousFrame : nextFrame;
-    RiskFrameData result = membershipFrame;
+    RiskFrameData result = previousFrame;
     result.sourceTimestamp = sourceTimestamp;
 
     QHash<qint64, const RiskObjectData*> previousObjects;
@@ -428,59 +418,46 @@ RiskFrameData RiskObjectTracker::interpolatedFrame(qint64 sourceTimestamp) const
 
 /** @brief 설정 좌표가 없을 때 관측 좌표로 지도 정규화 범위를 갱신합니다. */
 void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
-    if (hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_ || frame.objects.isEmpty()) {
+    if (hasConfiguredWorldBounds_ || frame.objects.isEmpty()) {
         return;
     }
 
-    if (automaticBoundsStartSourceTimestamp_ <= 0) {
-        automaticBoundsStartSourceTimestamp_ = frame.sourceTimestamp;
-    }
-
+    double minX = frame.objects.constFirst().worldPosition.x();
+    double maxX = minX;
+    double minY = frame.objects.constFirst().worldPosition.y();
+    double maxY = minY;
+    bool normalizedCoordinates = true;
     for (const RiskObjectData& object : frame.objects) {
-        if (automaticWorldSamples_.size() >= config_.world.automaticBoundsMaximumSamples) {
-            break;
-        }
-        automaticWorldSamples_.append(object.worldPosition);
+        minX = qMin(minX, object.worldPosition.x());
+        maxX = qMax(maxX, object.worldPosition.x());
+        minY = qMin(minY, object.worldPosition.y());
+        maxY = qMax(maxY, object.worldPosition.y());
+        normalizedCoordinates = normalizedCoordinates && object.worldPosition.x() >= 0.0 &&
+                                object.worldPosition.x() <= 1.0 && object.worldPosition.y() >= 0.0 &&
+                                object.worldPosition.y() <= 1.0;
     }
 
-    const bool warmupComplete =
-        frame.sourceTimestamp - automaticBoundsStartSourceTimestamp_ >= config_.world.automaticBoundsWarmupMsec;
-    if (!warmupComplete || automaticWorldSamples_.size() < config_.world.automaticBoundsMinimumSamples) {
-        return;
+    QRectF observedBounds;
+    if (normalizedCoordinates) {
+        observedBounds = QRectF(0.0, 0.0, 1.0, 1.0);
+    } else {
+        const double width = qMax(1.0, maxX - minX);
+        const double height = qMax(1.0, maxY - minY);
+        const double centerX = (minX + maxX) * 0.5;
+        const double centerY = (minY + maxY) * 0.5;
+        const double horizontalMargin = width * 0.08;
+        const double verticalMargin = height * 0.08;
+        observedBounds = QRectF(centerX - width * 0.5 - horizontalMargin, centerY - height * 0.5 - verticalMargin,
+                                width + horizontalMargin * 2.0, height + verticalMargin * 2.0);
     }
 
-    QVector<double> xValues;
-    QVector<double> yValues;
-    xValues.reserve(automaticWorldSamples_.size());
-    yValues.reserve(automaticWorldSamples_.size());
-    for (const QPointF& sample : automaticWorldSamples_) {
-        xValues.append(sample.x());
-        yValues.append(sample.y());
+    if (!hasAutomaticWorldBounds_) {
+        automaticWorldBounds_ = observedBounds;
+        hasAutomaticWorldBounds_ = true;
+    } else {
+        automaticWorldBounds_ = automaticWorldBounds_.united(observedBounds);
     }
-
-    const double lowerFraction = config_.world.automaticBoundsOutlierFraction;
-    const double upperFraction = 1.0 - lowerFraction;
-    const double minX = percentile(xValues, lowerFraction);
-    const double maxX = percentile(xValues, upperFraction);
-    const double minY = percentile(yValues, lowerFraction);
-    const double maxY = percentile(yValues, upperFraction);
-    const double width = qMax(1.0, maxX - minX);
-    const double height = qMax(1.0, maxY - minY);
-    const double horizontalMargin = width * config_.world.automaticBoundsPaddingRatio;
-    const double verticalMargin = height * config_.world.automaticBoundsPaddingRatio;
-
-    automaticWorldBounds_ = QRectF(minX - horizontalMargin, minY - verticalMargin, width + horizontalMargin * 2.0,
-                                   height + verticalMargin * 2.0);
-    hasAutomaticWorldBounds_ = true;
-    automaticWorldSamples_.clear();
-    qInfo().noquote() << QStringLiteral("[TOPVIEW MAP] Automatic world bounds frozen x=%1..%2 y=%3..%4")
-                             .arg(automaticWorldBounds_.left(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.right(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.top(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.bottom(), 0, 'f', 3);
 }
-
-bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
 
 /** @brief 월드 좌표를 지도에서 사용하는 0.0~1.0 좌표로 변환합니다. */
 QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition) const {
@@ -499,7 +476,7 @@ QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition)
  * @brief                   입력 좌표의 순간적인 튐을 제한하고 작은 위치 흔들림을 완화합니다.
  * @param objectId          추적 객체 식별자
  * @param measuredPosition  현재 프레임에서 계산한 정규화 좌표
- * @param sourceTimestamp   현재 보간 프레임의 원본 시각
+ * @param localTimeMsec     현재 로컬 시각
  * @return                  화면에 사용할 안정화된 정규화 좌표
  */
 QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPointF& measuredPosition,
@@ -519,15 +496,13 @@ QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPo
     const qint64 elapsedMsec =
         qBound(minimumPositionFilterStepMsec, localTimeMsec - previousTimeMsec, maximumPositionFilterStepMsec);
     const double maximumDistance = maximumNormalizedSpeedPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
-    double blend = distance <= smallMovementThreshold ? smallMovementBlend : regularMovementBlend;
 
     if (distance > maximumDistance && distance > 0.0) {
         displacement *= maximumDistance / distance;
-        blend = 1.0;
     }
 
-    const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x() * blend, 1.0),
-                             qBound(0.0, previousPosition.y() + displacement.y() * blend, 1.0));
+    const QPointF stabilized(qBound(0.0, previousPosition.x() + displacement.x(), 1.0),
+                             qBound(0.0, previousPosition.y() + displacement.y(), 1.0));
     stabilizedPositions_.insert(objectId, stabilized);
     stabilizedPositionTimesMsec_.insert(objectId, localTimeMsec);
     return stabilized;

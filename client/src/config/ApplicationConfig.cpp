@@ -148,6 +148,14 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         !readInt(digitalTwin, QStringLiteral("frameExpiryMs"), 100, 120000, config.frameExpiryMsec, error) ||
         !readInt(digitalTwin, QStringLiteral("frameExpiryPollMs"), 50, 60000, config.frameExpiryPollMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("renderDelayMs"), 0, 5000, config.renderDelayMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("videoSyncCorrectionMs"), -5000, 5000, config.videoSyncCorrectionMsec,
+                     error) ||
+        !readInteger(digitalTwin, QStringLiteral("maximumVideoClockSkewMs"), 100, 60000,
+                     config.maximumVideoClockSkewMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("videoTimestampTimeoutMs"), 100, 5000,
+                     config.videoTimestampTimeoutMsec, error) ||
+        !readInteger(digitalTwin, QStringLiteral("channelTimestampOutlierMs"), 50, 5000,
+                     config.channelTimestampOutlierMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeInMs"), 0, 5000, config.fadeInMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("missingGraceMs"), 0, 5000, config.missingGraceMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeOutMs"), 0, 5000, config.fadeOutMsec, error) ||
@@ -161,34 +169,11 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         return false;
     }
 
-    qint64 automaticBoundsMinimumSamples = config.world.automaticBoundsMinimumSamples;
-    qint64 automaticBoundsMaximumSamples = config.world.automaticBoundsMaximumSamples;
-    if ((world.contains(QStringLiteral("automaticBoundsWarmupMs")) &&
-         !readInt(world, QStringLiteral("automaticBoundsWarmupMs"), 0, 10000, config.world.automaticBoundsWarmupMsec,
-                  error)) ||
-        (world.contains(QStringLiteral("automaticBoundsMinimumSamples")) &&
-         !readInteger(world, QStringLiteral("automaticBoundsMinimumSamples"), 2, 4096, automaticBoundsMinimumSamples,
-                      error)) ||
-        (world.contains(QStringLiteral("automaticBoundsMaximumSamples")) &&
-         !readInteger(world, QStringLiteral("automaticBoundsMaximumSamples"), 2, 16384, automaticBoundsMaximumSamples,
-                      error)) ||
-        (world.contains(QStringLiteral("automaticBoundsPaddingRatio")) &&
-         !readDouble(world, QStringLiteral("automaticBoundsPaddingRatio"), 0.0, 1.0,
-                     config.world.automaticBoundsPaddingRatio, error)) ||
-        (world.contains(QStringLiteral("automaticBoundsOutlierFraction")) &&
-         !readDouble(world, QStringLiteral("automaticBoundsOutlierFraction"), 0.0, 0.25,
-                     config.world.automaticBoundsOutlierFraction, error)) ||
-        automaticBoundsMaximumSamples < automaticBoundsMinimumSamples) {
-        if (error.isEmpty()) {
-            error = QStringLiteral(
-                "automaticBoundsMaximumSamples must be greater than or equal to "
-                "automaticBoundsMinimumSamples");
-        }
-        error = QStringLiteral("digitalTwin.world automatic bounds are invalid: %1").arg(error);
+    if (digitalTwin.contains(QStringLiteral("syncWithVideo")) &&
+        !readBoolean(digitalTwin, QStringLiteral("syncWithVideo"), config.syncWithVideo, error)) {
+        error = QStringLiteral("digitalTwin: %1").arg(error);
         return false;
     }
-    config.world.automaticBoundsMinimumSamples = static_cast<qsizetype>(automaticBoundsMinimumSamples);
-    config.world.automaticBoundsMaximumSamples = static_cast<qsizetype>(automaticBoundsMaximumSamples);
 
     double minX = 0.0;
     double minY = 0.0;

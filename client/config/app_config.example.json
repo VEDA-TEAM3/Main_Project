@@ -9,19 +9,19 @@
         "frameExpiryMs": 5000,
         "frameExpiryPollMs": 1000,
         "renderDelayMs": 100,
+        "syncWithVideo": true,
+        "videoSyncCorrectionMs": 0,
+        "maximumVideoClockSkewMs": 3000,
+        "videoTimestampTimeoutMs": 500,
+        "channelTimestampOutlierMs": 500,
         "fadeInMs": 120,
-        "missingGraceMs": 350,
+        "missingGraceMs": 100,
         "fadeOutMs": 180,
         "maximumHistorySize": 16,
         "diagnosticsIntervalMs": 1000,
         "world": {
-            "fixedBoundsEnabled": false,
+            "fixedBoundsEnabled": true,
             "invertY": true,
-            "automaticBoundsWarmupMs": 500,
-            "automaticBoundsMinimumSamples": 12,
-            "automaticBoundsMaximumSamples": 512,
-            "automaticBoundsPaddingRatio": 0.08,
-            "automaticBoundsOutlierFraction": 0.05,
             "minX": 0.0,
             "minY": 0.0,
             "maxX": 100.0,
@@ -104,9 +104,9 @@
                 "sourceTimestampRestartThresholdMs": 2000,
                 "paddingRatio": 0.18,
                 "maximumCornerRadius": 28,
-                "radiusDivisor": 3,
+                "radiusDivisor": 4,
                 "minimumRadius": 4,
-                "maximumRadius": 28,
+                "maximumRadius": 18,
                 "debugLogIntervalMs": 1000
             }
         }
@@ -135,7 +135,7 @@
             "blurMaximumPendingFramesPerChannel": 32,
             "blurSourceRestartGapMs": 5000,
             "blurTimestampRestartThresholdMs": 2000,
-            "riskFlushIntervalMs": 10,
+            "riskFlushIntervalMs": 50,
             "riskSourceRestartGapMs": 5000,
             "riskTimestampRollbackResetMs": 1000
         }

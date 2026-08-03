@@ -5,12 +5,14 @@
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <QVector>
 #include <QtGlobal>
 #include <memory>
 
 #include "model/MqttRealtimeData.h"
 #include "model/StreamConfig.h"
+#include "model/VideoFrameTimestamp.h"
 #include "model/VideoPreprocessingSettings.h"
 
 class QThread;
@@ -112,6 +114,7 @@ signals:
      * @param channelIndex StreamConfig에 정의된 채널 인덱스
      */
     void firstFrameReceived(int channelIndex);
+    void displayedVideoTimestampsChanged(QVector<VideoFrameTimestamp> timestamps);
 
 private:
     struct ReceiverWorker {
@@ -125,6 +128,7 @@ private:
     void connectReceiverSignals(const ReceiverWorker& worker);
     void startReceiverSequentially(qsizetype receiverIndex);
     void stopWorkers();
+    void publishDisplayedVideoTimestamps();
 
     std::shared_ptr<StreamReceiverFactory> receiverFactory_;
     int receiverStartSpacingMsec_ = 0;
@@ -135,6 +139,7 @@ private:
 
     QVector<StreamOutputBinding> bindings_;
     QVector<ReceiverWorker> receiverWorkers_;
+    QTimer videoTimestampPublishTimer_;
 
     bool startRequested_ = false;
 };
