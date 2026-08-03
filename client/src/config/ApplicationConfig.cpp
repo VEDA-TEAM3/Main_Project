@@ -148,14 +148,6 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         !readInt(digitalTwin, QStringLiteral("frameExpiryMs"), 100, 120000, config.frameExpiryMsec, error) ||
         !readInt(digitalTwin, QStringLiteral("frameExpiryPollMs"), 50, 60000, config.frameExpiryPollMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("renderDelayMs"), 0, 5000, config.renderDelayMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("videoSyncCorrectionMs"), -5000, 5000, config.videoSyncCorrectionMsec,
-                     error) ||
-        !readInteger(digitalTwin, QStringLiteral("maximumVideoClockSkewMs"), 100, 60000,
-                     config.maximumVideoClockSkewMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("videoTimestampTimeoutMs"), 100, 5000,
-                     config.videoTimestampTimeoutMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("channelTimestampOutlierMs"), 50, 5000,
-                     config.channelTimestampOutlierMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeInMs"), 0, 5000, config.fadeInMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("missingGraceMs"), 0, 5000, config.missingGraceMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeOutMs"), 0, 5000, config.fadeOutMsec, error) ||
@@ -165,12 +157,6 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         !readObject(digitalTwin, QStringLiteral("world"), world, error) ||
         !readBoolean(world, QStringLiteral("fixedBoundsEnabled"), config.world.fixedBoundsEnabled, error) ||
         !readBoolean(world, QStringLiteral("invertY"), config.world.invertY, error)) {
-        error = QStringLiteral("digitalTwin: %1").arg(error);
-        return false;
-    }
-
-    if (digitalTwin.contains(QStringLiteral("syncWithVideo")) &&
-        !readBoolean(digitalTwin, QStringLiteral("syncWithVideo"), config.syncWithVideo, error)) {
         error = QStringLiteral("digitalTwin: %1").arg(error);
         return false;
     }

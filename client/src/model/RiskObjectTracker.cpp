@@ -21,7 +21,9 @@ constexpr double maximumNormalizedSpeedPerSecond = 0.9;
 constexpr double smallMovementThreshold = 0.015;
 constexpr double smallMovementBlend = 0.55;
 constexpr double regularMovementBlend = 0.82;
-constexpr qsizetype maximumClockOffsetSampleCount = 15;
+constexpr qsizetype maximumTimelineOffsetSampleCount = 15;
+constexpr qsizetype timelineOffsetWarmupSampleCount = 5;
+constexpr qint64 maximumTimelineOffsetAdjustmentMsec = 2;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -102,12 +104,12 @@ void RiskObjectTracker::reset() {
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
-    sourceClockOffsetSamples_.clear();
+    sourceToLocalOffsetSamples_.clear();
     automaticWorldBounds_ = {};
     automaticWorldSamples_.clear();
     automaticBoundsStartSourceTimestamp_ = 0;
     lastArrivalTimeMsec_ = 0;
-    sourceClockOffsetMsec_ = 0;
+    sourceToLocalOffsetMsec_ = 0;
     lastRenderSourceTimestamp_ = 0;
     lastDiagnosticsMsec_ = 0;
     hasAutomaticWorldBounds_ = false;
@@ -138,14 +140,22 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
-    const qint64 measuredClockOffsetMsec = arrivalTimeMsec - frame.sourceTimestamp;
-    sourceClockOffsetSamples_.append(measuredClockOffsetMsec);
-    while (sourceClockOffsetSamples_.size() > maximumClockOffsetSampleCount) {
-        sourceClockOffsetSamples_.removeFirst();
+    const qint64 measuredSourceToLocalOffsetMsec = arrivalTimeMsec - frame.sourceTimestamp;
+    sourceToLocalOffsetSamples_.append(measuredSourceToLocalOffsetMsec);
+    while (sourceToLocalOffsetSamples_.size() > maximumTimelineOffsetSampleCount) {
+        sourceToLocalOffsetSamples_.removeFirst();
     }
-    QVector<qint64> sortedOffsets = sourceClockOffsetSamples_;
+    QVector<qint64> sortedOffsets = sourceToLocalOffsetSamples_;
     std::sort(sortedOffsets.begin(), sortedOffsets.end());
-    sourceClockOffsetMsec_ = sortedOffsets[sortedOffsets.size() / 2];
+    const qint64 medianOffsetMsec = sortedOffsets[sortedOffsets.size() / 2];
+    if (sourceToLocalOffsetSamples_.size() <= timelineOffsetWarmupSampleCount) {
+        sourceToLocalOffsetMsec_ = medianOffsetMsec;
+    } else {
+        const qint64 adjustmentMsec =
+            qBound(-maximumTimelineOffsetAdjustmentMsec, medianOffsetMsec - sourceToLocalOffsetMsec_,
+                   maximumTimelineOffsetAdjustmentMsec);
+        sourceToLocalOffsetMsec_ += adjustmentMsec;
+    }
 
     updateAutomaticWorldBounds(frame);
 
@@ -195,8 +205,7 @@ bool RiskObjectTracker::hasFrame() const { return !history_.isEmpty(); }
  * @param localTimeMsec  현재 로컬 시각
  * @return               UI 렌더링용 디지털 트윈 스냅샷
  */
-DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
-                                                     const std::optional<VideoFrameTimestamp>& videoTimestamp) {
+DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     pendingRiskEvents_.clear();
     if (history_.isEmpty()) {
         return {};
@@ -205,29 +214,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
     if (!worldBoundsReady()) {
         return {};
     }
-    const qint64 estimatedSourceTimestamp = localTimeMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
-    qint64 calculatedSourceTimestamp = estimatedSourceTimestamp;
-    QString clockSource = QStringLiteral("arrival-offset");
-    if (videoTimestamp.has_value() && videoTimestamp->isValid() &&
-        localTimeMsec - videoTimestamp->observedLocalMsec <= config_.videoTimestampTimeoutMsec) {
-        const qint64 elapsedSinceVideoObservationMsec =
-            qMax<qint64>(0, localTimeMsec - videoTimestamp->observedLocalMsec);
-        const qint64 progressingVideoUtcMsec = videoTimestamp->utcMsec + elapsedSinceVideoObservationMsec;
-        const qint64 videoBasedTimestamp =
-            videoTimestamp->senderClock
-                ? progressingVideoUtcMsec - config_.videoSyncCorrectionMsec - config_.renderDelayMsec
-                : progressingVideoUtcMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
-        if (qAbs(videoBasedTimestamp - estimatedSourceTimestamp) <= config_.maximumVideoClockSkewMsec) {
-            calculatedSourceTimestamp = videoBasedTimestamp;
-            clockSource =
-                videoTimestamp->senderClock ? QStringLiteral("video-sender-clock") : QStringLiteral("video-pts-anchor");
-        } else {
-            clockSource = QStringLiteral("video-clock-rejected");
-        }
-    }
-
     const qint64 latestSourceTimestamp = history_.constLast().sourceTimestamp;
-    const qint64 desiredSourceTimestamp = qMin(latestSourceTimestamp, calculatedSourceTimestamp);
+    const qint64 estimatedSourceTimestamp = localTimeMsec - sourceToLocalOffsetMsec_ - config_.renderDelayMsec;
+    const qint64 desiredSourceTimestamp = qMin(latestSourceTimestamp, estimatedSourceTimestamp);
     const qint64 targetSourceTimestamp = qMax(desiredSourceTimestamp, lastRenderSourceTimestamp_);
     lastRenderSourceTimestamp_ = targetSourceTimestamp;
     RiskFrameData frame = interpolatedFrame(targetSourceTimestamp);
@@ -249,21 +238,15 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
 
     if (config_.diagnosticsIntervalMsec > 0 &&
         localTimeMsec - lastDiagnosticsMsec_ >= config_.diagnosticsIntervalMsec) {
-        const qint64 videoUtcMsec = videoTimestamp.has_value() ? videoTimestamp->utcMsec : 0;
-        const int referenceChannel = videoTimestamp.has_value() ? videoTimestamp->channelIndex + 1 : 0;
-        const bool senderClock = videoTimestamp.has_value() && videoTimestamp->senderClock;
         qInfo().noquote() << QStringLiteral(
-                                 "[TOPVIEW SYNC] clock=%1 channel=%2 videoTs=%3 senderClock=%4 targetTs=%5 "
-                                 "desiredTs=%6 latestRiskTs=%7 buffered=%8ms offset=%9ms history=%10")
-                                 .arg(clockSource)
-                                 .arg(referenceChannel)
-                                 .arg(videoUtcMsec)
-                                 .arg(senderClock)
+                                 "[TOPVIEW PLAYOUT] targetTs=%1 desiredTs=%2 latestRiskTs=%3 buffered=%4ms "
+                                 "sourceToLocalOffset=%5ms renderDelay=%6ms history=%7")
                                  .arg(targetSourceTimestamp)
                                  .arg(desiredSourceTimestamp)
                                  .arg(latestSourceTimestamp)
                                  .arg(latestSourceTimestamp - targetSourceTimestamp)
-                                 .arg(sourceClockOffsetMsec_)
+                                 .arg(sourceToLocalOffsetMsec_)
+                                 .arg(config_.renderDelayMsec)
                                  .arg(history_.size());
         lastDiagnosticsMsec_ = localTimeMsec;
     }

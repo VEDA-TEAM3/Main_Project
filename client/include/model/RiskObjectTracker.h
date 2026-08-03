@@ -4,12 +4,10 @@
 #include <QPointF>
 #include <QRectF>
 #include <QVector>
-#include <optional>
 
 #include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
 #include "model/MqttRealtimeData.h"
-#include "model/VideoFrameTimestamp.h"
 
 class RiskObjectTracker final {
 public:
@@ -19,8 +17,7 @@ public:
     bool submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec);
     bool expireStaleFrame(qint64 currentTimeMsec, qint64 expiryMsec);
     bool hasFrame() const;
-    DigitalTwinSnapshot buildSnapshot(qint64 localTimeMsec,
-                                      const std::optional<VideoFrameTimestamp>& videoTimestamp = std::nullopt);
+    DigitalTwinSnapshot buildSnapshot(qint64 localTimeMsec);
     QVector<DigitalTwinRiskEvent> takeRiskEvents();
 
 private:
@@ -43,14 +40,14 @@ private:
     QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
     QHash<QString, qint64> nextPairPulseTimesMsec_;
     QVector<DigitalTwinRiskEvent> pendingRiskEvents_;
-    QVector<qint64> sourceClockOffsetSamples_;
+    QVector<qint64> sourceToLocalOffsetSamples_;
     DigitalTwinRuntimeConfig config_;
     QRectF configuredWorldBounds_;
     QRectF automaticWorldBounds_;
     QVector<QPointF> automaticWorldSamples_;
     qint64 automaticBoundsStartSourceTimestamp_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
-    qint64 sourceClockOffsetMsec_ = 0;
+    qint64 sourceToLocalOffsetMsec_ = 0;
     qint64 lastRenderSourceTimestamp_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     bool hasConfiguredWorldBounds_ = false;
