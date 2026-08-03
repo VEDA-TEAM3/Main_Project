@@ -12,8 +12,8 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QShortcut>
 #include <QShowEvent>
+#include <QShortcut>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
