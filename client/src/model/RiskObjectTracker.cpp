@@ -59,6 +59,17 @@ int channelIndexForPosition(const QPointF& position) {
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
     return first + (second - first) * ratio;
 }
+
+double percentile(QVector<double> values, double fraction) {
+    if (values.isEmpty()) {
+        return 0.0;
+    }
+
+    std::sort(values.begin(), values.end());
+    const double boundedFraction = qBound(0.0, fraction, 1.0);
+    const qsizetype index = static_cast<qsizetype>(boundedFraction * static_cast<double>(values.size() - 1));
+    return values[index];
+}
 }  // namespace
 
 /** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다. */
@@ -89,6 +100,8 @@ void RiskObjectTracker::reset() {
     pendingRiskEvents_.clear();
     sourceClockOffsetSamples_.clear();
     automaticWorldBounds_ = {};
+    automaticWorldSamples_.clear();
+    automaticBoundsStartSourceTimestamp_ = 0;
     lastArrivalTimeMsec_ = 0;
     sourceClockOffsetMsec_ = 0;
     lastRenderSourceTimestamp_ = 0;
@@ -129,6 +142,8 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     QVector<qint64> sortedOffsets = sourceClockOffsetSamples_;
     std::sort(sortedOffsets.begin(), sortedOffsets.end());
     sourceClockOffsetMsec_ = sortedOffsets[sortedOffsets.size() / 2];
+
+    updateAutomaticWorldBounds(frame);
 
     for (const RiskObjectData& object : frame.objects) {
         retainedObjects_.insert(object.globalId, object);
@@ -183,7 +198,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
         return {};
     }
 
-    updateAutomaticWorldBounds(history_.constLast());
+    if (!worldBoundsReady()) {
+        return {};
+    }
     const qint64 estimatedSourceTimestamp = localTimeMsec - sourceClockOffsetMsec_ - config_.renderDelayMsec;
     qint64 calculatedSourceTimestamp = estimatedSourceTimestamp;
     QString clockSource = QStringLiteral("arrival-offset");
@@ -418,46 +435,59 @@ RiskFrameData RiskObjectTracker::interpolatedFrame(qint64 sourceTimestamp) const
 
 /** @brief 설정 좌표가 없을 때 관측 좌표로 지도 정규화 범위를 갱신합니다. */
 void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
-    if (hasConfiguredWorldBounds_ || frame.objects.isEmpty()) {
+    if (hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_ || frame.objects.isEmpty()) {
         return;
     }
 
-    double minX = frame.objects.constFirst().worldPosition.x();
-    double maxX = minX;
-    double minY = frame.objects.constFirst().worldPosition.y();
-    double maxY = minY;
-    bool normalizedCoordinates = true;
+    if (automaticBoundsStartSourceTimestamp_ <= 0) {
+        automaticBoundsStartSourceTimestamp_ = frame.sourceTimestamp;
+    }
+
     for (const RiskObjectData& object : frame.objects) {
-        minX = qMin(minX, object.worldPosition.x());
-        maxX = qMax(maxX, object.worldPosition.x());
-        minY = qMin(minY, object.worldPosition.y());
-        maxY = qMax(maxY, object.worldPosition.y());
-        normalizedCoordinates = normalizedCoordinates && object.worldPosition.x() >= 0.0 &&
-                                object.worldPosition.x() <= 1.0 && object.worldPosition.y() >= 0.0 &&
-                                object.worldPosition.y() <= 1.0;
+        if (automaticWorldSamples_.size() >= config_.world.automaticBoundsMaximumSamples) {
+            break;
+        }
+        automaticWorldSamples_.append(object.worldPosition);
     }
 
-    QRectF observedBounds;
-    if (normalizedCoordinates) {
-        observedBounds = QRectF(0.0, 0.0, 1.0, 1.0);
-    } else {
-        const double width = qMax(1.0, maxX - minX);
-        const double height = qMax(1.0, maxY - minY);
-        const double centerX = (minX + maxX) * 0.5;
-        const double centerY = (minY + maxY) * 0.5;
-        const double horizontalMargin = width * 0.08;
-        const double verticalMargin = height * 0.08;
-        observedBounds = QRectF(centerX - width * 0.5 - horizontalMargin, centerY - height * 0.5 - verticalMargin,
-                                width + horizontalMargin * 2.0, height + verticalMargin * 2.0);
+    const bool warmupComplete =
+        frame.sourceTimestamp - automaticBoundsStartSourceTimestamp_ >= config_.world.automaticBoundsWarmupMsec;
+    if (!warmupComplete || automaticWorldSamples_.size() < config_.world.automaticBoundsMinimumSamples) {
+        return;
     }
 
-    if (!hasAutomaticWorldBounds_) {
-        automaticWorldBounds_ = observedBounds;
-        hasAutomaticWorldBounds_ = true;
-    } else {
-        automaticWorldBounds_ = automaticWorldBounds_.united(observedBounds);
+    QVector<double> xValues;
+    QVector<double> yValues;
+    xValues.reserve(automaticWorldSamples_.size());
+    yValues.reserve(automaticWorldSamples_.size());
+    for (const QPointF& sample : automaticWorldSamples_) {
+        xValues.append(sample.x());
+        yValues.append(sample.y());
     }
+
+    const double lowerFraction = config_.world.automaticBoundsOutlierFraction;
+    const double upperFraction = 1.0 - lowerFraction;
+    const double minX = percentile(xValues, lowerFraction);
+    const double maxX = percentile(xValues, upperFraction);
+    const double minY = percentile(yValues, lowerFraction);
+    const double maxY = percentile(yValues, upperFraction);
+    const double width = qMax(1.0, maxX - minX);
+    const double height = qMax(1.0, maxY - minY);
+    const double horizontalMargin = width * config_.world.automaticBoundsPaddingRatio;
+    const double verticalMargin = height * config_.world.automaticBoundsPaddingRatio;
+
+    automaticWorldBounds_ = QRectF(minX - horizontalMargin, minY - verticalMargin, width + horizontalMargin * 2.0,
+                                   height + verticalMargin * 2.0);
+    hasAutomaticWorldBounds_ = true;
+    automaticWorldSamples_.clear();
+    qInfo().noquote() << QStringLiteral("[TOPVIEW MAP] Automatic world bounds frozen x=%1..%2 y=%3..%4")
+                             .arg(automaticWorldBounds_.left(), 0, 'f', 3)
+                             .arg(automaticWorldBounds_.right(), 0, 'f', 3)
+                             .arg(automaticWorldBounds_.top(), 0, 'f', 3)
+                             .arg(automaticWorldBounds_.bottom(), 0, 'f', 3);
 }
+
+bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
 
 /** @brief 월드 좌표를 지도에서 사용하는 0.0~1.0 좌표로 변환합니다. */
 QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition) const {

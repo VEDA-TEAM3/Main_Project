@@ -26,6 +26,7 @@ public:
 private:
     RiskFrameData interpolatedFrame(qint64 sourceTimestamp) const;
     void updateAutomaticWorldBounds(const RiskFrameData& frame);
+    bool worldBoundsReady() const;
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
     QPointF stabilizedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
@@ -46,6 +47,8 @@ private:
     DigitalTwinRuntimeConfig config_;
     QRectF configuredWorldBounds_;
     QRectF automaticWorldBounds_;
+    QVector<QPointF> automaticWorldSamples_;
+    qint64 automaticBoundsStartSourceTimestamp_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 sourceClockOffsetMsec_ = 0;
     qint64 lastRenderSourceTimestamp_ = 0;
