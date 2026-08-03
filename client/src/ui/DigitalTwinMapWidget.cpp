@@ -839,17 +839,21 @@ std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTime
             freshTimestamps.end());
     }
 
+    const auto projectedUtcMsec = [currentTimeMsec](const VideoFrameTimestamp& timestamp) {
+        return timestamp.utcMsec + qMax<qint64>(0, currentTimeMsec - timestamp.observedLocalMsec);
+    };
     std::sort(freshTimestamps.begin(), freshTimestamps.end(),
-              [](const VideoFrameTimestamp& first, const VideoFrameTimestamp& second) {
-                  return first.utcMsec < second.utcMsec;
+              [&projectedUtcMsec](const VideoFrameTimestamp& first, const VideoFrameTimestamp& second) {
+                  return projectedUtcMsec(first) < projectedUtcMsec(second);
               });
-    const qint64 medianUtcMsec = freshTimestamps[freshTimestamps.size() / 2].utcMsec;
-    freshTimestamps.erase(std::remove_if(freshTimestamps.begin(), freshTimestamps.end(),
-                                         [this, medianUtcMsec](const VideoFrameTimestamp& timestamp) {
-                                             return qAbs(timestamp.utcMsec - medianUtcMsec) >
-                                                    liveConfig_.channelTimestampOutlierMsec;
-                                         }),
-                          freshTimestamps.end());
+    const qint64 medianUtcMsec = projectedUtcMsec(freshTimestamps[freshTimestamps.size() / 2]);
+    freshTimestamps.erase(
+        std::remove_if(freshTimestamps.begin(), freshTimestamps.end(),
+                       [this, medianUtcMsec, &projectedUtcMsec](const VideoFrameTimestamp& timestamp) {
+                           return qAbs(projectedUtcMsec(timestamp) - medianUtcMsec) >
+                                  liveConfig_.channelTimestampOutlierMsec;
+                       }),
+        freshTimestamps.end());
 
     const auto synchronized =
         std::find_if(freshTimestamps.cbegin(), freshTimestamps.cend(), [this](const VideoFrameTimestamp& timestamp) {

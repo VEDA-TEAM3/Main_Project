@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QPointF>
 #include <QRectF>
@@ -49,6 +50,8 @@ private:
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 sourceClockOffsetMsec_ = 0;
     qint64 lastRenderSourceTimestamp_ = 0;
+    QElapsedTimer renderElapsedTimer_;
+    qint64 lastRenderElapsedMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     bool hasConfiguredWorldBounds_ = false;
     bool hasAutomaticWorldBounds_ = false;

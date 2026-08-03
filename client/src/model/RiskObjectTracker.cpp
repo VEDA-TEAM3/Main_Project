@@ -22,6 +22,8 @@ constexpr double smallMovementThreshold = 0.015;
 constexpr double smallMovementBlend = 0.55;
 constexpr double regularMovementBlend = 0.82;
 constexpr qsizetype maximumClockOffsetSampleCount = 15;
+constexpr qint64 maximumRenderGapMsec = 500;
+constexpr qint64 maximumTimelineCorrectionPerTickMsec = 8;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -67,6 +69,7 @@ QPointF interpolatePosition(const QPointF& first, const QPointF& second, double 
 
 /** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다. */
 RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(std::move(config)) {
+    renderElapsedTimer_.start();
     if (config_.world.fixedBoundsEnabled && config_.world.bounds.width() > 0.0 && config_.world.bounds.height() > 0.0) {
         configuredWorldBounds_ = config_.world.bounds;
         hasConfiguredWorldBounds_ = true;
@@ -96,6 +99,8 @@ void RiskObjectTracker::reset() {
     lastArrivalTimeMsec_ = 0;
     sourceClockOffsetMsec_ = 0;
     lastRenderSourceTimestamp_ = 0;
+    renderElapsedTimer_.restart();
+    lastRenderElapsedMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
     hasAutomaticWorldBounds_ = false;
 }
@@ -210,8 +215,22 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
     }
 
     const qint64 latestSourceTimestamp = history_.constLast().sourceTimestamp;
-    const qint64 targetSourceTimestamp =
-        qMin(latestSourceTimestamp, qMax(calculatedSourceTimestamp, lastRenderSourceTimestamp_));
+    const qint64 desiredSourceTimestamp = qMin(latestSourceTimestamp, calculatedSourceTimestamp);
+    qint64 targetSourceTimestamp = qMax(desiredSourceTimestamp, lastRenderSourceTimestamp_);
+
+    const qint64 renderElapsedMsec = renderElapsedTimer_.elapsed();
+    if (lastRenderSourceTimestamp_ > 0 && lastRenderElapsedMsec_ > 0) {
+        const qint64 elapsedSinceRenderMsec = renderElapsedMsec - lastRenderElapsedMsec_;
+        if (elapsedSinceRenderMsec > 0 && elapsedSinceRenderMsec <= maximumRenderGapMsec) {
+            const qint64 expectedSourceTimestamp =
+                qMin(latestSourceTimestamp, lastRenderSourceTimestamp_ + elapsedSinceRenderMsec);
+            const qint64 maximumSourceTimestamp =
+                qMin(latestSourceTimestamp, expectedSourceTimestamp + maximumTimelineCorrectionPerTickMsec);
+            targetSourceTimestamp = qBound(lastRenderSourceTimestamp_, targetSourceTimestamp, maximumSourceTimestamp);
+        }
+    }
+
+    lastRenderElapsedMsec_ = renderElapsedMsec;
     lastRenderSourceTimestamp_ = targetSourceTimestamp;
     RiskFrameData frame = interpolatedFrame(targetSourceTimestamp);
 
@@ -237,12 +256,13 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec,
         const bool senderClock = videoTimestamp.has_value() && videoTimestamp->senderClock;
         qInfo().noquote() << QStringLiteral(
                                  "[TOPVIEW SYNC] clock=%1 channel=%2 videoTs=%3 senderClock=%4 targetTs=%5 "
-                                 "latestRiskTs=%6 buffered=%7ms offset=%8ms history=%9")
+                                 "desiredTs=%6 latestRiskTs=%7 buffered=%8ms offset=%9ms history=%10")
                                  .arg(clockSource)
                                  .arg(referenceChannel)
                                  .arg(videoUtcMsec)
                                  .arg(senderClock)
                                  .arg(targetSourceTimestamp)
+                                 .arg(desiredSourceTimestamp)
                                  .arg(latestSourceTimestamp)
                                  .arg(latestSourceTimestamp - targetSourceTimestamp)
                                  .arg(sourceClockOffsetMsec_)
