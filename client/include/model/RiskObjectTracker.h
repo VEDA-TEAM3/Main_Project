@@ -27,7 +27,7 @@ private:
     RiskFrameData interpolatedFrame(qint64 sourceTimestamp) const;
     void updateAutomaticWorldBounds(const RiskFrameData& frame);
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
-    QPointF stabilizedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
+    QPointF stabilizedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 sourceTimestamp);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
     void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions);
 

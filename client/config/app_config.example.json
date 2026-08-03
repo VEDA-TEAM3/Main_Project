@@ -22,10 +22,10 @@
         "world": {
             "fixedBoundsEnabled": true,
             "invertY": true,
-            "minX": -50.0,
-            "minY": -50.0,
-            "maxX": 50.0,
-            "maxY": 50.0
+            "minX": 0.0,
+            "minY": 0.0,
+            "maxX": 100.0,
+            "maxY": 100.0
         }
     },
     "video": {
