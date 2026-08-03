@@ -509,8 +509,8 @@ QPointF RiskObjectTracker::stabilizedPosition(const QString& objectId, const QPo
         return previousPosition;
     }
 
-    const double timeBasedBlend = 1.0 - std::exp(-static_cast<double>(elapsedMsec) /
-                                                 positionSmoothingTimeConstantMsec);
+    const double elapsed = static_cast<double>(elapsedMsec);
+    const double timeBasedBlend = elapsed / (positionSmoothingTimeConstantMsec + elapsed);
     const double movementScale = qBound(0.0, distance / smallMovementThreshold, 1.0);
     const double blend = qMin(maximumPositionBlend, timeBasedBlend + movementScale * 0.20);
     displacement *= blend;
