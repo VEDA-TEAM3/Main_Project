@@ -18,11 +18,12 @@ constexpr double centralCctvZValue = 3.0;
 constexpr double overlayZValue = 40.0;
 const QPointF centralCctvPosition(500.0, 260.0);
 
+// 인덱스가 곧 채널이다. CH03과 CH04는 현장 설치가 사분면 순서와 반대이므로 아래 두 좌표가 교차한다
 const std::array<QPointF, channelCount> channelAnchors = {
     QPointF(106.0, 100.0),
     QPointF(544.0, 100.0),
-    QPointF(454.0, 420.0),
     QPointF(910.0, 420.0),
+    QPointF(454.0, 420.0),
 };
 }  // namespace
 
