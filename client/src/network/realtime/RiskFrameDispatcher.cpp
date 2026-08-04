@@ -76,13 +76,10 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
         if (debugWindowStartMsec_ <= 0) {
             debugWindowStartMsec_ = nowMsec;
         } else if (nowMsec - debugWindowStartMsec_ >= 1000) {
-            qInfo().noquote() << QStringLiteral("[TOPVIEW DBG] dispatch window=%1ms received=%2 delivered=%3 "
-                                                "coalesced=%4 flushInterval=%5ms")
-                                     .arg(nowMsec - debugWindowStartMsec_)
+            qInfo().noquote() << QStringLiteral("[TV] disp rx=%1 tx=%2 coal=%3")
                                      .arg(debugReceivedCount_)
                                      .arg(debugDeliveredCount_)
-                                     .arg(debugCoalescedCount_)
-                                     .arg(config_.riskFlushIntervalMsec);
+                                     .arg(debugCoalescedCount_);
             debugWindowStartMsec_ = nowMsec;
             debugReceivedCount_ = 0;
             debugDeliveredCount_ = 0;

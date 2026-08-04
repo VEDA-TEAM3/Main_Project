@@ -39,6 +39,10 @@ constexpr double channelBoundaryHysteresisMeters = 0.3;
 constexpr int automaticBoundsExpansionFrameCount = 3;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
+// 중앙값 필터는 움직이는 객체의 좌표를 항상 한 프레임 분량만큼 되돌린다. 그 정상 동작까지
+// '이상치 제거'로 세면 진단 로그가 매 프레임 남고 통계도 의미가 없어지므로, 이 크기를 넘는
+// 보정만 실제 이상치를 걸러낸 것으로 본다
+constexpr double notableFilterCorrectionMeters = 0.5;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -91,7 +95,7 @@ int resolveTopViewDebugLevel(int configuredLevel) {
 }
 
 QString formatPoint(const QPointF& point) {
-    return QStringLiteral("(%1,%2)").arg(point.x(), 0, 'f', 3).arg(point.y(), 0, 'f', 3);
+    return QStringLiteral("%1,%2").arg(point.x(), 0, 'f', 2).arg(point.y(), 0, 'f', 2);
 }
 
 int channelIndexForPosition(const QPointF& position) {
@@ -131,15 +135,11 @@ RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(
     diagnostics_.level = resolveTopViewDebugLevel(configuredLevel);
     diagnostics_.detailIntervalMsec = qMax(0, config_.debugDetailIntervalMsec);
     if (diagnostics_.level > 0) {
-        qInfo().noquote() << QStringLiteral(
-                                 "[TOPVIEW DBG] enabled level=%1 bounds=%2 invertY=%3 transition=%4ms median=%5 "
-                                 "speedCap=%6m/s")
+        qInfo().noquote() << QStringLiteral("[TV] on lvl=%1 inv=%2 cap=%3m/s")
                                  .arg(diagnostics_.level)
-                                 .arg(worldBoundsDescription())
                                  .arg(invertWorldY_ ? 1 : 0)
-                                 .arg(config_.positionTransitionMsec)
-                                 .arg(worldPositionMedianSampleCount)
                                  .arg(maximumWorldSpeedMetersPerSecond, 0, 'f', 1);
+        qInfo().noquote() << QStringLiteral("[TV] %1").arg(worldBoundsDescription());
     }
 }
 
@@ -193,8 +193,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
 
     if (lastArrivalTimeMsec_ > 0 && arrivalTimeMsec - lastArrivalTimeMsec_ > sourceRestartGapMsec) {
         if (diagnostics_.level > 0) {
-            qInfo().noquote() << QStringLiteral("[TOPVIEW DBG] stream restart detected, arrivalGap=%1ms")
-                                     .arg(arrivalTimeMsec - lastArrivalTimeMsec_);
+            qInfo().noquote() << QStringLiteral("[TV] restart gap=%1ms").arg(arrivalTimeMsec - lastArrivalTimeMsec_);
         }
         reset();
     }
@@ -230,7 +229,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
 
         if (diagnostics_.level > 0) {
             const QPointF medianDelta = medianPosition - rawPosition;
-            if (std::hypot(medianDelta.x(), medianDelta.y()) > 0.001) {
+            if (std::hypot(medianDelta.x(), medianDelta.y()) > notableFilterCorrectionMeters) {
                 ++diagnostics_.medianRejectedCount;
             }
         }
@@ -306,12 +305,10 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
 
     if (diagnostics_.level > 0 && config_.diagnosticsIntervalMsec > 0 &&
         localTimeMsec - lastDiagnosticsMsec_ >= config_.diagnosticsIntervalMsec) {
-        qInfo().noquote() << QStringLiteral(
-                                 "[TOPVIEW] mode=latest-risk latestRiskTs=%1 arrivalAge=%2ms transition=%3ms history=%4")
+        qInfo().noquote() << QStringLiteral("[TV] latest ts=%1 age=%2ms obj=%3")
                                  .arg(latestSourceTimestamp)
                                  .arg(qMax<qint64>(0, localTimeMsec - lastArrivalTimeMsec_))
-                                 .arg(config_.positionTransitionMsec)
-                                 .arg(history_.size());
+                                 .arg(frame.objects.size());
         lastDiagnosticsMsec_ = localTimeMsec;
     }
 
@@ -555,12 +552,12 @@ void RiskObjectTracker::expandAutomaticWorldBounds(const RiskFrameData& frame) {
  * @param reason  경계가 갱신된 이유
  */
 void RiskObjectTracker::logAutomaticWorldBounds(const QString& reason) const {
-    qInfo().noquote() << QStringLiteral("[TOPVIEW MAP] Automatic world bounds %1 x=%2..%3 y=%4..%5")
+    qInfo().noquote() << QStringLiteral("[TV] bounds %1 x=%2..%3 y=%4..%5")
                              .arg(reason)
-                             .arg(automaticWorldBounds_.left(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.right(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.top(), 0, 'f', 3)
-                             .arg(automaticWorldBounds_.bottom(), 0, 'f', 3);
+                             .arg(automaticWorldBounds_.left(), 0, 'f', 1)
+                             .arg(automaticWorldBounds_.right(), 0, 'f', 1)
+                             .arg(automaticWorldBounds_.top(), 0, 'f', 1)
+                             .arg(automaticWorldBounds_.bottom(), 0, 'f', 1);
 }
 
 bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
@@ -609,12 +606,12 @@ QString RiskObjectTracker::worldBoundsDescription() const {
     }
 
     const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
-    return QStringLiteral("%1(x=%2..%3 y=%4..%5)")
-        .arg(hasConfiguredWorldBounds_ ? QStringLiteral("fixed") : QStringLiteral("auto"))
-        .arg(bounds.left(), 0, 'f', 3)
-        .arg(bounds.right(), 0, 'f', 3)
-        .arg(bounds.top(), 0, 'f', 3)
-        .arg(bounds.bottom(), 0, 'f', 3);
+    return QStringLiteral("bounds %1 x=%2..%3 y=%4..%5")
+        .arg(hasConfiguredWorldBounds_ ? QStringLiteral("fix") : QStringLiteral("auto"))
+        .arg(bounds.left(), 0, 'f', 1)
+        .arg(bounds.right(), 0, 'f', 1)
+        .arg(bounds.top(), 0, 'f', 1)
+        .arg(bounds.bottom(), 0, 'f', 1);
 }
 
 /**
@@ -652,32 +649,33 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             // gid마다 주기적으로만 남기되, 필터가 실제로 개입한 프레임은 주기와 무관하게 남긴다
             const QPointF medianDelta = medianPositions.at(index) - rawPosition;
             const QPointF limitDelta = object.worldPosition - medianPositions.at(index);
-            const bool filterIntervened = std::hypot(medianDelta.x(), medianDelta.y()) > 0.001 ||
+            const bool filterIntervened = std::hypot(medianDelta.x(), medianDelta.y()) > notableFilterCorrectionMeters ||
                                           std::hypot(limitDelta.x(), limitDelta.y()) > 0.001;
+            // 이상치 하나를 따라잡는 동안 상한이 여러 프레임 연속으로 걸리므로, 개입 로그도
+            // 더 짧은 주기로만 남긴다. 그래야 이상치 발생 사실은 놓치지 않으면서 줄 수가 안 터진다
             const qint64 lastLogMsec = diagnostics_.lastObjectLogMsec.value(object.globalId, 0);
-            const bool intervalElapsed =
-                lastLogMsec <= 0 || arrivalTimeMsec - lastLogMsec >= diagnostics_.detailIntervalMsec;
-            if (!filterIntervened && !intervalElapsed) {
+            const qint64 requiredIntervalMsec =
+                filterIntervened ? qMin<qint64>(diagnostics_.detailIntervalMsec, 250) : diagnostics_.detailIntervalMsec;
+            if (lastLogMsec > 0 && arrivalTimeMsec - lastLogMsec < requiredIntervalMsec) {
                 continue;
             }
             diagnostics_.lastObjectLogMsec.insert(object.globalId, arrivalTimeMsec);
 
+            // 한 줄이 길면 붙여넣기·수집 과정에서 잘린다. 80자 안쪽으로 유지한다
             const bool boundsReady = worldBoundsReady();
             const QPointF normalized = boundsReady ? normalizedWorldPosition(object.worldPosition) : QPointF();
-            qInfo().noquote()
-                << QStringLiteral("[TOPVIEW DBG] gid=%1 cls=%2 ts=%3 arrival=%4 raw=%5 med=%6 lim=%7 norm=%8 ch=%9 "
-                                  "dRaw=%10m")
-                       .arg(object.globalId)
-                       .arg(object.objectClass)
-                       .arg(frame.sourceTimestamp)
-                       .arg(arrivalTimeMsec)
-                       .arg(formatPoint(rawPosition))
-                       .arg(formatPoint(medianPositions.at(index)))
-                       .arg(formatPoint(object.worldPosition))
-                       .arg(boundsReady ? formatPoint(normalized) : QStringLiteral("n/a"))
-                       .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1)
-                                        : QStringLiteral("n/a"))
-                       .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 3);
+            QString line = QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
+                               .arg(object.globalId)
+                               .arg(formatPoint(rawPosition))
+                               .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
+                               .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1)
+                                                : QStringLiteral("-"));
+            if (filterIntervened) {
+                line += QStringLiteral(" cut med=%1 lim=%2")
+                            .arg(std::hypot(medianDelta.x(), medianDelta.y()), 0, 'f', 2)
+                            .arg(std::hypot(limitDelta.x(), limitDelta.y()), 0, 'f', 2);
+            }
+            qInfo().noquote() << line;
         }
     }
 
@@ -707,22 +705,20 @@ void RiskObjectTracker::logDiagnosticsSummary(qint64 arrivalTimeMsec, qsizetype 
         maximumInterval = intervals.constLast();
     }
 
-    qInfo().noquote() << QStringLiteral(
-                             "[TOPVIEW DBG] window=%1ms frames=%2 dup=%3 backwardTs=%4 tsDelta=%5..%6ms "
-                             "arrival=%7/%8/%9ms objects=%10 bounds=%11 rateLimited=%12 medianRejected=%13")
-                             .arg(arrivalTimeMsec - diagnostics_.windowStartMsec)
+    // 한 줄에 다 담으면 붙여넣기 과정에서 잘리므로 수신/필터 두 줄로 나눈다
+    qInfo().noquote() << QStringLiteral("[TV] rx f=%1 dup=%2 bts=%3 arr=%4/%5/%6ms obj=%7")
                              .arg(diagnostics_.frameCount)
                              .arg(diagnostics_.duplicateCount)
                              .arg(diagnostics_.backwardTimestampCount)
-                             .arg(diagnostics_.minTimestampDeltaMsec)
-                             .arg(diagnostics_.maximumTimestampDeltaMsec)
                              .arg(minimumInterval)
                              .arg(medianInterval)
                              .arg(maximumInterval)
-                             .arg(objectCount)
-                             .arg(worldBoundsDescription())
+                             .arg(objectCount);
+    qInfo().noquote() << QStringLiteral("[TV] flt lim=%1 med=%2 ts=%3..%4ms")
                              .arg(diagnostics_.rateLimitedCount)
-                             .arg(diagnostics_.medianRejectedCount);
+                             .arg(diagnostics_.medianRejectedCount)
+                             .arg(diagnostics_.minTimestampDeltaMsec)
+                             .arg(diagnostics_.maximumTimestampDeltaMsec);
 
     diagnostics_.windowStartMsec = arrivalTimeMsec;
     diagnostics_.frameCount = 0;
@@ -844,10 +840,10 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
     }
     lastRateLimitLogMsec_ = localTimeMsec;
 
-    qInfo().noquote() << QStringLiteral("[TOPVIEW] Rate-limited jump object=%1 measured=%2m allowed=%3m")
-                             .arg(QStringLiteral("G-%1").arg(globalId))
-                             .arg(distance, 0, 'f', 3)
-                             .arg(maximumDistance, 0, 'f', 3);
+    qInfo().noquote() << QStringLiteral("[TV] g%1 jump=%2m cap=%3m")
+                             .arg(globalId)
+                             .arg(distance, 0, 'f', 2)
+                             .arg(maximumDistance, 0, 'f', 2);
 }
 
 /**

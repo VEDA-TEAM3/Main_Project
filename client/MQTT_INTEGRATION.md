@@ -102,18 +102,30 @@ soon as stderr is redirected to a file, and the capture comes out empty.
 $env:VEDA_TOPVIEW_DEBUG = "2"; $env:QT_FORCE_STDERR_LOGGING = "1"; .\Qtcctvclient.exe 2> topview.log
 ```
 
+Lines are kept under 60 characters so a capture survives being pasted around without being cut off.
+
 ```text
-[TOPVIEW DBG] enabled level=2 bounds=fixed(x=-30.000..30.000 y=-20.000..20.000) invertY=1 transition=100ms median=3 speedCap=25.0m/s
-[TOPVIEW DBG] gid=1 cls=Human ts=1700000000100 arrival=100 raw=(-24.880,-14.928) med=(-24.880,-14.928) lim=(-24.880,-14.928) norm=(0.085,0.873) ch=3 dRaw=0.140m
-[TOPVIEW DBG] window=1009ms frames=11 dup=0 backwardTs=1 tsDelta=-200..400ms arrival=49/102/153ms objects=2 bounds=fixed(...) rateLimited=0 medianRejected=1
-[TOPVIEW DBG] dispatch window=1000ms received=20 delivered=10 coalesced=10 flushInterval=50ms
+[TV] on lvl=2 inv=1 cap=8.0m/s
+[TV] bounds fix x=-5.0..5.0 y=-5.0..5.0
+[TV] rx f=10 dup=0 bts=3 arr=49/102/153ms obj=2
+[TV] flt lim=1 med=2 ts=-200..400ms
+[TV] latest ts=1700000006100 age=38ms obj=2
+[TV] g1 raw=2.83,2.83 d=0.14 ch=2
+[TV] g19 raw=-1.20,3.40 d=10.72 ch=1 cut med=10.72 lim=0.00
+[TV] g19 jump=10.72m cap=0.48m
+[TV] disp rx=20 tx=10 coal=10
 ```
 
-`raw` is what the broker sent, `med` is after the three-sample median, `lim` is after the speed cap, `norm` is the
-0..1 map position and `ch` the channel the quadrant heuristic derived. `dRaw` is how far the raw coordinate moved
-since the previous frame — the honest measure of upstream stability. `bounds` says whether the normalization range
-came from configuration or from the automatic estimate. `coalesced` counts frames the dispatcher overwrote before
-delivery, which the map never sees.
+`raw` is the world coordinate the broker sent and `d` how far it moved since that object's previous frame — the
+honest measure of upstream stability. `ch` is the channel the quadrant rule derived. `cut` appears only when the
+median filter or the speed cap actually corrected an outlier, with how many metres each removed. `rx` counts frames,
+duplicates, backward timestamps and arrival intervals (min/median/max); `flt` counts filter interventions in the same
+second. `disp` counts frames the dispatcher received, delivered, and overwrote before delivery (`coal`), the last of
+which the map never sees.
+
+Per-object lines are throttled per gid (`topviewDetailIntervalMs`, 1 s by default), except that a frame where a
+filter intervened is always logged — at most four times a second per object, so a long catch-up after one outlier
+cannot flood the capture.
 
 `RiskFrame.ts` is **not** monotonic. `ConcatFuser` stamps the fused frame with the *oldest* observation timestamp in
 the window, and each channel's timestamp comes from its own CCTV clock, so the value moves backwards whenever the
