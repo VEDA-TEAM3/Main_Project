@@ -6,6 +6,7 @@
 #include <QSet>
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace {
@@ -99,19 +100,21 @@ QString formatPoint(const QPointF& point) {
 }
 
 /**
- * @brief        좌하단과 우하단 사분면에 붙는 채널 번호를 서로 맞바꿉니다.
- * @param index  0부터 시작하는 사분면 또는 채널 인덱스
- * @return       맞바꾼 인덱스
+ * @brief           담당 구역을 중심에서 X자로 나눠 채널을 정합니다.
+ * @param position  0.0~1.0 정규화 좌표 (y는 화면 기준 아래쪽이 큼)
+ * @return          0부터 시작하는 채널 인덱스
  *
- * @details 현장 CH03과 CH04는 사분면 순서와 반대로 설치되어 있다. 자기 자신이 역함수이므로
- *          채널 인덱스를 사분면으로 되돌릴 때도 같은 함수를 쓴다.
+ * @details 카메라 4대가 중심에서 상/우/하/좌를 바라보므로 경계는 사분면이 아니라 45도
+ *          대각선 두 개다. 위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04 순서다.
  */
-int swapLowerChannels(int index) { return index == 2 ? 3 : (index == 3 ? 2 : index); }
-
 int channelIndexForPosition(const QPointF& position) {
-    const int column = position.x() >= 0.5 ? 1 : 0;
-    const int row = position.y() >= 0.5 ? 1 : 0;
-    return swapLowerChannels(row * 2 + column);
+    const double offsetX = position.x() - 0.5;
+    const double offsetY = position.y() - 0.5;
+
+    if (qAbs(offsetY) >= qAbs(offsetX)) {
+        return offsetY < 0.0 ? 0 : 2;
+    }
+    return offsetX > 0.0 ? 1 : 3;
 }
 
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
@@ -578,35 +581,34 @@ bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBoun
  * @param normalizedPosition  현재 표시 중인 0.0~1.0 좌표
  * @return                    0부터 시작하는 채널 인덱스
  *
- * @details 채널은 담당 구역의 4사분면이므로 경계는 정규화 0.5의 두 축이다. 경계를 막 넘은
- *          상태에서는 표시 지연과 좌표 흔들림만으로 판정이 뒤집히므로, 이전 채널에서 벗어나려면
- *          경계를 channelBoundaryHysteresisMeters만큼 확실히 지나야 한다.
+ * @details 채널 경계는 중심을 지나는 45도 대각선 두 개다. 경계를 막 넘은 상태에서는 표시 지연과
+ *          좌표 흔들림만으로 판정이 뒤집히므로, 이전 채널에서 벗어나려면 경계선에서
+ *          channelBoundaryHysteresisMeters만큼 확실히 떨어져야 한다. 대각선까지의 수직 거리는
+ *          두 축 이탈량 차이의 1/sqrt(2)이므로 여유값에 sqrt(2)를 곱해 비교한다.
  */
 int RiskObjectTracker::channelIndexForObject(qint64 globalId, const QPointF& normalizedPosition) {
-    const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
-    const double horizontalMargin =
-        bounds.width() > 0.0 ? channelBoundaryHysteresisMeters / bounds.width() : 0.0;
-    const double verticalMargin =
-        bounds.height() > 0.0 ? channelBoundaryHysteresisMeters / bounds.height() : 0.0;
-
-    const auto previousIterator = channelIndexes_.constFind(globalId);
     const int measuredIndex = channelIndexForPosition(normalizedPosition);
+    const auto previousIterator = channelIndexes_.constFind(globalId);
     if (previousIterator == channelIndexes_.cend()) {
         channelIndexes_.insert(globalId, measuredIndex);
         return measuredIndex;
     }
 
-    const int previousQuadrant = swapLowerChannels(*previousIterator);
-    const int previousColumn = previousQuadrant % 2;
-    const int previousRow = previousQuadrant / 2;
-    const int column = previousColumn == 0 ? (normalizedPosition.x() >= 0.5 + horizontalMargin ? 1 : 0)
-                                           : (normalizedPosition.x() < 0.5 - horizontalMargin ? 0 : 1);
-    const int row = previousRow == 0 ? (normalizedPosition.y() >= 0.5 + verticalMargin ? 1 : 0)
-                                     : (normalizedPosition.y() < 0.5 - verticalMargin ? 0 : 1);
+    const int previousIndex = *previousIterator;
+    if (measuredIndex != previousIndex) {
+        const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
+        const double extent = qMax(bounds.width(), bounds.height());
+        const double margin =
+            extent > 0.0 ? channelBoundaryHysteresisMeters / extent * std::numbers::sqrt2 : 0.0;
+        const double offsetX = qAbs(normalizedPosition.x() - 0.5);
+        const double offsetY = qAbs(normalizedPosition.y() - 0.5);
+        if (qAbs(offsetX - offsetY) <= margin) {
+            return previousIndex;
+        }
+    }
 
-    const int channelIndex = swapLowerChannels(row * 2 + column);
-    channelIndexes_.insert(globalId, channelIndex);
-    return channelIndex;
+    channelIndexes_.insert(globalId, measuredIndex);
+    return measuredIndex;
 }
 
 /** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로 만듭니다. */

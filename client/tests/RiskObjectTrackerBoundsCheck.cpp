@@ -204,17 +204,17 @@ void checkChannelDoesNotFlapAtBoundary() {
 
     RiskObjectTracker tracker(config);
     qint64 timeMsec = 1000;
-    tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(-0.5, -2.0))}), timeMsec);
+    tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(1.5, -2.5))}), timeMsec);
     const DigitalTwinSnapshot first = tracker.buildSnapshot(timeMsec);
     const int startChannel = first.objects.isEmpty() ? -1 : first.objects.constFirst().channelIndex;
-    check(startChannel >= 0, "the object must be assigned a channel");
+    check(startChannel == 2, "below the diagonal must start on CH03");
 
-    // 경계(x=0)를 사이에 두고 +-0.1m로 흔들리는 좌표
+    // 대각선 경계(|x| = |y|, 여기서는 x = 2.5) 위에서 +-0.1m로 흔들리는 좌표
     int changes = 0;
     for (int step = 0; step < 20; ++step) {
         timeMsec += 100;
-        const double x = (step % 2 == 0) ? 0.1 : -0.1;
-        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(x, -2.0))}), timeMsec);
+        const double x = (step % 2 == 0) ? 2.6 : 2.4;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(x, -2.5))}), timeMsec);
         const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(timeMsec);
         if (!snapshot.objects.isEmpty() && snapshot.objects.constFirst().channelIndex != startChannel) {
             ++changes;
@@ -225,36 +225,37 @@ void checkChannelDoesNotFlapAtBoundary() {
     // 경계를 확실히 넘어가면 채널은 바뀌어야 한다
     for (int step = 0; step < 10; ++step) {
         timeMsec += 100;
-        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(2.0, -2.0))}), timeMsec);
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(4.0, -2.5))}), timeMsec);
         tracker.buildSnapshot(timeMsec);
     }
     const DigitalTwinSnapshot moved = tracker.buildSnapshot(timeMsec);
     check(!moved.objects.isEmpty() && moved.objects.constFirst().channelIndex != startChannel,
           "crossing the boundary for real must change the channel");
 }
-/// 사분면과 채널 번호의 대응. CH03과 CH04는 현장 설치가 반대라 아래쪽 두 사분면이 교차한다.
-void checkQuadrantChannelMapping() {
+/// 중심에서 X자로 자른 네 구역과 채널 번호의 대응. 위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04.
+void checkWedgeChannelMapping() {
     DigitalTwinRuntimeConfig config = checkConfig();
     config.world.fixedBoundsEnabled = true;
     config.world.bounds = QRectF(-5.0, -5.0, 10.0, 10.0);
     config.world.invertY = true;  // 월드 +Y는 위쪽이다
 
     RiskObjectTracker tracker(config);
-    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(-2.0, 2.0)), objectAt(2, QPointF(2.0, 2.0)),
-                                       objectAt(3, QPointF(-2.0, -2.0)), objectAt(4, QPointF(2.0, -2.0))}),
+    // 각 구역 한가운데. 대각선 위가 아니라 축 위에 두어야 구역이 명확하다
+    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(0.0, 3.0)), objectAt(2, QPointF(3.0, 0.0)),
+                                       objectAt(3, QPointF(0.0, -3.0)), objectAt(4, QPointF(-3.0, 0.0))}),
                         1000);
 
     const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(1000);
-    check(snapshot.objects.size() == 4, "all four corner objects must be present");
+    check(snapshot.objects.size() == 4, "all four wedge objects must be present");
     for (const DigitalTwinObject& object : snapshot.objects) {
         if (object.objectId == QStringLiteral("G-1")) {
-            check(object.channelIndex == 0, "north-west must be CH01");
+            check(object.channelIndex == 0, "the north wedge must be CH01");
         } else if (object.objectId == QStringLiteral("G-2")) {
-            check(object.channelIndex == 1, "north-east must be CH02");
+            check(object.channelIndex == 1, "the east wedge must be CH02");
         } else if (object.objectId == QStringLiteral("G-3")) {
-            check(object.channelIndex == 3, "south-west must be CH04");
+            check(object.channelIndex == 2, "the south wedge must be CH03");
         } else if (object.objectId == QStringLiteral("G-4")) {
-            check(object.channelIndex == 2, "south-east must be CH03");
+            check(object.channelIndex == 3, "the west wedge must be CH04");
         }
     }
 }
@@ -307,7 +308,7 @@ int main() {
     checkStreamRestartKeepsWorldBounds();
     checkBackwardTimestampStillUpdates();
     checkChannelDoesNotFlapAtBoundary();
-    checkQuadrantChannelMapping();
+    checkWedgeChannelMapping();
     checkRiskPulsesAreRateLimited();
 
     if (failureCount > 0) {

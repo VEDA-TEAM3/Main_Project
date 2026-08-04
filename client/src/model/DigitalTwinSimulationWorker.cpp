@@ -30,15 +30,18 @@ constexpr double verticalVelocityJitter = verticalVelocityJitterPerSecond * seco
 constexpr double opacityIncrementPerTick = static_cast<double>(updateIntervalMsec) / fadeInDurationMsec;
 
 /**
- * @brief           정규화 좌표를 2x2 구역으로 나눠 CCTV 채널을 계산합니다.
+ * @brief           정규화 좌표를 중심에서 X자로 나눠 CCTV 채널을 계산합니다.
  * @param position  0.0~1.0 기준 객체 위치
- * @return          0~3 채널 인덱스 (CH03과 CH04는 현장 설치가 반대라 좌하/우하가 교차됨)
+ * @return          위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04 순의 0~3 채널 인덱스
  */
 int channelIndexForPosition(const QPointF& position) {
-    const bool rightSide = position.x() >= 0.5;
-    const bool bottomSide = position.y() >= 0.5;
-    const int quadrant = (bottomSide ? 2 : 0) + (rightSide ? 1 : 0);
-    return quadrant == 2 ? 3 : (quadrant == 3 ? 2 : quadrant);
+    const double offsetX = position.x() - 0.5;
+    const double offsetY = position.y() - 0.5;
+
+    if (qAbs(offsetY) >= qAbs(offsetX)) {
+        return offsetY < 0.0 ? 0 : 2;
+    }
+    return offsetX > 0.0 ? 1 : 3;
 }
 
 /**

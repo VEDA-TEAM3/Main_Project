@@ -18,12 +18,13 @@ constexpr double centralCctvZValue = 3.0;
 constexpr double overlayZValue = 40.0;
 const QPointF centralCctvPosition(500.0, 260.0);
 
-// 인덱스가 곧 채널이다. CH03과 CH04는 현장 설치가 사분면 순서와 반대이므로 아래 두 좌표가 교차한다
+// 인덱스가 곧 채널이다. 카메라가 중심에서 상/우/하/좌를 보므로 각 구역 한가운데,
+// 주차면이 없는 통로(중앙 세로 470~566, 가로 띠 190~326)에 올린다
 const std::array<QPointF, channelCount> channelAnchors = {
-    QPointF(106.0, 100.0),
-    QPointF(544.0, 100.0),
-    QPointF(910.0, 420.0),
-    QPointF(454.0, 420.0),
+    QPointF(518.0, 110.0),
+    QPointF(880.0, 258.0),
+    QPointF(518.0, 385.0),
+    QPointF(120.0, 258.0),
 };
 }  // namespace
 

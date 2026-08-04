@@ -67,10 +67,11 @@ later video frame.
 One client owns one 4-channel CCTV unit and the 10 x 10 m it covers, each channel taking one 5 x 5 m quadrant of it.
 A larger site is covered by deploying more clients, not by adding channels to one, so the world extent below is the
 area of *this* client, not of the whole site — `digitalTwin.world` ships as a 10 x 10 m square centred on the unit
-(`-5..5` on both axes). The channel a risk object belongs to is derived from which quadrant of that square it sits
-in, which holds exactly as long as the unit is centred on the world origin and the channels are laid out
-CH01 = NW, CH02 = NE, CH03 = SE, CH04 = SW. The two lower quadrants are crossed relative to the natural
-reading order because that is how CH03 and CH04 are physically installed on site.
+(`-5..5` on both axes). The four cameras look outward from the centre of that square, so the channel a risk object
+belongs to is the wedge it sits in, cut by the two 45-degree diagonals through the centre — not by the axes:
+CH01 = north, CH02 = east, CH03 = south, CH04 = west. This holds exactly as long as the unit is centred on the
+world origin. An object stays on its previous channel until it is `channelBoundaryHysteresisMeters` clear of a
+diagonal, so a track running along a boundary does not flip back and forth.
 
 TopView positions are world coordinates. For a stable production map, set the calibrated world extent:
 
@@ -153,7 +154,7 @@ client is only hiding it.
 The shared world-coordinate contract has positive Y pointing north/up. Qt therefore flips the
 Y axis when mapping it to screen coordinates. Set `VEDA_MAP_INVERT_Y=0` only when an upstream source already provides
 screen-style coordinates whose positive Y points down. Calibrated `VEDA_MAP_MIN_*` and `VEDA_MAP_MAX_*` values are
-required for exact CH-01 through CH-04 quadrant assignment; automatic bounds are only a safe fallback.
+required for exact CH-01 through CH-04 wedge assignment; automatic bounds are only a safe fallback.
 
 ## Build
 
