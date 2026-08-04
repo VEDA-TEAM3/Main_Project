@@ -112,9 +112,7 @@ void DeviceStatusPanel::setupUi() {
     gridLayout->setVerticalSpacing(6);
 
     for (int channelIndex = 0; channelIndex < deviceChannelCount; ++channelIndex) {
-        // 현장 설치가 사분면 순서와 반대라 아래 줄은 좌하 CH04, 우하 CH03으로 놓는다
-        const int cell = channelIndex == 2 ? 3 : (channelIndex == 3 ? 2 : channelIndex);
-        gridLayout->addWidget(createChannelCard(channelIndex), cell / 2, cell % 2);
+        gridLayout->addWidget(createChannelCard(channelIndex), channelIndex / 2, channelIndex % 2);
     }
 
     gridLayout->setColumnStretch(0, 1);
