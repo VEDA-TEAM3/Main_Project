@@ -34,15 +34,17 @@ private:
     void logAutomaticWorldBounds(const QString& reason) const;
     bool worldBoundsReady() const;
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
+    QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
     QPointF rateLimitedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
     void logRateLimitedJump(const QString& objectId, double distance, double maximumDistance, qint64 localTimeMsec);
     QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 sourceTimestamp,
                                  qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
-    void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions);
+    void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions, qint64 localTimeMsec);
 
     QVector<RiskFrameData> history_;
     QHash<qint64, RiskObjectData> retainedObjects_;
+    QHash<qint64, QVector<QPointF>> worldPositionHistories_;
     QHash<qint64, qint64> lastSeenArrivalTimesMsec_;
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;

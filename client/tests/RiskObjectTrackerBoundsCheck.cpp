@@ -128,6 +128,45 @@ void checkSustainedMovementCatchesUp() {
     const double followedX = positionOf(tracker.buildSnapshot(timeMsec), 1).x();
     check(qAbs(followedX - 0.9) < 0.01, "sustained movement must reach the measured position");
 }
+/// 한 프레임만 튄 좌표는 화면에 전혀 반영되지 않아야 한다.
+void checkIsolatedOutlierFrameIsRejected() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(0.0, 0.0, 100.0, 100.0);
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(10.0, 10.0))}), 1000);
+    tracker.buildSnapshot(1000);
+    tracker.submitFrame(frameAt(1100, {objectAt(1, QPointF(10.0, 10.0))}), 1100);
+    tracker.buildSnapshot(1100);
+
+    tracker.submitFrame(frameAt(1200, {objectAt(1, QPointF(90.0, 90.0))}), 1200);
+    const QPointF position = positionOf(tracker.buildSnapshot(1200), 1);
+    check(qAbs(position.x() - 0.1) < 0.001, "a single outlier frame must not move the object at all");
+}
+
+/// 수신이 끊겼다 돌아와도 지도 배율은 유지되어야 한다 (화면 전체가 튀는 것 방지).
+void checkStreamRestartKeepsWorldBounds() {
+    RiskObjectTracker tracker(checkConfig());
+    for (int step = 0; step < 3; ++step) {
+        const qint64 timeMsec = 1000 + step * 100;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(0.0, 0.0)), objectAt(2, QPointF(40.0, 40.0)),
+                                               objectAt(3, QPointF(20.0, 20.0))}),
+                            timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
+    const double beforeX = positionOf(tracker.buildSnapshot(1200), 3).x();
+
+    // 도착 간격 5초 초과 -> 스트림 재시작으로 간주되어 내부 상태가 초기화된다.
+    // 재시작 후에는 관측 분포가 좁아, 경계를 다시 추정하면 같은 좌표가 다른 위치로 간다
+    const qint64 restartMsec = 1200 + 6000;
+    tracker.submitFrame(frameAt(restartMsec, {objectAt(1, QPointF(0.0, 0.0)), objectAt(3, QPointF(20.0, 20.0))}),
+                        restartMsec);
+    const double afterX = positionOf(tracker.buildSnapshot(restartMsec), 3).x();
+
+    check(qAbs(beforeX - 0.5) < 0.05, "the probe must sit mid-map before the restart");
+    check(qAbs(afterX - beforeX) < 0.001, "a stream restart must not rescale the map");
+}
 }  // namespace
 
 int main() {
@@ -135,6 +174,8 @@ int main() {
     checkOutOfRangePositionExpandsBounds();
     checkSingleFrameTeleportIsRateLimited();
     checkSustainedMovementCatchesUp();
+    checkIsolatedOutlierFrameIsRejected();
+    checkStreamRestartKeepsWorldBounds();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

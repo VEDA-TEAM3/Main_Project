@@ -19,6 +19,7 @@ constexpr qint64 maximumPositionFilterStepMsec = 100;
 constexpr double maximumNormalizedSpeedPerSecond = 0.9;
 constexpr int automaticBoundsExpansionFrameCount = 3;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
+constexpr qsizetype worldPositionMedianSampleCount = 3;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -100,15 +101,19 @@ void RiskObjectTracker::reset() {
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
-    automaticWorldBounds_ = {};
-    automaticWorldSamples_.clear();
-    automaticBoundsStartSourceTimestamp_ = 0;
+    worldPositionHistories_.clear();
     pendingExpansionBounds_ = {};
     pendingExpansionFrameCount_ = 0;
     lastArrivalTimeMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
     lastRateLimitLogMsec_ = 0;
-    hasAutomaticWorldBounds_ = false;
+
+    // 지도 정규화 범위는 현장의 성질이지 수신 세션의 성질이 아니다. 스트림이 잠깐 끊겼다는
+    // 이유로 버리면 재연결마다 새 warmup 창으로 배율이 다시 잡혀 화면 전체가 튄다
+    if (!hasAutomaticWorldBounds_) {
+        automaticWorldSamples_.clear();
+        automaticBoundsStartSourceTimestamp_ = 0;
+    }
 }
 
 /**
@@ -136,6 +141,11 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
+    // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는 것을 막는다
+    for (RiskObjectData& object : frame.objects) {
+        object.worldPosition = medianFilteredWorldPosition(object.globalId, object.worldPosition);
+    }
+
     updateAutomaticWorldBounds(frame);
 
     for (const RiskObjectData& object : frame.objects) {
@@ -151,6 +161,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         }
 
         retainedObjects_.remove(iterator.key());
+        worldPositionHistories_.remove(iterator.key());
         iterator = lastSeenArrivalTimesMsec_.erase(iterator);
     }
 
@@ -313,7 +324,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         }
     }
     previousPairRiskLevels_ = std::move(currentPairRiskLevels);
-    removeInactivePositionStates(currentPositions);
+    removeInactivePositionStates(currentPositions, localTimeMsec);
     previousPositions_ = std::move(currentPositions);
     return snapshot;
 }
@@ -461,6 +472,42 @@ QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition)
 }
 
 /**
+ * @brief                  gid별 최근 월드 좌표의 중앙값을 돌려줍니다.
+ * @param globalId         융합 객체 ID
+ * @param worldPosition    이번 프레임의 월드 좌표
+ * @return                 중앙값 필터를 통과한 월드 좌표
+ *
+ * @details 속도 상한은 이상치의 '속도'만 자를 뿐 몇 프레임에 걸쳐 끌려가는 것은 막지 못한다.
+ *          한 프레임만 튄 좌표는 중앙값에서 아예 탈락하므로 화면에도, 자동 경계 확장에도
+ *          반영되지 않는다.
+ *
+ * ponytail: 표본 3개짜리 축별 중앙값이라 2프레임 이상 지속되는 이상치는 통과한다(속도 상한이
+ *           2차 방어선). 더 필요하면 표본 수를 늘리거나 속도까지 모델링하는 추정기로 올린다.
+ */
+QPointF RiskObjectTracker::medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition) {
+    QVector<QPointF>& history = worldPositionHistories_[globalId];
+    history.append(worldPosition);
+    while (history.size() > worldPositionMedianSampleCount) {
+        history.removeFirst();
+    }
+
+    if (history.size() < worldPositionMedianSampleCount) {
+        return worldPosition;
+    }
+
+    QVector<double> xValues;
+    QVector<double> yValues;
+    xValues.reserve(history.size());
+    yValues.reserve(history.size());
+    for (const QPointF& sample : history) {
+        xValues.append(sample.x());
+        yValues.append(sample.y());
+    }
+
+    return QPointF(percentile(xValues, 0.5), percentile(yValues, 0.5));
+}
+
+/**
  * @brief                    한 프레임 만에 도달할 수 없는 이동량을 잘라 목표 좌표를 만듭니다.
  * @param objectId           추적 객체 식별자
  * @param measuredPosition   RiskFrame에서 계산한 정규화 좌표
@@ -600,8 +647,10 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
 /**
  * @brief                   현재 스냅샷에서 사라진 객체의 위치 보정 상태를 정리합니다.
  * @param currentPositions  현재 화면에 표시 중인 객체 위치
+ * @param localTimeMsec     현재 로컬 monotonic 시각
  */
-void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions) {
+void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions,
+                                                     qint64 localTimeMsec) {
     for (auto iterator = positionTransitions_.begin(); iterator != positionTransitions_.end();) {
         if (currentPositions.contains(iterator.key())) {
             ++iterator;
@@ -614,8 +663,18 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
             renderedOpacities_.remove(objectId);
             opacityUpdateTimesMsec_.remove(objectId);
         }
-        filteredPositions_.remove(iterator.key());
-        filteredPositionTimesMsec_.remove(iterator.key());
         iterator = positionTransitions_.erase(iterator);
+    }
+
+    // 속도 상한 상태는 표시가 끊겨도 잠시 남긴다. 융합이 한두 프레임 객체를 놓쳤다가 되찾을 때
+    // 상태를 이미 지웠으면 재등장 좌표를 그대로 받아들여 그 순간 튄다
+    for (auto iterator = filteredPositionTimesMsec_.begin(); iterator != filteredPositionTimesMsec_.end();) {
+        if (localTimeMsec - iterator.value() <= positionFilterResetGapMsec) {
+            ++iterator;
+            continue;
+        }
+
+        filteredPositions_.remove(iterator.key());
+        iterator = filteredPositionTimesMsec_.erase(iterator);
     }
 }
