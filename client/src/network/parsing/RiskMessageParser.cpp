@@ -116,10 +116,12 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
             return false;
         }
 
+        // 공유 계약의 ObjectClass에는 Unknown/Head/LicensePlate도 있다. 표시 대상이 아닌 객체
+        // 하나 때문에 프레임 전체를 버리면 그 구간의 모든 객체가 멈췄다가 한 번에 튀므로,
+        // 계약을 벗어난 객체만 건너뛴다
         const QString objectClass = classValue.toString();
         if (objectClass != QStringLiteral("Human") && objectClass != QStringLiteral("Vehicle")) {
-            error = QStringLiteral("Unsupported RiskObject class on %1: %2").arg(topic, objectClass);
-            return false;
+            continue;
         }
 
         const QJsonObject position = positionValue.toObject();

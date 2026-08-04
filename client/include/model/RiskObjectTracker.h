@@ -26,7 +26,7 @@ private:
         QPointF startPosition;
         QPointF targetPosition;
         qint64 transitionStartMsec = 0;
-        qint64 targetSourceTimestamp = 0;
+        qint64 targetFrameSequence = 0;
     };
 
     void updateAutomaticWorldBounds(const RiskFrameData& frame);
@@ -37,7 +37,7 @@ private:
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
     QPointF rateLimitedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
     void logRateLimitedJump(const QString& objectId, double distance, double maximumDistance, qint64 localTimeMsec);
-    QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 sourceTimestamp,
+    QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 frameSequence,
                                  qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
     void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions, qint64 localTimeMsec);
@@ -62,6 +62,7 @@ private:
     QRectF pendingExpansionBounds_;
     qint64 automaticBoundsStartSourceTimestamp_ = 0;
     int pendingExpansionFrameCount_ = 0;
+    qint64 frameSequence_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     qint64 lastRateLimitLogMsec_ = 0;

@@ -167,6 +167,33 @@ void checkStreamRestartKeepsWorldBounds() {
     check(qAbs(beforeX - 0.5) < 0.05, "the probe must sit mid-map before the restart");
     check(qAbs(afterX - beforeX) < 0.001, "a stream restart must not rescale the map");
 }
+/// RiskFrame.ts가 뒤로 가도 프레임을 버리지 않아야 한다 (멈췄다가 튀는 현상 방지).
+/// control-server는 윈도우에 모인 채널 관측 중 가장 오래된 ts를 싣기 때문에, 채널별 CCTV
+/// 시계 차이만큼 ts가 역행할 수 있다.
+void checkBackwardTimestampStillUpdates() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(0.0, 0.0, 100.0, 100.0);
+
+    RiskObjectTracker tracker(config);
+    // 중앙값 필터가 채워지도록 같은 좌표를 세 번 넣고 시작한다
+    for (int step = 0; step < 3; ++step) {
+        const qint64 timeMsec = 1000 + step * 100;
+        tracker.submitFrame(frameAt(5000 + step, {objectAt(1, QPointF(10.0, 10.0))}), timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
+
+    // ts가 300ms 역행한 프레임들: 다른 채널 시계로 넘어간 상황
+    qint64 timeMsec = 1300;
+    for (int step = 0; step < 3; ++step) {
+        timeMsec += 100;
+        tracker.submitFrame(frameAt(4700 + step, {objectAt(1, QPointF(14.0, 10.0))}), timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
+
+    const double movedX = positionOf(tracker.buildSnapshot(timeMsec), 1).x();
+    check(movedX > 0.11, "frames with a backward source timestamp must still be rendered");
+}
 }  // namespace
 
 int main() {
@@ -176,6 +203,7 @@ int main() {
     checkSustainedMovementCatchesUp();
     checkIsolatedOutlierFrameIsRejected();
     checkStreamRestartKeepsWorldBounds();
+    checkBackwardTimestampStillUpdates();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

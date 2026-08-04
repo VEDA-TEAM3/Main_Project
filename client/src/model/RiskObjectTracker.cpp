@@ -10,7 +10,6 @@
 
 namespace {
 constexpr qint64 sourceRestartGapMsec = 5000;
-constexpr qint64 sourceTimestampRollbackResetMsec = 1000;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
 constexpr qint64 positionFilterResetGapMsec = 500;
@@ -127,19 +126,21 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
-    const bool arrivalGapDetected =
-        lastArrivalTimeMsec_ > 0 && arrivalTimeMsec - lastArrivalTimeMsec_ > sourceRestartGapMsec;
-    const bool sourceTimestampRolledBack =
-        !history_.isEmpty() &&
-        history_.constLast().sourceTimestamp - frame.sourceTimestamp > sourceTimestampRollbackResetMsec;
-    if (arrivalGapDetected || sourceTimestampRolledBack) {
+    if (lastArrivalTimeMsec_ > 0 && arrivalTimeMsec - lastArrivalTimeMsec_ > sourceRestartGapMsec) {
         reset();
     }
     lastArrivalTimeMsec_ = arrivalTimeMsec;
 
-    if (!history_.isEmpty() && frame.sourceTimestamp <= history_.constLast().sourceTimestamp) {
+    // RiskFrame.ts는 단조 증가하지 않는다: control-server가 윈도우에 모인 채널 관측 중
+    // '가장 오래된' ts를 프레임 ts로 싣는데(ConcatFuser), 채널별 CCTV 시계가 서로 다르므로
+    // 어느 채널이 윈도우에 들어왔는지에 따라 ts가 뒤로 갈 수 있다. ts로 순서를 매기면 그동안의
+    // 프레임이 통째로 버려져 객체가 멈췄다가 한 번에 튄다. 순서는 도착 순(QoS 1, 토픽 내 순서
+    // 보장)으로 잡고, ts는 재전송된 같은 프레임을 걸러내는 데만 쓴다
+    if (!history_.isEmpty() && frame.sourceTimestamp == history_.constLast().sourceTimestamp) {
         return false;
     }
+
+    ++frameSequence_;
 
     // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는 것을 막는다
     for (RiskObjectData& object : frame.objects) {
@@ -222,7 +223,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
     const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys, &includedObjectIds](
-                                  const RiskObjectData& sourceObject, qreal opacity, qint64 objectSourceTimestamp) {
+                                  const RiskObjectData& sourceObject, qreal opacity, qint64 objectFrameSequence) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
         }
@@ -234,7 +235,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
                                                                           : DigitalTwinObjectType::Vehicle;
         const QPointF measuredPosition = normalizedWorldPosition(sourceObject.worldPosition);
         const QPointF targetPosition = rateLimitedPosition(object.objectId, measuredPosition, localTimeMsec);
-        object.position = transitionedPosition(object.objectId, targetPosition, objectSourceTimestamp, localTimeMsec);
+        object.position = transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec);
         object.channelIndex = channelIndexForPosition(object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
@@ -262,8 +263,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     };
 
     for (const RiskObjectData& sourceObject : frame.objects) {
-        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec),
-                     latestSourceTimestamp);
+        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_);
     }
 
     for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
@@ -274,9 +274,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         }
 
         const QString objectId = QStringLiteral("G-%1").arg(iterator.key());
-        const qint64 retainedSourceTimestamp = positionTransitions_.value(objectId).targetSourceTimestamp;
+        const qint64 retainedFrameSequence = positionTransitions_.value(objectId).targetFrameSequence;
         appendObject(iterator.value(), lifecycleOpacity(iterator.key(), false, missingAgeMsec, localTimeMsec),
-                     retainedSourceTimestamp > 0 ? retainedSourceTimestamp : latestSourceTimestamp);
+                     retainedFrameSequence > 0 ? retainedFrameSequence : frameSequence_);
     }
 
     QHash<QString, DigitalTwinRiskLevel> currentPairRiskLevels;
@@ -574,12 +574,12 @@ void RiskObjectTracker::logRateLimitedJump(const QString& objectId, double dista
  * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬 시간으로 전환합니다.
  * @param objectId          추적 객체 식별자
  * @param targetPosition    최신 RiskFrame에서 계산한 목표 정규화 좌표
- * @param sourceTimestamp   목표 좌표가 속한 RiskFrame source timestamp
+ * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번 (RiskFrame.ts는 단조 증가가 아니라 쓰지 않는다)
  * @param localTimeMsec     현재 로컬 monotonic 시각
  * @return                  현재 렌더 시점의 정규화 좌표
  */
 QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const QPointF& targetPosition,
-                                                 qint64 sourceTimestamp, qint64 localTimeMsec) {
+                                                 qint64 frameSequence, qint64 localTimeMsec) {
     auto currentPosition = [this, localTimeMsec](const PositionTransitionState& state) {
         if (config_.positionTransitionMsec <= 0 || state.transitionStartMsec <= 0) {
             return state.targetPosition;
@@ -598,18 +598,18 @@ QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const Q
         state.startPosition = targetPosition;
         state.targetPosition = targetPosition;
         state.transitionStartMsec = localTimeMsec;
-        state.targetSourceTimestamp = sourceTimestamp;
+        state.targetFrameSequence = frameSequence;
         positionTransitions_.insert(objectId, state);
         return targetPosition;
     }
 
     PositionTransitionState& state = iterator.value();
-    if (sourceTimestamp > state.targetSourceTimestamp) {
+    if (frameSequence > state.targetFrameSequence) {
         const QPointF renderedNow = currentPosition(state);
         state.startPosition = renderedNow;
         state.targetPosition = targetPosition;
         state.transitionStartMsec = localTimeMsec;
-        state.targetSourceTimestamp = sourceTimestamp;
+        state.targetFrameSequence = frameSequence;
     }
 
     const QPointF rendered = currentPosition(state);

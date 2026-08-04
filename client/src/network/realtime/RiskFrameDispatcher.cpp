@@ -51,13 +51,13 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
     const qint64 nowMsec = qMax<qint64>(1, clock_.elapsed());
     if (lastArrivalMsec_ > 0 && nowMsec - lastArrivalMsec_ > config_.riskSourceRestartGapMsec) {
         reset();
-    } else if (latestSourceTimestamp_ > 0 &&
-               latestSourceTimestamp_ - frame.sourceTimestamp > config_.riskTimestampRollbackResetMsec) {
-        reset();
     }
     lastArrivalMsec_ = nowMsec;
 
-    if (frame.sourceTimestamp <= latestSourceTimestamp_) {
+    // control-server가 싣는 RiskFrame.ts는 윈도우에 모인 채널 관측 중 가장 오래된 값이라
+    // 채널 구성이 바뀌면 뒤로 갈 수 있다. ts로 순서를 매기면 그 구간의 프레임이 통째로 버려져
+    // 화면이 멈췄다가 튄다. 순서는 도착 순(QoS 1)으로 두고 ts는 재전송 중복 제거에만 쓴다
+    if (frame.sourceTimestamp == latestSourceTimestamp_) {
         return;
     }
 

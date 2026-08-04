@@ -81,6 +81,12 @@ without that widening the surplus area would be clamped onto the map edges. The 
 scale settles once the site has been covered. Watch `[TOPVIEW MAP] Automatic world bounds estimated|expanded` in the
 log to see the extent Qt is actually using.
 
+`RiskFrame.ts` is **not** monotonic. `ConcatFuser` stamps the fused frame with the *oldest* observation timestamp in
+the window, and each channel's timestamp comes from its own CCTV clock, so the value moves backwards whenever the
+set of channels in a window changes. Qt therefore orders risk frames by arrival (QoS 1 preserves per-topic order) and
+uses `ts` only to drop a redelivered copy of the frame it already has. Ordering by `ts` instead would discard every
+frame carrying the lagging channel's clock, freezing the map and then jumping it forward in one step.
+
 Qt also caps how far an object may move between renders (0.9 of the map per second). Multi-camera fusion can
 represent one object by a different observation from frame to frame, which arrives as a single-frame teleport across
 the map and back; the cap absorbs those while genuine movement, which keeps arriving in the same direction, catches
