@@ -214,7 +214,9 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
-    setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
+    // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에 파동이 하나씩만 있어도
+    // 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로 나눠 판단한다
+    setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
 
     overlayManager_.setScene(&scene_);
     dangerAlertOverlay_ = new DangerAlertOverlay(viewport());
@@ -236,6 +238,12 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     lastLiveSnapshotPublishMsec_ = 0;
     updateObjectAreaRect();
+
+    // 이미 떠 있는 데모 아이콘도 새 크기로 다시 그린다
+    objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(liveConfig_.icons);
+    for (DemoVisualItem& visualItem : demoItems_) {
+        updateMarkerPixmap(&visualItem);
+    }
 }
 
 /**

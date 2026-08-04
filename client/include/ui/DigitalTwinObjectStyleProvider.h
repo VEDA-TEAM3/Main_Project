@@ -4,6 +4,7 @@
 #include <QSize>
 #include <QString>
 
+#include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
 
 struct DigitalTwinObjectVisualStyle {
@@ -23,5 +24,10 @@ public:
 
 class DefaultDigitalTwinObjectStyleProvider final : public DigitalTwinObjectStyleProvider {
 public:
+    explicit DefaultDigitalTwinObjectStyleProvider(DigitalTwinIconConfig iconConfig = {});
+
     DigitalTwinObjectVisualStyle styleFor(const DigitalTwinObject& object) const override;
+
+private:
+    DigitalTwinIconConfig iconConfig_;
 };

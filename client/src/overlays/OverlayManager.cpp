@@ -1,13 +1,22 @@
 #include "overlays/OverlayManager.h"
 
 #include <QObject>
+#include <cmath>
 #include <memory>
 
 #include "overlays/RadarPulseItem.h"
 
 namespace {
 constexpr int overlayFrameIntervalMsec = 33;
-constexpr int maxActivePulseItemCount = 8;
+// 파동 하나가 프레임당 약 2ms를 먹는다(안티에일리어싱 원 스트로크 8회). 30fps 예산이 33ms인데
+// GUI 스레드는 영상 위젯과 표까지 같이 그리므로, 동시 개수를 4로 묶어 8ms 안쪽으로 유지한다
+constexpr int maxActivePulseItemCount = 4;
+// 객체가 몰리면 거의 같은 자리에 파동이 여러 개 겹쳐 뜬다. 보이는 그림은 하나와 다를 게 없으므로
+// 이 거리 안에 같은 단계 이상의 파동이 이미 퍼지는 중이면 새로 만들지 않는다.
+// 파동 반지름이 180px까지 커지므로 이 정도는 사실상 같은 원이다(실데이터 10x10m 기준 약 1.3m)
+constexpr double pulseMergeDistance = 50.0;
+// 이미 절반 넘게 퍼진 파동은 곧 사라지므로 겹침으로 보지 않는다
+constexpr qreal pulseMergeMaximumProgress = 0.5;
 }  // namespace
 
 /**
@@ -49,6 +58,10 @@ void OverlayManager::showRiskPulse(const QPointF& scenePosition, DigitalTwinRisk
         return;
     }
 
+    if (isCoveredByActivePulse(scenePosition, riskLevel)) {
+        return;
+    }
+
     if (activePulseItems_.size() >= maxActivePulseItemCount) {
         removePulseAt(0);
     }
@@ -58,11 +71,39 @@ void OverlayManager::showRiskPulse(const QPointF& scenePosition, DigitalTwinRisk
     pulseItem->setElapsedMsec(0);
 
     scene_->addItem(pulseItem.get());
-    activePulseItems_.append({pulseItem, 0});
+    activePulseItems_.append({pulseItem, 0, scenePosition, riskLevel});
 
     if (!animationTimer_.isActive()) {
         animationTimer_.start();
     }
+}
+
+/**
+ * @brief                 같은 자리에서 이미 퍼지고 있는 파동이 있는지 확인합니다.
+ * @param scenePosition   새로 띄우려는 위치
+ * @param riskLevel       새로 띄우려는 단계
+ * @return                덮이면 true
+ *
+ * @details 객체가 셋 이상 몰리면 쌍마다 파동이 생겨 거의 같은 자리에 여러 겹이 쌓인다. 겹친 그림은
+ *          한 겹과 구분되지 않으면서 비용만 배로 든다. 단, 더 높은 단계는 색이 다르므로 항상 띄운다.
+ */
+bool OverlayManager::isCoveredByActivePulse(const QPointF& scenePosition, DigitalTwinRiskLevel riskLevel) const {
+    for (const ActivePulseItem& activePulseItem : activePulseItems_) {
+        if (!activePulseItem.item || activePulseItem.item->progress() > pulseMergeMaximumProgress) {
+            continue;
+        }
+
+        if (static_cast<int>(activePulseItem.riskLevel) < static_cast<int>(riskLevel)) {
+            continue;
+        }
+
+        const QPointF offset = activePulseItem.position - scenePosition;
+        if (std::hypot(offset.x(), offset.y()) <= pulseMergeDistance) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**

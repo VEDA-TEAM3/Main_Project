@@ -88,6 +88,7 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 - MQTT 토픽 필터와 QoS
 - 위험 및 블러 디스패처 주기
 - 로그 카테고리별 on/off (`logging`)
+- 탑뷰 객체 아이콘 크기 (`digitalTwin.icons.vehiclePx`, `pedestrianPx`, 각 8~512, 기본 92/62)
 
 로그는 카테고리별로 켜고 끕니다. 전부 켜면 고빈도 항목(`mqttStatusPayload`, `mqttBlur`, `blurApply`)이
 초당 수백 줄을 쏟아내 정작 봐야 할 줄이 묻히므로, 필요한 것만 `true`로 둡니다. 오류 로그는 어떤

@@ -36,19 +36,20 @@ QString iconPathForObject(const DigitalTwinObject& object) {
 }
 
 /**
- * @brief            객체 타입별 기본 아이콘 표시 크기를 반환합니다.
+ * @brief             객체 타입별 아이콘 표시 크기를 반환합니다.
  * @param objectType  디지털 트윈 객체 타입
+ * @param iconConfig  설정 파일에서 읽은 아이콘 크기
  * @return            scene에 표시할 아이콘 크기
  */
-QSize iconSizeForType(DigitalTwinObjectType objectType) {
+QSize iconSizeForType(DigitalTwinObjectType objectType, const DigitalTwinIconConfig& iconConfig) {
     switch (objectType) {
         case DigitalTwinObjectType::Vehicle:
-            return QSize(92, 92);
+            return QSize(iconConfig.vehiclePixels, iconConfig.vehiclePixels);
         case DigitalTwinObjectType::Pedestrian:
-            return QSize(62, 62);
+            return QSize(iconConfig.pedestrianPixels, iconConfig.pedestrianPixels);
     }
 
-    return QSize(44, 44);
+    return QSize(iconConfig.pedestrianPixels, iconConfig.pedestrianPixels);
 }
 
 /**
@@ -103,12 +104,17 @@ QColor fallbackColorForObject(const DigitalTwinObject& object) {
 }
 }  // namespace
 
+/** @brief 설정 파일에서 읽은 아이콘 크기로 스타일 제공자를 만듭니다. */
+DefaultDigitalTwinObjectStyleProvider::DefaultDigitalTwinObjectStyleProvider(DigitalTwinIconConfig iconConfig)
+    : iconConfig_(iconConfig) {}
+
 /**
  * @brief         객체 타입과 위험 단계에 맞는 아이콘/색상 스타일을 제공합니다.
  * @param object  스타일을 조회할 디지털 트윈 객체
  * @return        화면 표시용 스타일 값
  */
 DigitalTwinObjectVisualStyle DefaultDigitalTwinObjectStyleProvider::styleFor(const DigitalTwinObject& object) const {
-    return {iconPathForObject(object), iconSizeForType(object.type), labelColorForRiskLevel(object.riskLevel),
-            trailColorForObjectType(object.type), fallbackColorForObject(object)};
+    return {iconPathForObject(object), iconSizeForType(object.type, iconConfig_),
+            labelColorForRiskLevel(object.riskLevel), trailColorForObjectType(object.type),
+            fallbackColorForObject(object)};
 }

@@ -79,17 +79,11 @@ void RadarPulseItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* op
         const qreal fade = remaining * remaining * (3.0 - 2.0 * remaining);
         const int alpha = static_cast<int>((danger ? 255.0 : 220.0) * fade);
 
-        QColor outerGlowColor = baseColor;
-        outerGlowColor.setAlpha(std::max(0, danger ? alpha / 5 : alpha * 4 / 25));
-        QPen outerGlowPen(outerGlowColor, danger ? 19.0 : 15.0);
-        outerGlowPen.setCosmetic(true);
-        painter->setPen(outerGlowPen);
-        painter->setBrush(Qt::NoBrush);
-        painter->drawEllipse(QPointF(0.0, 0.0), radius, radius);
-
+        // 예전에는 19px 외곽 글로우를 한 겹 더 그렸다. 가장 넓은 스트로크인데 알파는 1/5라
+        // 프레임 비용의 3분의 1을 쓰면서 눈에는 거의 안 보였다. 폭을 조금 키운 내부 글로우로 대신한다
         QColor innerGlowColor = baseColor;
         innerGlowColor.setAlpha(std::max(0, danger ? alpha * 2 / 5 : alpha * 8 / 25));
-        QPen innerGlowPen(innerGlowColor, danger ? 8.5 : 7.0);
+        QPen innerGlowPen(innerGlowColor, danger ? 11.0 : 9.0);
         innerGlowPen.setCosmetic(true);
         painter->setPen(innerGlowPen);
         painter->setBrush(Qt::NoBrush);

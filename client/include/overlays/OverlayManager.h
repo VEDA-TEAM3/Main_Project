@@ -26,7 +26,11 @@ private:
     struct ActivePulseItem {
         std::shared_ptr<RadarPulseItem> item;
         int elapsedMsec = 0;
+        QPointF position;
+        DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
     };
+
+    bool isCoveredByActivePulse(const QPointF& scenePosition, DigitalTwinRiskLevel riskLevel) const;
 
     QGraphicsScene* scene_ = nullptr;
     QTimer animationTimer_;

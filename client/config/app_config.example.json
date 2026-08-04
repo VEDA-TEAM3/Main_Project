@@ -26,6 +26,10 @@
         "fadeOutMs": 180,
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
+        "icons": {
+            "vehiclePx": 92,
+            "pedestrianPx": 62
+        },
         "world": {
             "fixedBoundsEnabled": true,
             "invertY": true,

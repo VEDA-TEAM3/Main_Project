@@ -174,6 +174,18 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         }
     }
 
+    if (digitalTwin.contains(QStringLiteral("icons"))) {
+        QJsonObject icons;
+        if (!readObject(digitalTwin, QStringLiteral("icons"), icons, error) ||
+            (icons.contains(QStringLiteral("vehiclePx")) &&
+             !readInt(icons, QStringLiteral("vehiclePx"), 8, 512, config.icons.vehiclePixels, error)) ||
+            (icons.contains(QStringLiteral("pedestrianPx")) &&
+             !readInt(icons, QStringLiteral("pedestrianPx"), 8, 512, config.icons.pedestrianPixels, error))) {
+            error = QStringLiteral("digitalTwin.icons: %1").arg(error);
+            return false;
+        }
+    }
+
     qint64 automaticBoundsMinimumSamples = config.world.automaticBoundsMinimumSamples;
     qint64 automaticBoundsMaximumSamples = config.world.automaticBoundsMaximumSamples;
     if ((world.contains(QStringLiteral("automaticBoundsWarmupMs")) &&

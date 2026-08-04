@@ -14,6 +14,12 @@ struct DigitalTwinWorldConfig {
     double automaticBoundsOutlierFraction = 0.05;
 };
 
+/// 탑뷰 맵에 그리는 객체 아이콘의 한 변 길이(scene 단위). 맵 자체는 1000x520이다
+struct DigitalTwinIconConfig {
+    int vehiclePixels = 92;
+    int pedestrianPixels = 62;
+};
+
 struct DigitalTwinRuntimeConfig {
     int renderIntervalMsec = 33;
     int snapshotPublishIntervalMsec = 50;
@@ -33,4 +39,5 @@ struct DigitalTwinRuntimeConfig {
     /// 객체별 상세 로그를 gid마다 이 주기로 제한한다. 필터가 개입한 프레임은 주기와 무관하게 남는다
     int debugDetailIntervalMsec = 1000;
     DigitalTwinWorldConfig world;
+    DigitalTwinIconConfig icons;
 };
