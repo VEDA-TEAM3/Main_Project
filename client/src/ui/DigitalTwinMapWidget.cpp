@@ -1,6 +1,5 @@
 #include "ui/DigitalTwinMapWidget.h"
 
-#include <QDateTime>
 #include <QDebug>
 #include <QFrame>
 #include <QGraphicsPathItem>
@@ -197,6 +196,7 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     qRegisterMetaType<DigitalTwinSnapshot>("DigitalTwinSnapshot");
     qRegisterMetaType<QVector<DigitalTwinObject>>("QVector<DigitalTwinObject>");
 
+    liveClock_.start();
     liveFrameExpiryTimer_.setInterval(liveConfig_.frameExpiryPollMsec);
     liveFrameExpiryTimer_.setTimerType(Qt::CoarseTimer);
     connect(&liveFrameExpiryTimer_, &QTimer::timeout, this, &DigitalTwinMapWidget::expireStaleLiveFrames);
@@ -234,16 +234,7 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     liveFrameExpiryTimer_.setInterval(liveConfig_.frameExpiryPollMsec);
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
-    displayedVideoTimestamps_.clear();
     lastLiveSnapshotPublishMsec_ = 0;
-}
-
-/**
- * @brief              확대 영상이 있으면 해당 채널을 TopView 영상 시각 기준으로 우선 사용합니다.
- * @param channelIndex 0 기반 채널 인덱스이며 4분할 화면은 -1
- */
-void DigitalTwinMapWidget::setPreferredVideoChannel(int channelIndex) {
-    preferredVideoChannelIndex_ = channelIndex >= 0 && channelIndex < digitalTwinChannelCount ? channelIndex : -1;
 }
 
 /**
@@ -330,7 +321,7 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
         emit liveRiskStreamActivated();
     }
 
-    if (!riskObjectTracker_->submitFrame(std::move(frame), QDateTime::currentMSecsSinceEpoch())) {
+    if (!riskObjectTracker_->submitFrame(std::move(frame), qMax<qint64>(1, liveClock_.elapsed()))) {
         return;
     }
 
@@ -379,15 +370,9 @@ void DigitalTwinMapWidget::setDeviceSignalAvailable(bool available) {
     deviceStatusMapOverlay_.setSignalAvailable(available);
 }
 
-/** @brief 채널별 sink 직전 최신 영상 시각을 TopView 동기화 기준으로 갱신합니다. */
-void DigitalTwinMapWidget::applyDisplayedVideoTimestamps(QVector<VideoFrameTimestamp> timestamps) {
-    displayedVideoTimestamps_ = std::move(timestamps);
-}
-
 void DigitalTwinMapWidget::rebuildLiveSnapshot() {
-    const qint64 currentTimeMsec = QDateTime::currentMSecsSinceEpoch();
-    const DigitalTwinSnapshot snapshot =
-        riskObjectTracker_->buildSnapshot(currentTimeMsec, representativeVideoTimestamp(currentTimeMsec));
+    const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
+    const DigitalTwinSnapshot snapshot = riskObjectTracker_->buildSnapshot(currentTimeMsec);
     applyObjectUpdates(snapshot.objects);
 
     const QVector<DigitalTwinRiskEvent> riskEvents = riskObjectTracker_->takeRiskEvents();
@@ -430,7 +415,7 @@ bool DigitalTwinMapWidget::hasActiveCentralDanger() const {
 }
 
 void DigitalTwinMapWidget::expireStaleLiveFrames() {
-    const qint64 currentTimeMsec = QDateTime::currentMSecsSinceEpoch();
+    const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
     const bool riskExpired = riskObjectTracker_->expireStaleFrame(currentTimeMsec, liveConfig_.frameExpiryMsec);
     if (riskExpired) {
         rebuildLiveSnapshot();
@@ -793,59 +778,4 @@ void DigitalTwinMapWidget::fitMapInView() {
     }
 
     fitInView(scene_.sceneRect(), Qt::KeepAspectRatio);
-}
-
-/**
- * @brief                 최근 채널 영상 시각 중 이상치에 덜 민감한 중앙값을 선택합니다.
- * @param currentTimeMsec 현재 로컬 UTC millisecond
- * @return                sender clock을 우선한 대표 영상 시각
- */
-std::optional<VideoFrameTimestamp> DigitalTwinMapWidget::representativeVideoTimestamp(qint64 currentTimeMsec) const {
-    if (!liveConfig_.syncWithVideo) {
-        return std::nullopt;
-    }
-
-    QVector<VideoFrameTimestamp> freshTimestamps;
-    freshTimestamps.reserve(displayedVideoTimestamps_.size());
-    for (const VideoFrameTimestamp& timestamp : displayedVideoTimestamps_) {
-        if (timestamp.isValid() && currentTimeMsec >= timestamp.observedLocalMsec &&
-            currentTimeMsec - timestamp.observedLocalMsec <= liveConfig_.videoTimestampTimeoutMsec) {
-            freshTimestamps.append(timestamp);
-        }
-    }
-    if (freshTimestamps.isEmpty()) {
-        return std::nullopt;
-    }
-
-    if (preferredVideoChannelIndex_ >= 0) {
-        const auto preferred = std::find_if(freshTimestamps.cbegin(), freshTimestamps.cend(),
-                                            [this](const VideoFrameTimestamp& timestamp) {
-                                                return timestamp.channelIndex == preferredVideoChannelIndex_;
-                                            });
-        if (preferred != freshTimestamps.cend()) {
-            return *preferred;
-        }
-    }
-
-    const bool hasSenderClock = std::any_of(freshTimestamps.cbegin(), freshTimestamps.cend(),
-                                            [](const VideoFrameTimestamp& timestamp) { return timestamp.senderClock; });
-    if (hasSenderClock) {
-        freshTimestamps.erase(
-            std::remove_if(freshTimestamps.begin(), freshTimestamps.end(),
-                           [](const VideoFrameTimestamp& timestamp) { return !timestamp.senderClock; }),
-            freshTimestamps.end());
-    }
-
-    std::sort(freshTimestamps.begin(), freshTimestamps.end(),
-              [](const VideoFrameTimestamp& first, const VideoFrameTimestamp& second) {
-                  return first.utcMsec < second.utcMsec;
-              });
-    const qint64 medianUtcMsec = freshTimestamps[freshTimestamps.size() / 2].utcMsec;
-    freshTimestamps.erase(std::remove_if(freshTimestamps.begin(), freshTimestamps.end(),
-                                         [this, medianUtcMsec](const VideoFrameTimestamp& timestamp) {
-                                             return qAbs(timestamp.utcMsec - medianUtcMsec) >
-                                                    liveConfig_.channelTimestampOutlierMsec;
-                                         }),
-                          freshTimestamps.end());
-    return freshTimestamps[freshTimestamps.size() / 2];
 }

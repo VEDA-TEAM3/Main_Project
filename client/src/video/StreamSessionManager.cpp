@@ -20,11 +20,6 @@ StreamSessionManager::StreamSessionManager(std::shared_ptr<StreamReceiverFactory
     : QObject(parent),
       receiverFactory_(std::move(receiverFactory)),
       receiverStartSpacingMsec_(receiverStartSpacingMsec) {
-    qRegisterMetaType<QVector<VideoFrameTimestamp>>("QVector<VideoFrameTimestamp>");
-    videoTimestampPublishTimer_.setInterval(33);
-    videoTimestampPublishTimer_.setTimerType(Qt::PreciseTimer);
-    connect(&videoTimestampPublishTimer_, &QTimer::timeout, this,
-            &StreamSessionManager::publishDisplayedVideoTimestamps);
 }
 
 /**
@@ -67,7 +62,6 @@ void StreamSessionManager::start() {
     }
 
     startRequested_ = true;
-    videoTimestampPublishTimer_.start();
     startReceiverSequentially(0);
 }
 
@@ -340,7 +334,6 @@ void StreamSessionManager::startReceiverSequentially(qsizetype receiverIndex) {
  */
 void StreamSessionManager::stopWorkers() {
     startRequested_ = false;
-    videoTimestampPublishTimer_.stop();
 
     if (receiverWorkers_.isEmpty()) {
         return;
@@ -398,26 +391,4 @@ void StreamSessionManager::stopWorkers() {
     }
 
     receiverWorkers_.clear();
-}
-
-/** @brief 채널 worker의 원자적 최신 영상 시각을 한 번에 수집해 UI에 게시합니다. */
-void StreamSessionManager::publishDisplayedVideoTimestamps() {
-    QVector<VideoFrameTimestamp> timestamps;
-    timestamps.reserve(receiverWorkers_.size());
-
-    for (const ReceiverWorker& worker : receiverWorkers_) {
-        if (!worker.receiver) {
-            continue;
-        }
-
-        VideoFrameTimestamp timestamp = worker.receiver->latestDisplayedFrameTimestamp();
-        timestamp.channelIndex = worker.config.channelIndex;
-        if (timestamp.isValid()) {
-            timestamps.append(timestamp);
-        }
-    }
-
-    if (!timestamps.isEmpty()) {
-        emit displayedVideoTimestampsChanged(std::move(timestamps));
-    }
 }

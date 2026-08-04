@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 
 #include "model/MqttRealtimeData.h"
@@ -24,6 +25,7 @@ signals:
 private:
     void flushPendingFrame();
 
+    QElapsedTimer clock_;
     RiskFrameData pendingFrame_;
     QTimer* flushTimer_ = nullptr;
     MqttDispatcherConfig config_;

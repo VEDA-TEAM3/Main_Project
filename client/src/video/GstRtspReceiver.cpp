@@ -5,7 +5,6 @@
 #include <gst/video/videooverlay.h>
 
 #include <QByteArray>
-#include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QThread>
@@ -215,15 +214,6 @@ void GstRtspReceiver::moveInternalObjectsToThread(QThread* thread) {
     }
 }
 
-/** @brief framewatch에서 마지막으로 관찰한 표시 직전 영상 시각을 원자적으로 반환합니다. */
-VideoFrameTimestamp GstRtspReceiver::latestDisplayedFrameTimestamp() const {
-    VideoFrameTimestamp timestamp;
-    timestamp.utcMsec = latestDisplayedUtcMsec_.load(std::memory_order_acquire);
-    timestamp.observedLocalMsec = latestDisplayedObservedLocalMsec_.load(std::memory_order_acquire);
-    timestamp.senderClock = latestDisplayedUsesSenderClock_.load(std::memory_order_acquire);
-    return timestamp;
-}
-
 /**
  * @brief   수동 정지 상태를 해제하고 pipeline 시작을 요청합니다.
  */
@@ -270,9 +260,6 @@ void GstRtspReceiver::startPipeline() {
 
     gotAnyPacket_.store(false, std::memory_order_relaxed);
     gotAnyFrame_.store(false, std::memory_order_relaxed);
-    latestDisplayedUtcMsec_.store(0, std::memory_order_relaxed);
-    latestDisplayedObservedLocalMsec_.store(0, std::memory_order_relaxed);
-    latestDisplayedUsesSenderClock_.store(false, std::memory_order_relaxed);
 
     const gint64 startTimeUsec = g_get_monotonic_time();
 
@@ -303,6 +290,8 @@ void GstRtspReceiver::startPipeline() {
             "h264parse config-interval=-1 ! "
             "queue name=decodequeue silent=true max-size-buffers=%2 max-size-bytes=0 max-size-time=%3 ! "
             "%1 ! videoconvert ! video/x-raw,format=BGRA ! "
+            "queue name=alignmentqueue silent=true leaky=downstream max-size-buffers=0 max-size-bytes=0 "
+            "max-size-time=%6 min-threshold-time=%7 ! "
             "queue name=renderqueue silent=true leaky=downstream max-size-buffers=%4 max-size-bytes=0 "
             "max-size-time=%5 ! "
             "videobalance name=balance brightness=0.0 contrast=1.0 saturation=1.0 ! "
@@ -316,6 +305,8 @@ void GstRtspReceiver::startPipeline() {
             .arg(config_.decodeQueueMaximumTimeMsec * 1000LL * 1000LL)
             .arg(config_.renderQueueMaximumBuffers)
             .arg(config_.renderQueueMaximumTimeMsec * 1000LL * 1000LL)
+            .arg(config_.alignmentQueueMaximumTimeMsec * 1000LL * 1000LL)
+            .arg(config_.alignmentDelayMsec * 1000LL * 1000LL)
             .replace(QStringLiteral("qos=false"),
                      QStringLiteral("qos=%1").arg(config_.sinkQos ? QStringLiteral("true") : QStringLiteral("false")))
             .replace(QStringLiteral("sync=false"),
@@ -325,6 +316,9 @@ void GstRtspReceiver::startPipeline() {
                 QStringLiteral("async=%1").arg(config_.sinkAsync ? QStringLiteral("true") : QStringLiteral("false")));
 
     qDebug().noquote() << "[GstRtspReceiver] Manual RTSP pipeline:" << videoChainDesc;
+    qInfo().noquote() << QStringLiteral("[GstRtspReceiver] video alignment delay=%1ms maxBuffer=%2ms")
+                             .arg(config_.alignmentDelayMsec)
+                             .arg(config_.alignmentQueueMaximumTimeMsec);
 
     GError* error = nullptr;
     GstElement* source = gst_element_factory_make("rtspsrc", "src");
@@ -721,7 +715,7 @@ void GstRtspReceiver::checkStall() {
  * @param userData   GstRtspReceiver 포인터
  * @return           pad probe 처리 결과
  */
-GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo* info, gpointer userData) {
+GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo*, gpointer userData) {
     auto* receiver = static_cast<GstRtspReceiver*>(userData);
 
     if (!receiver) {
@@ -729,15 +723,6 @@ GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo* info, 
     }
 
     receiver->lastFrameTimeUsec_.store(g_get_monotonic_time(), std::memory_order_relaxed);
-
-    GstBuffer* buffer = info ? gst_pad_probe_info_get_buffer(info) : nullptr;
-    const std::optional<VideoUtcTimestamp> timestamp = receiver->blurProcessor_.timestampForVideoBuffer(buffer);
-    if (timestamp.has_value()) {
-        receiver->latestDisplayedUtcMsec_.store(timestamp->utcMsec, std::memory_order_release);
-        receiver->latestDisplayedUsesSenderClock_.store(timestamp->senderClock, std::memory_order_release);
-        receiver->latestDisplayedObservedLocalMsec_.store(QDateTime::currentMSecsSinceEpoch(),
-                                                          std::memory_order_release);
-    }
 
     bool expected = false;
     if (receiver->gotAnyFrame_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,

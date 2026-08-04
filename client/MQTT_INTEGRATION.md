@@ -73,9 +73,15 @@ VEDA_MAP_MAX_X=<right bound in meters>
 VEDA_MAP_MAX_Y=<bottom bound in meters>
 ```
 
-If all four values are absent or invalid, Qt auto-expands bounds from received positions. Values already in `[0,1]` are used as normalized coordinates.
+`RiskFrame.pos` is always in meters on the shared drawing frame (origin at the intersection centre), so negative
+values are normal and are never interpreted as already-normalized `[0,1]` input. If all four bounds are absent or
+invalid, Qt estimates bounds from the first `digitalTwin.world.automaticBoundsWarmupMs` of samples and then widens
+them whenever a position falls outside — the estimate from a short warmup window is narrower than the real site, and
+without that widening the surplus area would be clamped onto the map edges. The bounds only ever grow, so the map
+scale settles once the site has been covered. Watch `[TOPVIEW MAP] Automatic world bounds estimated|expanded` in the
+log to see the extent Qt is actually using.
 
-`RiskFrame.pos` follows the shared world-coordinate contract, where positive Y points north/up. Qt therefore flips the
+The shared world-coordinate contract has positive Y pointing north/up. Qt therefore flips the
 Y axis when mapping it to screen coordinates. Set `VEDA_MAP_INVERT_Y=0` only when an upstream source already provides
 screen-style coordinates whose positive Y points down. Calibrated `VEDA_MAP_MIN_*` and `VEDA_MAP_MAX_*` values are
 required for exact CH-01 through CH-04 quadrant assignment; automatic bounds are only a safe fallback.

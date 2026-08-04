@@ -147,15 +147,6 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
                  error) ||
         !readInt(digitalTwin, QStringLiteral("frameExpiryMs"), 100, 120000, config.frameExpiryMsec, error) ||
         !readInt(digitalTwin, QStringLiteral("frameExpiryPollMs"), 50, 60000, config.frameExpiryPollMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("renderDelayMs"), 0, 5000, config.renderDelayMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("videoSyncCorrectionMs"), -5000, 5000, config.videoSyncCorrectionMsec,
-                     error) ||
-        !readInteger(digitalTwin, QStringLiteral("maximumVideoClockSkewMs"), 100, 60000,
-                     config.maximumVideoClockSkewMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("videoTimestampTimeoutMs"), 100, 5000,
-                     config.videoTimestampTimeoutMsec, error) ||
-        !readInteger(digitalTwin, QStringLiteral("channelTimestampOutlierMs"), 50, 5000,
-                     config.channelTimestampOutlierMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeInMs"), 0, 5000, config.fadeInMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("missingGraceMs"), 0, 5000, config.missingGraceMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeOutMs"), 0, 5000, config.fadeOutMsec, error) ||
@@ -169,10 +160,18 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         return false;
     }
 
-    if (digitalTwin.contains(QStringLiteral("syncWithVideo")) &&
-        !readBoolean(digitalTwin, QStringLiteral("syncWithVideo"), config.syncWithVideo, error)) {
-        error = QStringLiteral("digitalTwin: %1").arg(error);
-        return false;
+    if (digitalTwin.contains(QStringLiteral("positionTransitionMs"))) {
+        if (!readInteger(digitalTwin, QStringLiteral("positionTransitionMs"), 0, 5000, config.positionTransitionMsec,
+                         error)) {
+            error = QStringLiteral("digitalTwin: %1").arg(error);
+            return false;
+        }
+    } else if (digitalTwin.contains(QStringLiteral("renderDelayMs"))) {
+        // Backward compatibility: the old render delay becomes only the local position transition duration.
+        if (!readInteger(digitalTwin, QStringLiteral("renderDelayMs"), 0, 5000, config.positionTransitionMsec, error)) {
+            error = QStringLiteral("digitalTwin: %1").arg(error);
+            return false;
+        }
     }
 
     qint64 automaticBoundsMinimumSamples = config.world.automaticBoundsMinimumSamples;
@@ -333,6 +332,21 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
     if (config.decoderMode != QStringLiteral("auto") && config.decoderMode != QStringLiteral("software") &&
         config.decoderMode != QStringLiteral("d3d11")) {
         error = QStringLiteral("video.receiver.decoderMode must be auto, software or d3d11");
+        return false;
+    }
+
+    if (receiver.contains(QStringLiteral("alignmentDelayMs")) &&
+        !readInteger(receiver, QStringLiteral("alignmentDelayMs"), 0, 5000, config.alignmentDelayMsec, error)) {
+        return false;
+    }
+    if (receiver.contains(QStringLiteral("alignmentQueueMaximumTimeMs")) &&
+        !readInteger(receiver, QStringLiteral("alignmentQueueMaximumTimeMs"), 1, 10000,
+                     config.alignmentQueueMaximumTimeMsec, error)) {
+        return false;
+    }
+    if (config.alignmentDelayMsec > 0 &&
+        config.alignmentQueueMaximumTimeMsec < config.alignmentDelayMsec) {
+        error = QStringLiteral("video.receiver.alignmentQueueMaximumTimeMs must be >= alignmentDelayMs");
         return false;
     }
 

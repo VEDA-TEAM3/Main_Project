@@ -19,16 +19,12 @@ struct DigitalTwinRuntimeConfig {
     int snapshotPublishIntervalMsec = 50;
     int frameExpiryMsec = 5000;
     int frameExpiryPollMsec = 1000;
-    qint64 renderDelayMsec = 100;
-    bool syncWithVideo = true;
-    qint64 videoSyncCorrectionMsec = 0;
-    qint64 maximumVideoClockSkewMsec = 3000;
-    qint64 videoTimestampTimeoutMsec = 500;
-    qint64 channelTimestampOutlierMsec = 500;
+    // Local UI interpolation only; this is not a video/source timestamp delay.
+    qint64 positionTransitionMsec = 100;
     qint64 fadeInMsec = 120;
     qint64 missingGraceMsec = 100;
     qint64 fadeOutMsec = 180;
-    qsizetype maximumHistorySize = 16;
+    qsizetype maximumHistorySize = 2;
     int diagnosticsIntervalMsec = 1000;
     DigitalTwinWorldConfig world;
 };

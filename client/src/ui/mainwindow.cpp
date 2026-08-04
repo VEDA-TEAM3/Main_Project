@@ -674,10 +674,6 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
     streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
 
-    if (ui_->digitalTwinMapWidget) {
-        connect(streamSessionManager_, &StreamSessionManager::displayedVideoTimestampsChanged,
-                ui_->digitalTwinMapWidget, &DigitalTwinMapWidget::applyDisplayedVideoTimestamps, Qt::QueuedConnection);
-    }
 
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,
@@ -817,7 +813,6 @@ void MainWindow::expandVideo(QWidget* targetWidget) {
     targetFrame->raise();
 
     expandedWidget_ = targetWidget;
-    ui_->digitalTwinMapWidget->setPreferredVideoChannel(static_cast<int>(targetIndex));
 }
 
 /**
@@ -857,5 +852,4 @@ void MainWindow::restoreVideoGrid() {
     }
 
     expandedWidget_ = nullptr;
-    ui_->digitalTwinMapWidget->setPreferredVideoChannel(-1);
 }

@@ -41,6 +41,9 @@ struct GstRtspReceiverConfig {
     bool addReferenceTimestampMeta = true;
     int decodeQueueMaximumBuffers = 0;
     qint64 decodeQueueMaximumTimeMsec = 0;
+    // Intentional decoded-video playout delay used to align video with slower AI/MQTT state updates.
+    qint64 alignmentDelayMsec = 250;
+    qint64 alignmentQueueMaximumTimeMsec = 450;
     int renderQueueMaximumBuffers = 0;
     qint64 renderQueueMaximumTimeMsec = 0;
     bool sinkQos = false;

@@ -82,11 +82,12 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 
 - 창 크기
 - 4채널 카메라 ID, 표시명, RTSP URL, 활성 여부
-- GStreamer latency, timeout, queue, sink, 재연결 설정
+- GStreamer 네트워크 latency, 의도적 영상 alignment delay, queue, sink, 재연결 설정
 - 블러 동기화 및 영상 필터 설정
 - MQTT Broker, TLS 인증서, keep-alive, 재연결 설정
 - MQTT 토픽 필터와 QoS
 - 위험 및 블러 디스패처 주기
+- TopView 최신 Risk 상태의 로컬 위치 전환(`digitalTwin.positionTransitionMs`)
 
 운영 자동화와 비밀 정보 주입을 위해 아래 환경 변수는 JSON보다 우선합니다.
 
@@ -103,6 +104,11 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `QTCCTV_DECODER_MODE` | `auto`, `software`, `d3d11` 디코더 선택 |
 
 Windows Qt Creator에서는 **Projects > Run > Environment**에 환경 변수를 등록합니다.
+
+영상과 TopView는 더 이상 영상 프레임 timestamp를 기준으로 직접 동기화하지 않습니다. `video.receiver.latencyMs`는
+RTSP/RTP 네트워크 지터 흡수용으로 유지하고, `video.receiver.alignmentDelayMs`는 AI/MQTT 처리 시간에 맞추기 위한
+의도적 표시 지연으로 별도 관리합니다. TopView는 최신 `RiskFrame`을 즉시 상태로 반영하고 객체 위치만
+`digitalTwin.positionTransitionMs` 동안 부드럽게 전환합니다.
 
 ## MQTT
 

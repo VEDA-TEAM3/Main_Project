@@ -1,6 +1,5 @@
 #include "network/realtime/RiskFrameDispatcher.h"
 
-#include <QDateTime>
 #include <QTimer>
 #include <utility>
 
@@ -11,6 +10,7 @@
  */
 RiskFrameDispatcher::RiskFrameDispatcher(MqttDispatcherConfig config, QObject* parent)
     : QObject(parent), config_(std::move(config)) {
+    clock_.start();
     flushTimer_ = new QTimer(this);
     flushTimer_->setInterval(config_.riskFlushIntervalMsec);
     flushTimer_->setSingleShot(true);
@@ -48,7 +48,7 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
         return;
     }
 
-    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+    const qint64 nowMsec = qMax<qint64>(1, clock_.elapsed());
     if (lastArrivalMsec_ > 0 && nowMsec - lastArrivalMsec_ > config_.riskSourceRestartGapMsec) {
         reset();
     } else if (latestSourceTimestamp_ > 0 &&

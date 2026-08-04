@@ -14,6 +14,7 @@ set(GSTREAMER_ROOT "C:/Program Files/gstreamer/1.0/mingw_x86_64" CACHE PATH
 
 option(QTCCTV_ENABLE_PCH "Enable precompiled headers for faster Qt rebuilds" ON)
 option(QTCCTV_ENABLE_UNITY_BUILD "Enable unity build for faster full rebuilds" OFF)
+option(QTCCTV_BUILD_CHECKS "Build standalone logic self-checks" OFF)
 
 qt_standard_project_setup()
 
@@ -89,7 +90,6 @@ qt_add_executable(Qtcctvclient
 
     include/model/DigitalTwinTypes.h
     include/model/DigitalTwinRuntimeConfig.h
-    include/model/VideoFrameTimestamp.h
     include/model/DigitalTwinMapDisplaySettings.h
     include/model/DeviceStatus.h
     include/model/DeviceStatusReport.h
@@ -293,3 +293,16 @@ target_link_libraries(Qtcctvclient PRIVATE
     glib-2.0
     intl
 )
+
+if(QTCCTV_BUILD_CHECKS)
+    add_executable(risk_object_tracker_bounds_check
+        tests/RiskObjectTrackerBoundsCheck.cpp
+        src/model/RiskObjectTracker.cpp
+    )
+
+    target_include_directories(risk_object_tracker_bounds_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+endif()
