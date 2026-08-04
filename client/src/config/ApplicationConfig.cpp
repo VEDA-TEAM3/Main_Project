@@ -595,6 +595,15 @@ bool parseLogging(const QJsonObject& root, ApplicationConfig& config, QString& e
         return false;
     }
 
+    if (logging.contains(QStringLiteral("topviewDetailIntervalMs"))) {
+        qint64 detailIntervalMsec = config.digitalTwin.debugDetailIntervalMsec;
+        if (!readInteger(logging, QStringLiteral("topviewDetailIntervalMs"), 0, 60000, detailIntervalMsec, error)) {
+            error = QStringLiteral("logging is invalid: %1").arg(error);
+            return false;
+        }
+        config.digitalTwin.debugDetailIntervalMsec = static_cast<int>(detailIntervalMsec);
+    }
+
     // BlurProcessor는 주기값으로 로그를 켠다. 꺼졌으면 주기를 0으로 만들어 출력 경로를 막는다
     if (!blurApply) {
         config.video.receiver.blur.debugLogIntervalMsec = 0;

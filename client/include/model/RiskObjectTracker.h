@@ -30,6 +30,7 @@ private:
      */
     struct Diagnostics {
         int level = 0;
+        int detailIntervalMsec = 1000;
         qint64 windowStartMsec = 0;
         qint64 previousSourceTimestamp = 0;
         int frameCount = 0;
@@ -41,6 +42,14 @@ private:
         int medianRejectedCount = 0;
         QVector<qint64> arrivalIntervalsMsec;
         QHash<qint64, QPointF> previousRawPositions;
+        QHash<qint64, qint64> lastObjectLogMsec;
+    };
+
+    /** @brief 쌍별 위험 파동 발생 상태 (레벨, 마지막 발생·관측 시각) */
+    struct PairPulseState {
+        DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
+        qint64 lastPulseMsec = 0;
+        qint64 lastSeenMsec = 0;
     };
 
     struct PositionTransitionState {
@@ -79,8 +88,7 @@ private:
     QHash<qint64, QPointF> filteredPositions_;
     QHash<qint64, qint64> filteredPositionTimesMsec_;
     QHash<QString, PositionTransitionState> positionTransitions_;
-    QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
-    QHash<QString, qint64> nextPairPulseTimesMsec_;
+    QHash<QString, PairPulseState> pairPulseStates_;
     QVector<DigitalTwinRiskEvent> pendingRiskEvents_;
     DigitalTwinRuntimeConfig config_;
     QRectF configuredWorldBounds_;
@@ -94,6 +102,7 @@ private:
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     qint64 lastRateLimitLogMsec_ = 0;
+    qint64 lastPulseEmitMsec_ = 0;
     bool hasConfiguredWorldBounds_ = false;
     bool hasAutomaticWorldBounds_ = false;
     bool invertWorldY_ = true;

@@ -103,7 +103,12 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `blurDispatch` | `[MQTT BLUR DISPATCH]` 블러 전달·병합 통계 | `false` |
 | `riskDispatch` | `[TOPVIEW DBG] dispatch` 위험 전달·병합 통계 | `false` |
 | `topview` | `[TOPVIEW]` 수신 요약, 이상치, 자동 경계 | `false` |
-| `topviewDetail` | `[TOPVIEW DBG]` 객체별 프레임 좌표 상세 (많음) | `false` |
+| `topviewDetail` | `[TOPVIEW DBG]` 객체별 프레임 좌표 상세 | `false` |
+| `topviewDetailIntervalMs` | 위 상세 로그를 gid마다 이 주기로 제한 (`0`이면 매 프레임) | `1000` |
+
+`topviewDetail`은 gid마다 `topviewDetailIntervalMs` 주기로만 남기되, **중앙값 필터나 속도 상한이 실제로
+개입한 프레임은 주기와 무관하게 항상 남깁니다.** 평상시 분량을 20분의 1로 줄이면서 이상치는 하나도
+놓치지 않습니다.
 - TopView 최신 Risk 상태의 로컬 위치 전환(`digitalTwin.positionTransitionMs`)
 
 운영 자동화와 비밀 정보 주입을 위해 아래 환경 변수는 JSON보다 우선합니다.

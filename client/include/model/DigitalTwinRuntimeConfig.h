@@ -30,5 +30,7 @@ struct DigitalTwinRuntimeConfig {
     bool debugLogging = false;
     /// 객체별 프레임 상세 좌표 로그 (debugLogging이 켜져 있어야 의미가 있다)
     bool debugDetail = false;
+    /// 객체별 상세 로그를 gid마다 이 주기로 제한한다. 필터가 개입한 프레임은 주기와 무관하게 남는다
+    int debugDetailIntervalMsec = 1000;
     DigitalTwinWorldConfig world;
 };

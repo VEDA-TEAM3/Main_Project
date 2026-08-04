@@ -12,7 +12,8 @@
         "blurDispatch": false,
         "riskDispatch": false,
         "topview": false,
-        "topviewDetail": false
+        "topviewDetail": false,
+        "topviewDetailIntervalMs": 1000
     },
     "digitalTwin": {
         "renderIntervalMs": 33,

@@ -232,6 +232,44 @@ void checkChannelDoesNotFlapAtBoundary() {
     check(!moved.objects.isEmpty() && moved.objects.constFirst().channelIndex != startChannel,
           "crossing the boundary for real must change the channel");
 }
+/// 같은 쌍이 프레임마다 사라졌다 나타나도 위험 파동이 쏟아지면 안 된다.
+void checkRiskPulsesAreRateLimited() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-5.0, -5.0, 10.0, 10.0);
+    // 객체 보존을 끊어야 쌍이 실제로 스냅샷에서 사라진다(기본값이면 280ms 동안 남아 깜빡이지 않는다)
+    config.missingGraceMsec = 0;
+    config.fadeOutMsec = 0;
+
+    RiskObjectTracker tracker(config);
+    int pulseCount = 0;
+    qint64 timeMsec = 1000;
+    for (int step = 0; step < 40; ++step) {
+        timeMsec += 100;
+
+        // 서로를 최근접으로 가리키는 위험 쌍. 한 프레임씩 건너뛰며 사라졌다 나타난다
+        QVector<RiskObjectData> objects;
+        if (step % 2 == 0) {
+            RiskObjectData first = objectAt(1, QPointF(-1.0, 0.0));
+            first.riskLevel = DigitalTwinRiskLevel::Danger;
+            first.nearestId = 2;
+            first.distance = 2.0;
+            RiskObjectData second = objectAt(2, QPointF(1.0, 0.0));
+            second.riskLevel = DigitalTwinRiskLevel::Danger;
+            second.nearestId = 1;
+            second.distance = 2.0;
+            objects = {first, second};
+        }
+
+        tracker.submitFrame(frameAt(timeMsec, objects), timeMsec);
+        tracker.buildSnapshot(timeMsec);
+        pulseCount += static_cast<int>(tracker.takeRiskEvents().size());
+    }
+
+    // 4초 동안 1.5초 주기라면 3회 안팎이어야 한다. 예전 로직은 재등장마다 울려 20회 가까이 나왔다
+    check(pulseCount > 0, "a dangerous pair must pulse at least once");
+    check(pulseCount <= 6, "a flapping pair must not flood the map with pulses");
+}
 }  // namespace
 
 int main() {
@@ -243,6 +281,7 @@ int main() {
     checkStreamRestartKeepsWorldBounds();
     checkBackwardTimestampStillUpdates();
     checkChannelDoesNotFlapAtBoundary();
+    checkRiskPulsesAreRateLimited();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

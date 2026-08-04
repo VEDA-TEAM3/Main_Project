@@ -7,7 +7,7 @@
 
 namespace {
 constexpr int overlayFrameIntervalMsec = 33;
-constexpr int maxActivePulseItemCount = 24;
+constexpr int maxActivePulseItemCount = 8;
 }  // namespace
 
 /**

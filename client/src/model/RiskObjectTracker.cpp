@@ -12,6 +12,12 @@ namespace {
 constexpr qint64 sourceRestartGapMsec = 5000;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
+// 같은 쌍의 위험도가 올라가도 이보다 자주는 울리지 않는다
+constexpr qint64 minimumPairPulseIntervalMsec = 400;
+// 서로 다른 쌍의 파동도 한 프레임에 몰리지 않도록 최소 간격을 둔다
+constexpr qint64 minimumPulseSpacingMsec = 150;
+// 쌍이 사라졌다 돌아와도 직전 상태를 기억하는 기간
+constexpr qint64 pairPulseStateRetentionMsec = 5000;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
 // 허용 이동량은 실제 프레임 간격에 비례해야 한다. 이 상한을 리셋 기준보다 낮게 잡으면
@@ -123,6 +129,7 @@ RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(
 
     const int configuredLevel = config_.debugDetail ? 2 : (config_.debugLogging ? 1 : 0);
     diagnostics_.level = resolveTopViewDebugLevel(configuredLevel);
+    diagnostics_.detailIntervalMsec = qMax(0, config_.debugDetailIntervalMsec);
     if (diagnostics_.level > 0) {
         qInfo().noquote() << QStringLiteral(
                                  "[TOPVIEW DBG] enabled level=%1 bounds=%2 invertY=%3 transition=%4ms median=%5 "
@@ -147,8 +154,7 @@ void RiskObjectTracker::reset() {
     positionTransitions_.clear();
     filteredPositions_.clear();
     filteredPositionTimesMsec_.clear();
-    previousPairRiskLevels_.clear();
-    nextPairPulseTimesMsec_.clear();
+    pairPulseStates_.clear();
     pendingRiskEvents_.clear();
     worldPositionHistories_.clear();
     channelIndexes_.clear();
@@ -157,8 +163,10 @@ void RiskObjectTracker::reset() {
     lastArrivalTimeMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
     lastRateLimitLogMsec_ = 0;
+    lastPulseEmitMsec_ = 0;
     diagnostics_.previousSourceTimestamp = 0;
     diagnostics_.previousRawPositions.clear();
+    diagnostics_.lastObjectLogMsec.clear();
 
     // 지도 정규화 범위는 현장의 성질이지 수신 세션의 성질이 아니다. 스트림이 잠깐 끊겼다는
     // 이유로 버리면 재연결마다 새 warmup 창으로 배율이 다시 잡혀 화면 전체가 튄다
@@ -369,25 +377,33 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
                      retainedFrameSequence > 0 ? retainedFrameSequence : frameSequence_);
     }
 
-    QHash<QString, DigitalTwinRiskLevel> currentPairRiskLevels;
-    currentPairRiskLevels.reserve(snapshot.pairRiskStates.size());
     for (const DigitalTwinPairRiskState& pairState : snapshot.pairRiskStates) {
         const QString pairKey = pairState.firstObjectId + QStringLiteral("|") + pairState.secondObjectId;
-        currentPairRiskLevels.insert(pairKey, pairState.riskLevel);
+        PairPulseState& state = pairPulseStates_[pairKey];
 
-        const DigitalTwinRiskLevel previousRiskLevel =
-            previousPairRiskLevels_.value(pairKey, DigitalTwinRiskLevel::Normal);
+        const bool escalated = static_cast<int>(pairState.riskLevel) > static_cast<int>(state.riskLevel);
         const bool dangerToWarning =
-            previousRiskLevel == DigitalTwinRiskLevel::Danger && pairState.riskLevel == DigitalTwinRiskLevel::Warning;
-        const bool riskLevelChanged = previousRiskLevel != pairState.riskLevel;
-        const bool repeatDue = localTimeMsec >= nextPairPulseTimesMsec_.value(pairKey, 0);
+            state.riskLevel == DigitalTwinRiskLevel::Danger && pairState.riskLevel == DigitalTwinRiskLevel::Warning;
+        const bool firstPulse = state.lastPulseMsec <= 0;
+        const qint64 sinceLastPulseMsec = localTimeMsec - state.lastPulseMsec;
+        state.riskLevel = pairState.riskLevel;
+        state.lastSeenMsec = localTimeMsec;
 
         if (dangerToWarning) {
-            nextPairPulseTimesMsec_.insert(pairKey, localTimeMsec + pulseRepeatMsec(pairState.riskLevel));
+            state.lastPulseMsec = localTimeMsec;
             continue;
         }
 
-        if (!riskLevelChanged && !repeatDue) {
+        // 위험도가 올라갈 때도 최소 간격은 지킨다. 상류에서 쌍이 한 프레임씩 사라졌다 나타나면
+        // '레벨이 바뀌었다'가 매 프레임 참이 되어 같은 쌍의 파동이 수십 개씩 겹친다
+        const bool repeatDue = sinceLastPulseMsec >= pulseRepeatMsec(pairState.riskLevel);
+        const bool escalationDue = escalated && sinceLastPulseMsec >= minimumPairPulseIntervalMsec;
+        if (!firstPulse && !repeatDue && !escalationDue) {
+            continue;
+        }
+
+        // 여러 쌍이 같은 프레임에 조건을 만족해도 한꺼번에 쏟아내지 않는다
+        if (lastPulseEmitMsec_ > 0 && localTimeMsec - lastPulseEmitMsec_ < minimumPulseSpacingMsec) {
             continue;
         }
 
@@ -403,17 +419,18 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         riskEvent.position = (*firstPosition + *secondPosition) * 0.5;
         riskEvent.riskLevel = pairState.riskLevel;
         pendingRiskEvents_.append(std::move(riskEvent));
-        nextPairPulseTimesMsec_.insert(pairKey, localTimeMsec + pulseRepeatMsec(pairState.riskLevel));
+        state.lastPulseMsec = localTimeMsec;
+        lastPulseEmitMsec_ = localTimeMsec;
     }
 
-    for (auto iterator = nextPairPulseTimesMsec_.begin(); iterator != nextPairPulseTimesMsec_.end();) {
-        if (currentPairRiskLevels.contains(iterator.key())) {
-            ++iterator;
+    // 쌍이 잠깐 사라졌다고 상태를 지우면 재등장 즉시 다시 울린다. 시간으로만 정리한다
+    for (auto iterator = pairPulseStates_.begin(); iterator != pairPulseStates_.end();) {
+        if (localTimeMsec - iterator.value().lastSeenMsec > pairPulseStateRetentionMsec) {
+            iterator = pairPulseStates_.erase(iterator);
         } else {
-            iterator = nextPairPulseTimesMsec_.erase(iterator);
+            ++iterator;
         }
     }
-    previousPairRiskLevels_ = std::move(currentPairRiskLevels);
     removeInactivePositionStates(currentPositions, localTimeMsec);
     previousPositions_ = std::move(currentPositions);
     return snapshot;
@@ -630,6 +647,20 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             const QPointF previousRaw = diagnostics_.previousRawPositions.value(object.globalId, rawPosition);
             const QPointF rawDelta = rawPosition - previousRaw;
             diagnostics_.previousRawPositions.insert(object.globalId, rawPosition);
+
+            // 객체가 여럿이면 프레임마다 전부 남기는 것만으로 초당 수백 줄이 되어 정작 볼 줄이 묻힌다.
+            // gid마다 주기적으로만 남기되, 필터가 실제로 개입한 프레임은 주기와 무관하게 남긴다
+            const QPointF medianDelta = medianPositions.at(index) - rawPosition;
+            const QPointF limitDelta = object.worldPosition - medianPositions.at(index);
+            const bool filterIntervened = std::hypot(medianDelta.x(), medianDelta.y()) > 0.001 ||
+                                          std::hypot(limitDelta.x(), limitDelta.y()) > 0.001;
+            const qint64 lastLogMsec = diagnostics_.lastObjectLogMsec.value(object.globalId, 0);
+            const bool intervalElapsed =
+                lastLogMsec <= 0 || arrivalTimeMsec - lastLogMsec >= diagnostics_.detailIntervalMsec;
+            if (!filterIntervened && !intervalElapsed) {
+                continue;
+            }
+            diagnostics_.lastObjectLogMsec.insert(object.globalId, arrivalTimeMsec);
 
             const bool boundsReady = worldBoundsReady();
             const QPointF normalized = boundsReady ? normalizedWorldPosition(object.worldPosition) : QPointF();
