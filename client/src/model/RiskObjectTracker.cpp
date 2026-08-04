@@ -17,8 +17,12 @@ constexpr qint64 minimumPositionFilterStepMsec = 16;
 constexpr qint64 maximumPositionFilterStepMsec = 100;
 // 월드 좌표(m) 기준 상한. 정규화 좌표에 걸면 같은 상수가 지도 크기에 따라 전혀 다른 속도가 된다
 // (60m 지도에서 0.9/s = 54m/s로 사실상 무방비, 15m 지도에서는 13.5m/s로 실제 차량을 깎아냄).
-// 현장에서 나올 수 있는 최고 속도보다 약간 위로 잡는다: 25m/s = 90km/h
-constexpr double maximumWorldSpeedMetersPerSecond = 25.0;
+//
+// 이상치가 화면에 남길 수 있는 최대 이탈 = 이 값 x 프레임 간격이다(100ms면 0.8m).
+// 클라이언트 한 대가 담당하는 영역이 10x10m이므로 상한이 높을수록 이탈이 영역 대비 커진다.
+// 반대로 실제 최고 속도보다 낮게 잡으면 정상 이동까지 깎여 객체가 계속 뒤처지므로,
+// 현장 최고 속도의 1.5배 정도로 둔다: 8m/s = 29km/h (보행 1.4m/s, 구내 주행 3~5m/s 기준)
+constexpr double maximumWorldSpeedMetersPerSecond = 8.0;
 constexpr int automaticBoundsExpansionFrameCount = 3;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
@@ -54,6 +58,22 @@ bool readInvertWorldY() {
     return value != QStringLiteral("0") && value != QStringLiteral("false") && value != QStringLiteral("no");
 }
 
+/**
+ * @brief   VEDA_TOPVIEW_DEBUG에서 좌표 진단 수준을 읽습니다.
+ * @return  0=끔, 1=1초 요약, 2=객체별 프레임 상세까지
+ */
+int readTopViewDebugLevel() {
+    const QString value =
+        QProcessEnvironment::systemEnvironment().value(QStringLiteral("VEDA_TOPVIEW_DEBUG")).trimmed();
+    bool numberOk = false;
+    const int level = value.toInt(&numberOk);
+    return numberOk ? qBound(0, level, 2) : 0;
+}
+
+QString formatPoint(const QPointF& point) {
+    return QStringLiteral("(%1,%2)").arg(point.x(), 0, 'f', 3).arg(point.y(), 0, 'f', 3);
+}
+
 int channelIndexForPosition(const QPointF& position) {
     const int column = position.x() >= 0.5 ? 1 : 0;
     const int row = position.y() >= 0.5 ? 1 : 0;
@@ -82,11 +102,23 @@ RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(
         configuredWorldBounds_ = config_.world.bounds;
         hasConfiguredWorldBounds_ = true;
         invertWorldY_ = config_.world.invertY;
-        return;
+    } else {
+        hasConfiguredWorldBounds_ = readConfiguredWorldBounds(configuredWorldBounds_);
+        invertWorldY_ = hasConfiguredWorldBounds_ ? readInvertWorldY() : config_.world.invertY;
     }
 
-    hasConfiguredWorldBounds_ = readConfiguredWorldBounds(configuredWorldBounds_);
-    invertWorldY_ = hasConfiguredWorldBounds_ ? readInvertWorldY() : config_.world.invertY;
+    diagnostics_.level = readTopViewDebugLevel();
+    if (diagnostics_.level > 0) {
+        qInfo().noquote() << QStringLiteral(
+                                 "[TOPVIEW DBG] enabled level=%1 bounds=%2 invertY=%3 transition=%4ms median=%5 "
+                                 "speedCap=%6m/s")
+                                 .arg(diagnostics_.level)
+                                 .arg(worldBoundsDescription())
+                                 .arg(invertWorldY_ ? 1 : 0)
+                                 .arg(config_.positionTransitionMsec)
+                                 .arg(worldPositionMedianSampleCount)
+                                 .arg(maximumWorldSpeedMetersPerSecond, 0, 'f', 1);
+    }
 }
 
 /** @brief 수신 이력과 객체 이동 이력을 초기화합니다. */
@@ -109,6 +141,8 @@ void RiskObjectTracker::reset() {
     lastArrivalTimeMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
     lastRateLimitLogMsec_ = 0;
+    diagnostics_.previousSourceTimestamp = 0;
+    diagnostics_.previousRawPositions.clear();
 
     // 지도 정규화 범위는 현장의 성질이지 수신 세션의 성질이 아니다. 스트림이 잠깐 끊겼다는
     // 이유로 버리면 재연결마다 새 warmup 창으로 배율이 다시 잡혀 화면 전체가 튄다
@@ -129,7 +163,15 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
+    if (diagnostics_.level > 0 && lastArrivalTimeMsec_ > 0) {
+        diagnostics_.arrivalIntervalsMsec.append(arrivalTimeMsec - lastArrivalTimeMsec_);
+    }
+
     if (lastArrivalTimeMsec_ > 0 && arrivalTimeMsec - lastArrivalTimeMsec_ > sourceRestartGapMsec) {
+        if (diagnostics_.level > 0) {
+            qInfo().noquote() << QStringLiteral("[TOPVIEW DBG] stream restart detected, arrivalGap=%1ms")
+                                     .arg(arrivalTimeMsec - lastArrivalTimeMsec_);
+        }
         reset();
     }
     lastArrivalTimeMsec_ = arrivalTimeMsec;
@@ -140,20 +182,45 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     // 프레임이 통째로 버려져 객체가 멈췄다가 한 번에 튄다. 순서는 도착 순(QoS 1, 토픽 내 순서
     // 보장)으로 잡고, ts는 재전송된 같은 프레임을 걸러내는 데만 쓴다
     if (!history_.isEmpty() && frame.sourceTimestamp == history_.constLast().sourceTimestamp) {
+        ++diagnostics_.duplicateCount;
         return false;
     }
 
     ++frameSequence_;
 
+    QVector<QPointF> rawPositions;
+    QVector<QPointF> medianPositions;
+    if (diagnostics_.level >= 2) {
+        rawPositions.reserve(frame.objects.size());
+        medianPositions.reserve(frame.objects.size());
+    }
+
     // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는 것을 막는다.
     // 속도 상한도 렌더 틱이 아니라 여기서 건다: 좌표는 프레임마다만 바뀌므로, 렌더 틱마다
     // 걸면 한 프레임 분량의 이동이 한 틱에 몰려 정상 이동까지 상한에 걸린다
     for (RiskObjectData& object : frame.objects) {
+        const QPointF rawPosition = object.worldPosition;
         object.worldPosition = medianFilteredWorldPosition(object.globalId, object.worldPosition);
+        const QPointF medianPosition = object.worldPosition;
         object.worldPosition = rateLimitedWorldPosition(object.globalId, object.worldPosition, arrivalTimeMsec);
+
+        if (diagnostics_.level > 0) {
+            const QPointF medianDelta = medianPosition - rawPosition;
+            if (std::hypot(medianDelta.x(), medianDelta.y()) > 0.001) {
+                ++diagnostics_.medianRejectedCount;
+            }
+        }
+        if (diagnostics_.level >= 2) {
+            rawPositions.append(rawPosition);
+            medianPositions.append(medianPosition);
+        }
     }
 
     updateAutomaticWorldBounds(frame);
+
+    if (diagnostics_.level > 0) {
+        logFrameDiagnostics(frame, rawPositions, medianPositions, arrivalTimeMsec);
+    }
 
     for (const RiskObjectData& object : frame.objects) {
         retainedObjects_.insert(object.globalId, object);
@@ -463,6 +530,125 @@ void RiskObjectTracker::logAutomaticWorldBounds(const QString& reason) const {
 
 bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
 
+/** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로 만듭니다. */
+QString RiskObjectTracker::worldBoundsDescription() const {
+    if (!worldBoundsReady()) {
+        return QStringLiteral("pending(warmup)");
+    }
+
+    const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
+    return QStringLiteral("%1(x=%2..%3 y=%4..%5)")
+        .arg(hasConfiguredWorldBounds_ ? QStringLiteral("fixed") : QStringLiteral("auto"))
+        .arg(bounds.left(), 0, 'f', 3)
+        .arg(bounds.right(), 0, 'f', 3)
+        .arg(bounds.top(), 0, 'f', 3)
+        .arg(bounds.bottom(), 0, 'f', 3);
+}
+
+/**
+ * @brief                   프레임 단위 좌표 진단을 남깁니다.
+ * @param frame             필터를 통과한 최신 프레임
+ * @param rawPositions      필터 이전 월드 좌표 (level 2에서만 채워짐)
+ * @param medianPositions   중앙값 필터 직후 월드 좌표 (level 2에서만 채워짐)
+ * @param arrivalTimeMsec   로컬 수신 시각
+ */
+void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QVector<QPointF>& rawPositions,
+                                            const QVector<QPointF>& medianPositions, qint64 arrivalTimeMsec) {
+    ++diagnostics_.frameCount;
+
+    if (diagnostics_.previousSourceTimestamp > 0) {
+        const qint64 timestampDelta = frame.sourceTimestamp - diagnostics_.previousSourceTimestamp;
+        if (timestampDelta < 0) {
+            ++diagnostics_.backwardTimestampCount;
+        }
+        diagnostics_.minTimestampDeltaMsec = diagnostics_.frameCount == 1
+                                                 ? timestampDelta
+                                                 : qMin(diagnostics_.minTimestampDeltaMsec, timestampDelta);
+        diagnostics_.maximumTimestampDeltaMsec = qMax(diagnostics_.maximumTimestampDeltaMsec, timestampDelta);
+    }
+    diagnostics_.previousSourceTimestamp = frame.sourceTimestamp;
+
+    if (diagnostics_.level >= 2 && rawPositions.size() == frame.objects.size()) {
+        for (qsizetype index = 0; index < frame.objects.size(); ++index) {
+            const RiskObjectData& object = frame.objects.at(index);
+            const QPointF rawPosition = rawPositions.at(index);
+            const QPointF previousRaw = diagnostics_.previousRawPositions.value(object.globalId, rawPosition);
+            const QPointF rawDelta = rawPosition - previousRaw;
+            diagnostics_.previousRawPositions.insert(object.globalId, rawPosition);
+
+            const bool boundsReady = worldBoundsReady();
+            const QPointF normalized = boundsReady ? normalizedWorldPosition(object.worldPosition) : QPointF();
+            qInfo().noquote()
+                << QStringLiteral("[TOPVIEW DBG] gid=%1 cls=%2 ts=%3 arrival=%4 raw=%5 med=%6 lim=%7 norm=%8 ch=%9 "
+                                  "dRaw=%10m")
+                       .arg(object.globalId)
+                       .arg(object.objectClass)
+                       .arg(frame.sourceTimestamp)
+                       .arg(arrivalTimeMsec)
+                       .arg(formatPoint(rawPosition))
+                       .arg(formatPoint(medianPositions.at(index)))
+                       .arg(formatPoint(object.worldPosition))
+                       .arg(boundsReady ? formatPoint(normalized) : QStringLiteral("n/a"))
+                       .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1)
+                                        : QStringLiteral("n/a"))
+                       .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 3);
+        }
+    }
+
+    if (diagnostics_.windowStartMsec <= 0) {
+        diagnostics_.windowStartMsec = arrivalTimeMsec;
+        return;
+    }
+    if (arrivalTimeMsec - diagnostics_.windowStartMsec >= 1000) {
+        logDiagnosticsSummary(arrivalTimeMsec, frame.objects.size());
+    }
+}
+
+/**
+ * @brief                  1초 구간의 수신 상태 요약을 남기고 카운터를 초기화합니다.
+ * @param arrivalTimeMsec  현재 구간의 종료 시각
+ * @param objectCount      이번 프레임의 객체 수
+ */
+void RiskObjectTracker::logDiagnosticsSummary(qint64 arrivalTimeMsec, qsizetype objectCount) {
+    QVector<qint64>& intervals = diagnostics_.arrivalIntervalsMsec;
+    qint64 minimumInterval = 0;
+    qint64 medianInterval = 0;
+    qint64 maximumInterval = 0;
+    if (!intervals.isEmpty()) {
+        std::sort(intervals.begin(), intervals.end());
+        minimumInterval = intervals.constFirst();
+        medianInterval = intervals.at(intervals.size() / 2);
+        maximumInterval = intervals.constLast();
+    }
+
+    qInfo().noquote() << QStringLiteral(
+                             "[TOPVIEW DBG] window=%1ms frames=%2 dup=%3 backwardTs=%4 tsDelta=%5..%6ms "
+                             "arrival=%7/%8/%9ms objects=%10 bounds=%11 rateLimited=%12 medianRejected=%13")
+                             .arg(arrivalTimeMsec - diagnostics_.windowStartMsec)
+                             .arg(diagnostics_.frameCount)
+                             .arg(diagnostics_.duplicateCount)
+                             .arg(diagnostics_.backwardTimestampCount)
+                             .arg(diagnostics_.minTimestampDeltaMsec)
+                             .arg(diagnostics_.maximumTimestampDeltaMsec)
+                             .arg(minimumInterval)
+                             .arg(medianInterval)
+                             .arg(maximumInterval)
+                             .arg(objectCount)
+                             .arg(worldBoundsDescription())
+                             .arg(diagnostics_.rateLimitedCount)
+                             .arg(diagnostics_.medianRejectedCount);
+
+    diagnostics_.windowStartMsec = arrivalTimeMsec;
+    diagnostics_.frameCount = 0;
+    diagnostics_.duplicateCount = 0;
+    diagnostics_.backwardTimestampCount = 0;
+    diagnostics_.minTimestampDeltaMsec = 0;
+    diagnostics_.maximumTimestampDeltaMsec = 0;
+    diagnostics_.rateLimitedCount = 0;
+    diagnostics_.medianRejectedCount = 0;
+    intervals.clear();
+}
+
 /** @brief 월드 좌표를 지도에서 사용하는 0.0~1.0 좌표로 변환합니다. */
 QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition) const {
     const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
@@ -546,6 +732,7 @@ QPointF RiskObjectTracker::rateLimitedWorldPosition(qint64 globalId, const QPoin
     const double maximumDistance = maximumWorldSpeedMetersPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
     if (distance > maximumDistance && distance > 0.0) {
         displacement *= maximumDistance / distance;
+        ++diagnostics_.rateLimitedCount;
         logRateLimitedJump(globalId, distance, maximumDistance, arrivalTimeMsec);
     }
 

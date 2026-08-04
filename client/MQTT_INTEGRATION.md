@@ -64,6 +64,13 @@ to the delayed RTSP frame, expands each normalized bbox by 18%, and applies a tw
 An empty `blurs` array is a valid frame and must still be published so an earlier Head box is not reused for a
 later video frame.
 
+One client owns one 4-channel CCTV unit and the 10 x 10 m it covers, each channel taking one 5 x 5 m quadrant of it.
+A larger site is covered by deploying more clients, not by adding channels to one, so the world extent below is the
+area of *this* client, not of the whole site — `digitalTwin.world` ships as a 10 x 10 m square centred on the unit
+(`-5..5` on both axes). The channel a risk object belongs to is derived from which quadrant of that square it sits
+in, which holds exactly as long as the unit is centred on the world origin and the channels are laid out
+CH01 = NW, CH02 = NE, CH03 = SW, CH04 = SE.
+
 TopView positions are world coordinates. For a stable production map, set the calibrated world extent:
 
 ```text
@@ -81,14 +88,39 @@ without that widening the surplus area would be clamped onto the map edges. The 
 scale settles once the site has been covered. Watch `[TOPVIEW MAP] Automatic world bounds estimated|expanded` in the
 log to see the extent Qt is actually using.
 
+## TopView coordinate diagnostics
+
+`VEDA_TOPVIEW_DEBUG=1` prints a one-second reception summary; `=2` adds a per-object, per-frame line showing every
+stage of the coordinate path. On Windows also set `QT_FORCE_STDERR_LOGGING=1`, otherwise Qt sends the messages to the
+debugger instead of stderr as soon as stderr is redirected to a file, and the capture comes out empty.
+
+```powershell
+$env:VEDA_TOPVIEW_DEBUG = "2"; $env:QT_FORCE_STDERR_LOGGING = "1"; .\Qtcctvclient.exe 2> topview.log
+```
+
+```text
+[TOPVIEW DBG] enabled level=2 bounds=fixed(x=-30.000..30.000 y=-20.000..20.000) invertY=1 transition=100ms median=3 speedCap=25.0m/s
+[TOPVIEW DBG] gid=1 cls=Human ts=1700000000100 arrival=100 raw=(-24.880,-14.928) med=(-24.880,-14.928) lim=(-24.880,-14.928) norm=(0.085,0.873) ch=3 dRaw=0.140m
+[TOPVIEW DBG] window=1009ms frames=11 dup=0 backwardTs=1 tsDelta=-200..400ms arrival=49/102/153ms objects=2 bounds=fixed(...) rateLimited=0 medianRejected=1
+[TOPVIEW DBG] dispatch window=1000ms received=20 delivered=10 coalesced=10 flushInterval=50ms
+```
+
+`raw` is what the broker sent, `med` is after the three-sample median, `lim` is after the speed cap, `norm` is the
+0..1 map position and `ch` the channel the quadrant heuristic derived. `dRaw` is how far the raw coordinate moved
+since the previous frame — the honest measure of upstream stability. `bounds` says whether the normalization range
+came from configuration or from the automatic estimate. `coalesced` counts frames the dispatcher overwrote before
+delivery, which the map never sees.
+
 `RiskFrame.ts` is **not** monotonic. `ConcatFuser` stamps the fused frame with the *oldest* observation timestamp in
 the window, and each channel's timestamp comes from its own CCTV clock, so the value moves backwards whenever the
 set of channels in a window changes. Qt therefore orders risk frames by arrival (QoS 1 preserves per-topic order) and
 uses `ts` only to drop a redelivered copy of the frame it already has. Ordering by `ts` instead would discard every
 frame carrying the lagging channel's clock, freezing the map and then jumping it forward in one step.
 
-Qt also caps how far an object may move between frames, at 25 m/s in world units — deliberately not in normalized
-units, where the same constant would mean 54 m/s on a 60 m site and 13.5 m/s on a 15 m one. Multi-camera fusion can
+Qt also caps how far an object may move between frames, at 8 m/s in world units — deliberately not in normalized
+units, where the same constant would mean a different speed on every differently sized site. One client covers a
+10 x 10 m area, so the cap has to sit above the fastest thing that crosses it (walking 1.4 m/s, site driving 3-5 m/s)
+and no higher: what an outlier can do to the picture is the cap times the frame interval, 0.8 m here. Multi-camera fusion can
 represent one object by a different observation from frame to frame, which arrives as a single-frame teleport across
 the site and back. An isolated one is dropped outright by the three-sample median; the cap bounds what a repeated one
 can do to at most 25 m/s × the frame interval. Genuine movement keeps arriving in the same direction and is not

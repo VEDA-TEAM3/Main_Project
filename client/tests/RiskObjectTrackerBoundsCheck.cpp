@@ -119,9 +119,9 @@ void checkSustainedMovementCatchesUp() {
     tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(10.0, 10.0))}), 1000);
     tracker.buildSnapshot(1000);
 
-    // 80m를 속도 상한(25m/s)으로 따라잡으려면 3.2초가 필요하다
+    // 80m를 속도 상한(8m/s)으로 따라잡으려면 10초가 필요하다
     qint64 timeMsec = 1000;
-    for (int step = 0; step < 40; ++step) {
+    for (int step = 0; step < 105; ++step) {
         timeMsec += 100;
         tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(90.0, 10.0))}), timeMsec);
         tracker.buildSnapshot(timeMsec);

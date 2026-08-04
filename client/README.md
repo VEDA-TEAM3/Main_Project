@@ -100,6 +100,7 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `VEDA_MQTT_CA_FILE` | CA 인증서 경로 |
 | `VEDA_MQTT_CLIENT_ID` | 고정 MQTT Client ID |
 | `VEDA_MQTT_DEBUG` | MQTT 수신 디버그 로그 활성화 |
+| `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`1`=1초 요약, `2`=객체별 프레임 상세) |
 | `QTCCTV_BLUR_SYNC_OFFSET_MS` | 영상과 블러 메타데이터 동기화 보정값 |
 | `QTCCTV_DECODER_MODE` | `auto`, `software`, `d3d11` 디코더 선택 |
 

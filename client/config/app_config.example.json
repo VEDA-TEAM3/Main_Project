@@ -15,17 +15,17 @@
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
         "world": {
-            "fixedBoundsEnabled": false,
+            "fixedBoundsEnabled": true,
             "invertY": true,
             "automaticBoundsWarmupMs": 500,
             "automaticBoundsMinimumSamples": 12,
             "automaticBoundsMaximumSamples": 512,
             "automaticBoundsPaddingRatio": 0.08,
             "automaticBoundsOutlierFraction": 0.05,
-            "minX": 0.0,
-            "minY": 0.0,
-            "maxX": 100.0,
-            "maxY": 100.0
+            "minX": -5.0,
+            "minY": -5.0,
+            "maxX": 5.0,
+            "maxY": 5.0
         }
     },
     "video": {

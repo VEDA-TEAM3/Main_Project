@@ -1,5 +1,7 @@
 #include "network/realtime/RiskFrameDispatcher.h"
 
+#include <QDebug>
+#include <QProcessEnvironment>
 #include <QTimer>
 #include <utility>
 
@@ -16,6 +18,11 @@ RiskFrameDispatcher::RiskFrameDispatcher(MqttDispatcherConfig config, QObject* p
     flushTimer_->setSingleShot(true);
     flushTimer_->setTimerType(Qt::PreciseTimer);
     connect(flushTimer_, &QTimer::timeout, this, &RiskFrameDispatcher::flushPendingFrame);
+
+    bool levelOk = false;
+    const int level =
+        QProcessEnvironment::systemEnvironment().value(QStringLiteral("VEDA_TOPVIEW_DEBUG")).trimmed().toInt(&levelOk);
+    debugLevel_ = levelOk ? qBound(0, level, 2) : 0;
 }
 
 /** @brief 위험 프레임 전달을 시작합니다. */
@@ -36,6 +43,10 @@ void RiskFrameDispatcher::reset() {
     pendingFrame_ = {};
     latestSourceTimestamp_ = 0;
     lastArrivalMsec_ = 0;
+    debugWindowStartMsec_ = 0;
+    debugReceivedCount_ = 0;
+    debugCoalescedCount_ = 0;
+    debugDeliveredCount_ = 0;
     hasPendingFrame_ = false;
 }
 
@@ -62,6 +73,29 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
     }
 
     latestSourceTimestamp_ = frame.sourceTimestamp;
+    if (debugLevel_ > 0) {
+        ++debugReceivedCount_;
+        if (hasPendingFrame_) {
+            // 아직 전달되지 않은 프레임을 덮어쓴다 = 지도가 이 프레임을 영영 못 본다
+            ++debugCoalescedCount_;
+        }
+        if (debugWindowStartMsec_ <= 0) {
+            debugWindowStartMsec_ = nowMsec;
+        } else if (nowMsec - debugWindowStartMsec_ >= 1000) {
+            qInfo().noquote() << QStringLiteral("[TOPVIEW DBG] dispatch window=%1ms received=%2 delivered=%3 "
+                                                "coalesced=%4 flushInterval=%5ms")
+                                     .arg(nowMsec - debugWindowStartMsec_)
+                                     .arg(debugReceivedCount_)
+                                     .arg(debugDeliveredCount_)
+                                     .arg(debugCoalescedCount_)
+                                     .arg(config_.riskFlushIntervalMsec);
+            debugWindowStartMsec_ = nowMsec;
+            debugReceivedCount_ = 0;
+            debugDeliveredCount_ = 0;
+            debugCoalescedCount_ = 0;
+        }
+    }
+
     pendingFrame_ = std::move(frame);
     hasPendingFrame_ = true;
     if (!flushTimer_->isActive()) {
@@ -76,5 +110,6 @@ void RiskFrameDispatcher::flushPendingFrame() {
     }
 
     hasPendingFrame_ = false;
+    ++debugDeliveredCount_;
     emit frameReady(std::exchange(pendingFrame_, {}));
 }

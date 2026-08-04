@@ -235,6 +235,7 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     lastLiveSnapshotPublishMsec_ = 0;
+    updateObjectAreaRect();
 }
 
 /**
@@ -448,6 +449,7 @@ void DigitalTwinMapWidget::setupScene() {
     demoItems_.clear();
     visualItemIndexes_.clear();
     mapRect_ = sceneBuilder_->build(&scene_);
+    updateObjectAreaRect();
     deviceStatusMapOverlay_.initialize(&scene_);
     deviceStatusMapOverlay_.setDisplaySettings(displaySettings_);
 
@@ -717,9 +719,37 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
  * @param normalizedPosition  정규화된 객체 위치
  * @return                   scene 좌표계 위치
  */
+/**
+ * @brief   객체 좌표가 놓일 scene 영역을 월드 종횡비에 맞춰 계산합니다.
+ *
+ * @details 정규화 좌표를 맵 사각형에 그대로 펴 바르면 월드의 가로세로 비율이 무시된다.
+ *          담당 구역이 정사각형(10x10m)인데 맵이 1000x520이면 x축이 y축의 1.9배로 늘어나,
+ *          대각선 이동 각도와 객체 간 거리가 방향에 따라 다르게 보인다. 고정 경계가 설정된
+ *          경우에만 그 비율을 아는 것이므로, 자동 경계일 때는 기존처럼 맵 전체를 쓴다.
+ */
+void DigitalTwinMapWidget::updateObjectAreaRect() {
+    objectAreaRect_ = mapRect_;
+
+    const QRectF worldBounds = liveConfig_.world.bounds;
+    if (!liveConfig_.world.fixedBoundsEnabled || worldBounds.width() <= 0.0 || worldBounds.height() <= 0.0 ||
+        mapRect_.width() <= 0.0 || mapRect_.height() <= 0.0) {
+        return;
+    }
+
+    const double worldAspect = worldBounds.width() / worldBounds.height();
+    const double mapAspect = mapRect_.width() / mapRect_.height();
+    if (qFuzzyCompare(worldAspect, mapAspect)) {
+        return;
+    }
+
+    const double width = worldAspect > mapAspect ? mapRect_.width() : mapRect_.height() * worldAspect;
+    const double height = worldAspect > mapAspect ? mapRect_.width() / worldAspect : mapRect_.height();
+    objectAreaRect_ = QRectF(mapRect_.center().x() - width * 0.5, mapRect_.center().y() - height * 0.5, width, height);
+}
+
 QPointF DigitalTwinMapWidget::scenePointFromNormalized(const QPointF& normalizedPosition) const {
-    return QPointF(mapRect_.left() + normalizedPosition.x() * mapRect_.width(),
-                   mapRect_.top() + normalizedPosition.y() * mapRect_.height());
+    return QPointF(objectAreaRect_.left() + normalizedPosition.x() * objectAreaRect_.width(),
+                   objectAreaRect_.top() + normalizedPosition.y() * objectAreaRect_.height());
 }
 
 /**

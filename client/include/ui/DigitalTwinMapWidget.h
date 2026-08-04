@@ -80,6 +80,7 @@ private:
     void removeMissingVisualItems(const QVector<DigitalTwinObject>& objects);
     void removeVisualItemAt(qsizetype visualIndex);
     void rebuildVisualItemIndexes();
+    void updateObjectAreaRect();
     QPointF scenePointFromNormalized(const QPointF& normalizedPosition) const;
     QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
     void fitMapInView();
@@ -104,5 +105,6 @@ private:
     QTimer liveFrameRenderTimer_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
     QRectF mapRect_;
+    QRectF objectAreaRect_;
     bool liveMode_ = false;
 };

@@ -22,6 +22,27 @@ public:
     QVector<DigitalTwinRiskEvent> takeRiskEvents();
 
 private:
+    /**
+     * @brief VEDA_TOPVIEW_DEBUG로 켜는 좌표 진단 상태
+     *
+     * @details level 1은 1초 요약, level 2는 객체별 프레임 상세까지 남긴다.
+     *          꺼져 있으면(기본값) 아무 비용도 들지 않도록 모든 경로가 level_로 먼저 걸러진다.
+     */
+    struct Diagnostics {
+        int level = 0;
+        qint64 windowStartMsec = 0;
+        qint64 previousSourceTimestamp = 0;
+        int frameCount = 0;
+        int duplicateCount = 0;
+        int backwardTimestampCount = 0;
+        qint64 minTimestampDeltaMsec = 0;
+        qint64 maximumTimestampDeltaMsec = 0;
+        int rateLimitedCount = 0;
+        int medianRejectedCount = 0;
+        QVector<qint64> arrivalIntervalsMsec;
+        QHash<qint64, QPointF> previousRawPositions;
+    };
+
     struct PositionTransitionState {
         QPointF startPosition;
         QPointF targetPosition;
@@ -37,6 +58,10 @@ private:
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
     QPointF rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition, qint64 arrivalTimeMsec);
     void logRateLimitedJump(qint64 globalId, double distance, double maximumDistance, qint64 localTimeMsec);
+    void logFrameDiagnostics(const RiskFrameData& frame, const QVector<QPointF>& rawPositions,
+                             const QVector<QPointF>& medianPositions, qint64 arrivalTimeMsec);
+    void logDiagnosticsSummary(qint64 arrivalTimeMsec, qsizetype objectCount);
+    QString worldBoundsDescription() const;
     QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 frameSequence,
                                  qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
@@ -62,6 +87,7 @@ private:
     QRectF pendingExpansionBounds_;
     qint64 automaticBoundsStartSourceTimestamp_ = 0;
     int pendingExpansionFrameCount_ = 0;
+    Diagnostics diagnostics_;
     qint64 frameSequence_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
