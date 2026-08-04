@@ -13,6 +13,7 @@ target_link_libraries(shared INTERFACE nlohmann_json::nlohmann_json)
 option(VEDA_BUILD_CONTROL_SERVER "control-server 바이너리를 함께 빌드" ON)
 
 add_subdirectory(compute-server)
+add_subdirectory(stream-server)
 
 if(VEDA_BUILD_CONTROL_SERVER)
     add_subdirectory(control-server)
