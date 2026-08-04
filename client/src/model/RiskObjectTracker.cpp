@@ -66,15 +66,22 @@ bool readInvertWorldY() {
 }
 
 /**
- * @brief   VEDA_TOPVIEW_DEBUG에서 좌표 진단 수준을 읽습니다.
- * @return  0=끔, 1=1초 요약, 2=객체별 프레임 상세까지
+ * @brief                 좌표 진단 수준을 정합니다.
+ * @param configuredLevel 설정 파일에서 온 수준
+ * @return                0=끔, 1=1초 요약, 2=객체별 프레임 상세까지
+ *
+ * @details 현장에서 설정 파일을 고치지 않고 켤 수 있도록 VEDA_TOPVIEW_DEBUG가 설정을 덮어쓴다.
  */
-int readTopViewDebugLevel() {
+int resolveTopViewDebugLevel(int configuredLevel) {
     const QString value =
         QProcessEnvironment::systemEnvironment().value(QStringLiteral("VEDA_TOPVIEW_DEBUG")).trimmed();
+    if (value.isEmpty()) {
+        return qBound(0, configuredLevel, 2);
+    }
+
     bool numberOk = false;
     const int level = value.toInt(&numberOk);
-    return numberOk ? qBound(0, level, 2) : 0;
+    return numberOk ? qBound(0, level, 2) : qBound(0, configuredLevel, 2);
 }
 
 QString formatPoint(const QPointF& point) {
@@ -114,7 +121,8 @@ RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(
         invertWorldY_ = hasConfiguredWorldBounds_ ? readInvertWorldY() : config_.world.invertY;
     }
 
-    diagnostics_.level = readTopViewDebugLevel();
+    const int configuredLevel = config_.debugDetail ? 2 : (config_.debugLogging ? 1 : 0);
+    diagnostics_.level = resolveTopViewDebugLevel(configuredLevel);
     if (diagnostics_.level > 0) {
         qInfo().noquote() << QStringLiteral(
                                  "[TOPVIEW DBG] enabled level=%1 bounds=%2 invertY=%3 transition=%4ms median=%5 "
@@ -288,7 +296,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     const RiskFrameData& frame = history_.constLast();
     const qint64 latestSourceTimestamp = frame.sourceTimestamp;
 
-    if (config_.diagnosticsIntervalMsec > 0 &&
+    if (diagnostics_.level > 0 && config_.diagnosticsIntervalMsec > 0 &&
         localTimeMsec - lastDiagnosticsMsec_ >= config_.diagnosticsIntervalMsec) {
         qInfo().noquote() << QStringLiteral(
                                  "[TOPVIEW] mode=latest-risk latestRiskTs=%1 arrivalAge=%2ms transition=%3ms history=%4")
@@ -800,7 +808,7 @@ QPointF RiskObjectTracker::rateLimitedWorldPosition(qint64 globalId, const QPoin
  */
 void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, double maximumDistance,
                                            qint64 localTimeMsec) {
-    if (localTimeMsec - lastRateLimitLogMsec_ < rateLimitLogIntervalMsec) {
+    if (diagnostics_.level <= 0 || localTimeMsec - lastRateLimitLogMsec_ < rateLimitLogIntervalMsec) {
         return;
     }
     lastRateLimitLogMsec_ = localTimeMsec;

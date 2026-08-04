@@ -45,5 +45,7 @@ private:
     int blurDebugLogIntervalMsec_ = 0;
     int riskDebugLogIntervalMsec_ = 0;
     qsizetype maximumDebugPayloadLength_ = 0;
-    bool debugLogging_ = true;
+    bool logStatusPayload_ = false;
+    bool logRisk_ = false;
+    bool logBlur_ = false;
 };

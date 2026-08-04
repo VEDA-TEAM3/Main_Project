@@ -87,6 +87,23 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 - MQTT Broker, TLS 인증서, keep-alive, 재연결 설정
 - MQTT 토픽 필터와 QoS
 - 위험 및 블러 디스패처 주기
+- 로그 카테고리별 on/off (`logging`)
+
+로그는 카테고리별로 켜고 끕니다. 전부 켜면 고빈도 항목(`mqttStatusPayload`, `mqttBlur`, `blurApply`)이
+초당 수백 줄을 쏟아내 정작 봐야 할 줄이 묻히므로, 필요한 것만 `true`로 둡니다. 오류 로그는 어떤
+설정으로도 꺼지지 않습니다.
+
+| 키 | 로그 | 기본값 |
+| --- | --- | --- |
+| `mqttConnection` | `[MQTT]`, `[MQTT SUBSCRIBED]` 연결·구독 | `true` |
+| `mqttStatusPayload` | `[MQTT RX]` 장비 상태 payload 원문 (매우 많음) | `false` |
+| `mqttRisk` | `[MQTT RISK]` 위험 프레임 수신 요약 | `false` |
+| `mqttBlur` | `[MQTT BLUR]` 채널별 블러 수신 (많음) | `false` |
+| `blurApply` | `[BLUR APPLY]` 영상 프레임별 블러 적용 (많음) | `false` |
+| `blurDispatch` | `[MQTT BLUR DISPATCH]` 블러 전달·병합 통계 | `false` |
+| `riskDispatch` | `[TOPVIEW DBG] dispatch` 위험 전달·병합 통계 | `false` |
+| `topview` | `[TOPVIEW]` 수신 요약, 이상치, 자동 경계 | `false` |
+| `topviewDetail` | `[TOPVIEW DBG]` 객체별 프레임 좌표 상세 (많음) | `false` |
 - TopView 최신 Risk 상태의 로컬 위치 전환(`digitalTwin.positionTransitionMs`)
 
 운영 자동화와 비밀 정보 주입을 위해 아래 환경 변수는 JSON보다 우선합니다.
@@ -99,8 +116,8 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `VEDA_MQTT_PORT` | MQTT TLS 포트 |
 | `VEDA_MQTT_CA_FILE` | CA 인증서 경로 |
 | `VEDA_MQTT_CLIENT_ID` | 고정 MQTT Client ID |
-| `VEDA_MQTT_DEBUG` | MQTT 수신 디버그 로그 활성화 |
-| `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`1`=1초 요약, `2`=객체별 프레임 상세) |
+| `VEDA_MQTT_DEBUG` | MQTT 연결/구독 로그 활성화 (`logging.mqttConnection` 대체) |
+| `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`0`/`1`/`2`, `logging.topview*` 대체) |
 | `QTCCTV_BLUR_SYNC_OFFSET_MS` | 영상과 블러 메타데이터 동기화 보정값 |
 | `QTCCTV_DECODER_MODE` | `auto`, `software`, `d3d11` 디코더 선택 |
 

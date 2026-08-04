@@ -90,9 +90,13 @@ log to see the extent Qt is actually using.
 
 ## TopView coordinate diagnostics
 
-`VEDA_TOPVIEW_DEBUG=1` prints a one-second reception summary; `=2` adds a per-object, per-frame line showing every
-stage of the coordinate path. On Windows also set `QT_FORCE_STDERR_LOGGING=1`, otherwise Qt sends the messages to the
-debugger instead of stderr as soon as stderr is redirected to a file, and the capture comes out empty.
+Set `logging.topview` for a one-second reception summary and `logging.topviewDetail` for a per-object, per-frame line
+showing every stage of the coordinate path. `VEDA_TOPVIEW_DEBUG` (`0`/`1`/`2`) overrides both without touching the
+config file. Leave the high-volume categories (`mqttStatusPayload`, `mqttBlur`, `blurApply`) off while capturing, or
+the topview lines drown in them.
+
+On Windows also set `QT_FORCE_STDERR_LOGGING=1`, otherwise Qt sends the messages to the debugger instead of stderr as
+soon as stderr is redirected to a file, and the capture comes out empty.
 
 ```powershell
 $env:VEDA_TOPVIEW_DEBUG = "2"; $env:QT_FORCE_STDERR_LOGGING = "1"; .\Qtcctvclient.exe 2> topview.log

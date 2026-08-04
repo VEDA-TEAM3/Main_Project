@@ -26,5 +26,9 @@ struct DigitalTwinRuntimeConfig {
     qint64 fadeOutMsec = 180;
     qsizetype maximumHistorySize = 2;
     int diagnosticsIntervalMsec = 1000;
+    /// 탑뷰 수신 요약과 경계/이상치 로그
+    bool debugLogging = false;
+    /// 객체별 프레임 상세 좌표 로그 (debugLogging이 켜져 있어야 의미가 있다)
+    bool debugDetail = false;
     DigitalTwinWorldConfig world;
 };

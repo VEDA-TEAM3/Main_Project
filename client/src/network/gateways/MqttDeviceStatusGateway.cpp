@@ -27,7 +27,7 @@ QString debugPayloadText(const QByteArray& payload, qsizetype maximumLength) {
  * @brief                   MQTT gateway를 전송 구현과 토픽 router로 조립합니다.
  * @param transportFactory  worker thread에서 실제 transport를 생성할 factory
  * @param messageRouter     등록된 토픽 handler를 선택할 router
- * @param debugLogging      수신 및 변환 상태 로그 활성화 여부
+ * @param config            로그 카테고리 플래그를 포함한 MQTT 실행 설정
  * @param parent            Qt 객체 소유권을 연결할 부모 객체
  */
 MqttDeviceStatusGateway::MqttDeviceStatusGateway(std::shared_ptr<MqttTransportFactory> transportFactory,
@@ -39,7 +39,9 @@ MqttDeviceStatusGateway::MqttDeviceStatusGateway(std::shared_ptr<MqttTransportFa
       blurDebugLogIntervalMsec_(config.blurDebugLogIntervalMsec),
       riskDebugLogIntervalMsec_(config.riskDebugLogIntervalMsec),
       maximumDebugPayloadLength_(config.maximumDebugPayloadLength),
-      debugLogging_(config.connection.debugLogging) {
+      logStatusPayload_(config.logStatusPayload),
+      logRisk_(config.logRisk),
+      logBlur_(config.logBlur) {
     blurDispatcher_ = new BlurFrameDispatcher(config.dispatcher, std::make_shared<LatestBlurFrameBuffer>(), this);
     connect(blurDispatcher_, &BlurFrameDispatcher::frameReady, this, &DeviceStatusGateway::blurFrameReceived);
 
@@ -131,7 +133,7 @@ void MqttDeviceStatusGateway::handleMessage(const QByteArray& payload, const QSt
     }
 
     MqttRouteResult result = messageRouter_->route(payload, topic);
-    if (debugLogging_ && result.logPayload) {
+    if (logStatusPayload_ && result.logPayload) {
         logReceivedMessage(payload, topic);
     }
 
@@ -177,7 +179,7 @@ void MqttDeviceStatusGateway::logReceivedMessage(const QByteArray& payload, cons
 
 /** @brief 고빈도 블러 수신 상태를 채널별 제한 주기로 출력합니다. */
 void MqttDeviceStatusGateway::logBlurFrame(const QString& topic, const BlurFrameData& frame) {
-    if (!debugLogging_ || frame.channelIndex < 0 || frame.channelIndex >= mqttDeviceChannelCount) {
+    if (!logBlur_ || frame.channelIndex < 0 || frame.channelIndex >= mqttDeviceChannelCount) {
         return;
     }
 
@@ -197,7 +199,7 @@ void MqttDeviceStatusGateway::logBlurFrame(const QString& topic, const BlurFrame
 
 /** @brief 통합 위험 수신 상태를 설정된 주기로 제한하여 출력합니다. */
 void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrameData& frame) {
-    if (!debugLogging_) {
+    if (!logRisk_) {
         return;
     }
 
@@ -216,9 +218,8 @@ void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrame
 
 /** @brief MQTT 계약 또는 전송 오류를 기존 상태 서비스 경로로 전달합니다. */
 void MqttDeviceStatusGateway::emitProtocolError(QString detail) {
-    if (debugLogging_) {
-        qWarning().noquote() << QStringLiteral("[MQTT ERROR] %1").arg(detail);
-    }
+    // 오류는 로그 카테고리와 무관하게 항상 남긴다
+    qWarning().noquote() << QStringLiteral("[MQTT ERROR] %1").arg(detail);
 
     DeviceStatusReport report;
     report.type = DeviceStatusReportType::ProtocolError;

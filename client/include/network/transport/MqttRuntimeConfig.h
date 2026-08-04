@@ -22,6 +22,8 @@ struct MqttDispatcherConfig {
     int riskFlushIntervalMsec = 0;
     int riskSourceRestartGapMsec = 0;
     qint64 riskTimestampRollbackResetMsec = 0;
+    bool logBlurDispatch = false;
+    bool logRiskDispatch = false;
 };
 
 struct MqttRuntimeConfig {
@@ -31,4 +33,7 @@ struct MqttRuntimeConfig {
     int blurDebugLogIntervalMsec = 0;
     int riskDebugLogIntervalMsec = 0;
     qsizetype maximumDebugPayloadLength = 0;
+    bool logStatusPayload = false;
+    bool logRisk = false;
+    bool logBlur = false;
 };

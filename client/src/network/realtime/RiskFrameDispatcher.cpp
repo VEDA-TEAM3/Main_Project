@@ -1,7 +1,6 @@
 #include "network/realtime/RiskFrameDispatcher.h"
 
 #include <QDebug>
-#include <QProcessEnvironment>
 #include <QTimer>
 #include <utility>
 
@@ -18,11 +17,6 @@ RiskFrameDispatcher::RiskFrameDispatcher(MqttDispatcherConfig config, QObject* p
     flushTimer_->setSingleShot(true);
     flushTimer_->setTimerType(Qt::PreciseTimer);
     connect(flushTimer_, &QTimer::timeout, this, &RiskFrameDispatcher::flushPendingFrame);
-
-    bool levelOk = false;
-    const int level =
-        QProcessEnvironment::systemEnvironment().value(QStringLiteral("VEDA_TOPVIEW_DEBUG")).trimmed().toInt(&levelOk);
-    debugLevel_ = levelOk ? qBound(0, level, 2) : 0;
 }
 
 /** @brief 위험 프레임 전달을 시작합니다. */
@@ -73,7 +67,7 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
     }
 
     latestSourceTimestamp_ = frame.sourceTimestamp;
-    if (debugLevel_ > 0) {
+    if (config_.logRiskDispatch) {
         ++debugReceivedCount_;
         if (hasPendingFrame_) {
             // 아직 전달되지 않은 프레임을 덮어쓴다 = 지도가 이 프레임을 영영 못 본다

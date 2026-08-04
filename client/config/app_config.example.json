@@ -3,6 +3,17 @@
         "windowWidth": 1680,
         "windowHeight": 945
     },
+    "logging": {
+        "mqttConnection": true,
+        "mqttStatusPayload": false,
+        "mqttRisk": false,
+        "mqttBlur": false,
+        "blurApply": false,
+        "blurDispatch": false,
+        "riskDispatch": false,
+        "topview": false,
+        "topviewDetail": false
+    },
     "digitalTwin": {
         "renderIntervalMs": 33,
         "snapshotPublishIntervalMs": 50,

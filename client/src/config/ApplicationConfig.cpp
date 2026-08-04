@@ -560,6 +560,47 @@ bool validateEffectiveConfig(const ApplicationConfig& config, QString& error) {
     }
     return true;
 }
+
+/**
+ * @brief         로그 카테고리별 on/off를 읽어 각 구성 요소 설정에 반영합니다.
+ * @param root    설정 파일 루트 객체
+ * @param config  플래그를 반영할 애플리케이션 설정
+ * @param error   검증 실패 원인
+ * @return        파싱과 반영에 성공하면 true
+ *
+ * @details logging 블록과 그 안의 키는 모두 선택 사항이다. 없으면 각 플래그의 기본값을 쓴다.
+ *          오류 로그는 어떤 플래그로도 끄지 않는다.
+ */
+bool parseLogging(const QJsonObject& root, ApplicationConfig& config, QString& error) {
+    QJsonObject logging;
+    if (root.contains(QStringLiteral("logging")) && !readObject(root, QStringLiteral("logging"), logging, error)) {
+        return false;
+    }
+
+    const auto readFlag = [&logging, &error](const QString& key, bool& value) {
+        return !logging.contains(key) || readBoolean(logging, key, value, error);
+    };
+
+    bool blurApply = config.video.receiver.blur.debugLogIntervalMsec > 0;
+    if (!readFlag(QStringLiteral("mqttConnection"), config.mqtt.connection.debugLogging) ||
+        !readFlag(QStringLiteral("mqttStatusPayload"), config.mqtt.logStatusPayload) ||
+        !readFlag(QStringLiteral("mqttRisk"), config.mqtt.logRisk) ||
+        !readFlag(QStringLiteral("mqttBlur"), config.mqtt.logBlur) ||
+        !readFlag(QStringLiteral("blurApply"), blurApply) ||
+        !readFlag(QStringLiteral("blurDispatch"), config.mqtt.dispatcher.logBlurDispatch) ||
+        !readFlag(QStringLiteral("riskDispatch"), config.mqtt.dispatcher.logRiskDispatch) ||
+        !readFlag(QStringLiteral("topview"), config.digitalTwin.debugLogging) ||
+        !readFlag(QStringLiteral("topviewDetail"), config.digitalTwin.debugDetail)) {
+        error = QStringLiteral("logging is invalid: %1").arg(error);
+        return false;
+    }
+
+    // BlurProcessor는 주기값으로 로그를 켠다. 꺼졌으면 주기를 0으로 만들어 출력 경로를 막는다
+    if (!blurApply) {
+        config.video.receiver.blur.debugLogIntervalMsec = 0;
+    }
+    return true;
+}
 }  // namespace
 
 /**
@@ -593,7 +634,8 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
     if (!parseWindow(root, result.config.window, result.error) ||
         !parseDigitalTwin(root, result.config.digitalTwin, result.error) ||
         !parseVideo(root, result.config.video, result.error) ||
-        !parseMqtt(root, result.config.mqtt, clientIdPrefix, result.error)) {
+        !parseMqtt(root, result.config.mqtt, clientIdPrefix, result.error) ||
+        !parseLogging(root, result.config, result.error)) {
         return result;
     }
 

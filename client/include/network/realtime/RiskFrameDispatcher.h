@@ -35,7 +35,6 @@ private:
     int debugReceivedCount_ = 0;
     int debugCoalescedCount_ = 0;
     int debugDeliveredCount_ = 0;
-    int debugLevel_ = 0;
     bool hasPendingFrame_ = false;
     bool running_ = false;
 };
