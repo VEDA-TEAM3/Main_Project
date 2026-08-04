@@ -99,9 +99,10 @@ void checkSingleFrameTeleportIsRateLimited() {
     const double settledX = positionOf(tracker.buildSnapshot(1000), 1).x();
     check(qAbs(settledX - 0.1) < 0.01, "first sample must be shown as measured");
 
+    // 80m 순간 이동이지만 100ms 동안 허용되는 이동은 2.5m뿐이다
     tracker.submitFrame(frameAt(1100, {objectAt(1, QPointF(90.0, 10.0))}), 1100);
     const double jumpedX = positionOf(tracker.buildSnapshot(1100), 1).x();
-    check(jumpedX < 0.3, "one-frame teleport must not cross the map");
+    check(jumpedX < 0.15, "one-frame teleport must not cross the map");
 
     tracker.submitFrame(frameAt(1200, {objectAt(1, QPointF(10.0, 10.0))}), 1200);
     const double recoveredX = positionOf(tracker.buildSnapshot(1200), 1).x();
@@ -118,8 +119,9 @@ void checkSustainedMovementCatchesUp() {
     tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(10.0, 10.0))}), 1000);
     tracker.buildSnapshot(1000);
 
+    // 80m를 속도 상한(25m/s)으로 따라잡으려면 3.2초가 필요하다
     qint64 timeMsec = 1000;
-    for (int step = 0; step < 20; ++step) {
+    for (int step = 0; step < 40; ++step) {
         timeMsec += 100;
         tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(90.0, 10.0))}), timeMsec);
         tracker.buildSnapshot(timeMsec);

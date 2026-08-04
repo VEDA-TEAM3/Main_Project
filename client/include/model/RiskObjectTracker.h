@@ -35,8 +35,8 @@ private:
     bool worldBoundsReady() const;
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
-    QPointF rateLimitedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
-    void logRateLimitedJump(const QString& objectId, double distance, double maximumDistance, qint64 localTimeMsec);
+    QPointF rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition, qint64 arrivalTimeMsec);
+    void logRateLimitedJump(qint64 globalId, double distance, double maximumDistance, qint64 localTimeMsec);
     QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 frameSequence,
                                  qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
@@ -49,8 +49,8 @@ private:
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;
     QHash<QString, QPointF> previousPositions_;
-    QHash<QString, QPointF> filteredPositions_;
-    QHash<QString, qint64> filteredPositionTimesMsec_;
+    QHash<qint64, QPointF> filteredPositions_;
+    QHash<qint64, qint64> filteredPositionTimesMsec_;
     QHash<QString, PositionTransitionState> positionTransitions_;
     QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
     QHash<QString, qint64> nextPairPulseTimesMsec_;

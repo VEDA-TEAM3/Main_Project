@@ -87,11 +87,13 @@ set of channels in a window changes. Qt therefore orders risk frames by arrival 
 uses `ts` only to drop a redelivered copy of the frame it already has. Ordering by `ts` instead would discard every
 frame carrying the lagging channel's clock, freezing the map and then jumping it forward in one step.
 
-Qt also caps how far an object may move between renders (0.9 of the map per second). Multi-camera fusion can
+Qt also caps how far an object may move between frames, at 25 m/s in world units — deliberately not in normalized
+units, where the same constant would mean 54 m/s on a 60 m site and 13.5 m/s on a 15 m one. Multi-camera fusion can
 represent one object by a different observation from frame to frame, which arrives as a single-frame teleport across
-the map and back; the cap absorbs those while genuine movement, which keeps arriving in the same direction, catches
-up within a few frames. Repeated `[TOPVIEW] Rate-limited jump` lines mean the upstream fusion or camera calibration
-is unstable — the client is only hiding it.
+the site and back. An isolated one is dropped outright by the three-sample median; the cap bounds what a repeated one
+can do to at most 25 m/s × the frame interval. Genuine movement keeps arriving in the same direction and is not
+slowed. Repeated `[TOPVIEW] Rate-limited jump` lines mean the upstream fusion or camera calibration is unstable — the
+client is only hiding it.
 
 The shared world-coordinate contract has positive Y pointing north/up. Qt therefore flips the
 Y axis when mapping it to screen coordinates. Set `VEDA_MAP_INVERT_Y=0` only when an upstream source already provides
