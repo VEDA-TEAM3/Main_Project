@@ -106,6 +106,11 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `topviewDetail` | `[TOPVIEW DBG]` 객체별 프레임 좌표 상세 | `false` |
 | `topviewDetailIntervalMs` | 위 상세 로그를 gid마다 이 주기로 제한 (`0`이면 매 프레임) | `1000` |
 
+로그를 파일로 받을 때는 stderr 리다이렉트 대신 `VEDA_LOG_FILE`을 씁니다. GUI 서브시스템 실행 파일에는
+콘솔이 없어 Qt 기본 핸들러가 메시지를 `OutputDebugString`으로 보내는데, 이 경로는 디버거의 공유 버퍼를
+거치므로 긴 줄이 잘리고 여러 스레드의 줄이 섞입니다. `VEDA_LOG_FILE`은 메시지 핸들러를 직접 설치해
+뮤텍스로 직렬화한 뒤 파일에 온전히 기록합니다.
+
 `topviewDetail`은 gid마다 `topviewDetailIntervalMs` 주기로만 남기되, **중앙값 필터나 속도 상한이 실제로
 개입한 프레임은 주기와 무관하게 항상 남깁니다.** 평상시 분량을 20분의 1로 줄이면서 이상치는 하나도
 놓치지 않습니다.
@@ -123,6 +128,7 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `VEDA_MQTT_CLIENT_ID` | 고정 MQTT Client ID |
 | `VEDA_MQTT_DEBUG` | MQTT 연결/구독 로그 활성화 (`logging.mqttConnection` 대체) |
 | `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`0`/`1`/`2`, `logging.topview*` 대체) |
+| `VEDA_LOG_FILE` | 모든 로그를 이 파일에 그대로 기록 (콘솔 경유 잘림·뒤섞임 방지) |
 | `QTCCTV_BLUR_SYNC_OFFSET_MS` | 영상과 블러 메타데이터 동기화 보정값 |
 | `QTCCTV_DECODER_MODE` | `auto`, `software`, `d3d11` 디코더 선택 |
 

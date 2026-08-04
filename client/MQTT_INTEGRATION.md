@@ -69,7 +69,8 @@ A larger site is covered by deploying more clients, not by adding channels to on
 area of *this* client, not of the whole site — `digitalTwin.world` ships as a 10 x 10 m square centred on the unit
 (`-5..5` on both axes). The channel a risk object belongs to is derived from which quadrant of that square it sits
 in, which holds exactly as long as the unit is centred on the world origin and the channels are laid out
-CH01 = NW, CH02 = NE, CH03 = SW, CH04 = SE.
+CH01 = NW, CH02 = NE, CH03 = SE, CH04 = SW. The two lower quadrants are crossed relative to the natural
+reading order because that is how CH03 and CH04 are physically installed on site.
 
 TopView positions are world coordinates. For a stable production map, set the calibrated world extent:
 
@@ -95,14 +96,20 @@ showing every stage of the coordinate path. `VEDA_TOPVIEW_DEBUG` (`0`/`1`/`2`) o
 config file. Leave the high-volume categories (`mqttStatusPayload`, `mqttBlur`, `blurApply`) off while capturing, or
 the topview lines drown in them.
 
-On Windows also set `QT_FORCE_STDERR_LOGGING=1`, otherwise Qt sends the messages to the debugger instead of stderr as
-soon as stderr is redirected to a file, and the capture comes out empty.
+Capture with `VEDA_LOG_FILE` rather than by redirecting stderr:
 
 ```powershell
-$env:VEDA_TOPVIEW_DEBUG = "2"; $env:QT_FORCE_STDERR_LOGGING = "1"; .\Qtcctvclient.exe 2> topview.log
+$env:VEDA_TOPVIEW_DEBUG = "2"; $env:VEDA_LOG_FILE = "topview.log"; .\Qtcctvclient.exe
 ```
 
-Lines are kept under 60 characters so a capture survives being pasted around without being cut off.
+A GUI-subsystem executable has no console, so Qt's default handler sends messages to `OutputDebugString`
+instead of stderr. That path goes through the debugger's shared buffer, which cuts long messages and
+interleaves them when the MQTT gateway, the RTSP receivers, and the GUI thread all log at once — the reason
+captures came out cut off or empty even with `QT_FORCE_STDERR_LOGGING=1`. `VEDA_LOG_FILE` installs a
+`qInstallMessageHandler` that serialises every message with a mutex and writes it whole to the named file
+(still echoing to stderr), so a line arrives intact no matter how it is collected.
+
+Lines are also kept under 60 characters so a capture survives being pasted around.
 
 ```text
 [TV] on lvl=2 inv=1 cap=8.0m/s

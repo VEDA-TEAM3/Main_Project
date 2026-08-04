@@ -98,10 +98,20 @@ QString formatPoint(const QPointF& point) {
     return QStringLiteral("%1,%2").arg(point.x(), 0, 'f', 2).arg(point.y(), 0, 'f', 2);
 }
 
+/**
+ * @brief        좌하단과 우하단 사분면에 붙는 채널 번호를 서로 맞바꿉니다.
+ * @param index  0부터 시작하는 사분면 또는 채널 인덱스
+ * @return       맞바꾼 인덱스
+ *
+ * @details 현장 CH03과 CH04는 사분면 순서와 반대로 설치되어 있다. 자기 자신이 역함수이므로
+ *          채널 인덱스를 사분면으로 되돌릴 때도 같은 함수를 쓴다.
+ */
+int swapLowerChannels(int index) { return index == 2 ? 3 : (index == 3 ? 2 : index); }
+
 int channelIndexForPosition(const QPointF& position) {
     const int column = position.x() >= 0.5 ? 1 : 0;
     const int row = position.y() >= 0.5 ? 1 : 0;
-    return row * 2 + column;
+    return swapLowerChannels(row * 2 + column);
 }
 
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
@@ -586,15 +596,15 @@ int RiskObjectTracker::channelIndexForObject(qint64 globalId, const QPointF& nor
         return measuredIndex;
     }
 
-    const int previousIndex = *previousIterator;
-    const int previousColumn = previousIndex % 2;
-    const int previousRow = previousIndex / 2;
+    const int previousQuadrant = swapLowerChannels(*previousIterator);
+    const int previousColumn = previousQuadrant % 2;
+    const int previousRow = previousQuadrant / 2;
     const int column = previousColumn == 0 ? (normalizedPosition.x() >= 0.5 + horizontalMargin ? 1 : 0)
                                            : (normalizedPosition.x() < 0.5 - horizontalMargin ? 0 : 1);
     const int row = previousRow == 0 ? (normalizedPosition.y() >= 0.5 + verticalMargin ? 1 : 0)
                                      : (normalizedPosition.y() < 0.5 - verticalMargin ? 0 : 1);
 
-    const int channelIndex = row * 2 + column;
+    const int channelIndex = swapLowerChannels(row * 2 + column);
     channelIndexes_.insert(globalId, channelIndex);
     return channelIndex;
 }

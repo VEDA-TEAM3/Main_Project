@@ -1,10 +1,14 @@
 #include <gst/gst.h>
 
+#include <cstdio>
+
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QStringList>
 #include <QtGlobal>
 #include <memory>
@@ -18,6 +22,51 @@
 #include "video/GstStreamReceiverFactory.h"
 
 namespace {
+QFile applicationLogFile;
+QMutex applicationLogMutex;
+
+/**
+ * @brief       Qt 로그를 파일과 stderr에 줄 단위로 온전히 기록합니다.
+ * @param type  메시지 종류
+ * @param text  메시지 본문
+ *
+ * @details Windows GUI 서브시스템 실행 파일에는 콘솔이 없어 Qt 기본 핸들러가 메시지를
+ *          OutputDebugString으로 보낸다. 이 경로는 디버거의 공유 버퍼를 거치므로 긴 줄이
+ *          잘리고, 여러 스레드(MQTT 게이트웨이, RTSP 수신기, GUI)가 동시에 찍으면 줄이 섞인다.
+ *          진단 로그는 그 스레드들에서 나오므로 뮤텍스로 직렬화해 파일에 직접 쓴다.
+ *          ponytail: 줄마다 flush한다. 크래시 직전 줄까지 남기는 대신 초당 수백 줄 이상에서는
+ *          느려지므로, 그 분량이 필요해지면 버퍼링 후 주기적 flush로 바꾼다.
+ */
+void writeApplicationLog(QtMsgType type, const QMessageLogContext& /*context*/, const QString& text) {
+    const QString prefix = type == QtWarningMsg    ? QStringLiteral("[W] ")
+                           : type == QtCriticalMsg ? QStringLiteral("[C] ")
+                           : type == QtFatalMsg    ? QStringLiteral("[F] ")
+                                                   : QString();
+    const QByteArray line = (prefix + text + QLatin1Char('\n')).toUtf8();
+
+    const QMutexLocker locker(&applicationLogMutex);
+    applicationLogFile.write(line);
+    applicationLogFile.flush();
+    std::fwrite(line.constData(), 1, static_cast<size_t>(line.size()), stderr);
+}
+
+/** @brief VEDA_LOG_FILE이 지정되면 그 파일로 로그를 받는 메시지 핸들러를 설치합니다. */
+void installFileLogging() {
+    const QString path = qEnvironmentVariable("VEDA_LOG_FILE").trimmed();
+    if (path.isEmpty()) {
+        return;
+    }
+
+    applicationLogFile.setFileName(path);
+    if (!applicationLogFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning().noquote() << QStringLiteral("[Log] Failed to open %1").arg(path);
+        return;
+    }
+
+    qInstallMessageHandler(writeApplicationLog);
+    qInfo().noquote() << QStringLiteral("[Log] Writing to %1").arg(path);
+}
+
 /**
  * @brief GStreamer MinGW 런타임에서 선택형 GIO 프록시 모듈을 분리합니다.
  *
@@ -73,6 +122,7 @@ void loadApplicationStyle(QApplication& app) {
  * @return      Qt 이벤트 루프 종료 코드
  */
 int main(int argc, char* argv[]) {
+    installFileLogging();
     configureGstreamerMinGwRuntime();
     gst_init(&argc, &argv);
 

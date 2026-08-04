@@ -232,6 +232,32 @@ void checkChannelDoesNotFlapAtBoundary() {
     check(!moved.objects.isEmpty() && moved.objects.constFirst().channelIndex != startChannel,
           "crossing the boundary for real must change the channel");
 }
+/// 사분면과 채널 번호의 대응. CH03과 CH04는 현장 설치가 반대라 아래쪽 두 사분면이 교차한다.
+void checkQuadrantChannelMapping() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-5.0, -5.0, 10.0, 10.0);
+    config.world.invertY = true;  // 월드 +Y는 위쪽이다
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(-2.0, 2.0)), objectAt(2, QPointF(2.0, 2.0)),
+                                       objectAt(3, QPointF(-2.0, -2.0)), objectAt(4, QPointF(2.0, -2.0))}),
+                        1000);
+
+    const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(1000);
+    check(snapshot.objects.size() == 4, "all four corner objects must be present");
+    for (const DigitalTwinObject& object : snapshot.objects) {
+        if (object.objectId == QStringLiteral("G-1")) {
+            check(object.channelIndex == 0, "north-west must be CH01");
+        } else if (object.objectId == QStringLiteral("G-2")) {
+            check(object.channelIndex == 1, "north-east must be CH02");
+        } else if (object.objectId == QStringLiteral("G-3")) {
+            check(object.channelIndex == 3, "south-west must be CH04");
+        } else if (object.objectId == QStringLiteral("G-4")) {
+            check(object.channelIndex == 2, "south-east must be CH03");
+        }
+    }
+}
 /// 같은 쌍이 프레임마다 사라졌다 나타나도 위험 파동이 쏟아지면 안 된다.
 void checkRiskPulsesAreRateLimited() {
     DigitalTwinRuntimeConfig config = checkConfig();
@@ -281,6 +307,7 @@ int main() {
     checkStreamRestartKeepsWorldBounds();
     checkBackwardTimestampStillUpdates();
     checkChannelDoesNotFlapAtBoundary();
+    checkQuadrantChannelMapping();
     checkRiskPulsesAreRateLimited();
 
     if (failureCount > 0) {
