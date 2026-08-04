@@ -14,7 +14,10 @@ constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
-constexpr qint64 maximumPositionFilterStepMsec = 100;
+// 허용 이동량은 실제 프레임 간격에 비례해야 한다. 이 상한을 리셋 기준보다 낮게 잡으면
+// 배달이 늦은 구간에서 허용량만 고정되어(예: 300ms 만에 온 프레임에 100ms 분량만 허용)
+// 정상 이동까지 깎인다. 리셋 기준을 넘어가면 어차피 무제한으로 받아들이므로 같은 값으로 둔다
+constexpr qint64 maximumPositionFilterStepMsec = positionFilterResetGapMsec;
 // 월드 좌표(m) 기준 상한. 정규화 좌표에 걸면 같은 상수가 지도 크기에 따라 전혀 다른 속도가 된다
 // (60m 지도에서 0.9/s = 54m/s로 사실상 무방비, 15m 지도에서는 13.5m/s로 실제 차량을 깎아냄).
 //
@@ -23,6 +26,10 @@ constexpr qint64 maximumPositionFilterStepMsec = 100;
 // 반대로 실제 최고 속도보다 낮게 잡으면 정상 이동까지 깎여 객체가 계속 뒤처지므로,
 // 현장 최고 속도의 1.5배 정도로 둔다: 8m/s = 29km/h (보행 1.4m/s, 구내 주행 3~5m/s 기준)
 constexpr double maximumWorldSpeedMetersPerSecond = 8.0;
+// 채널 경계를 이만큼 넘어서야 채널이 바뀐다. 담당 구역이 10x10m이고 채널이 그 4사분면이라
+// 객체가 경계를 자주 넘는데, 표시 지연 때문에 경계 위에서 채널이 왕복하면 위험 테두리와
+// 신고 대상 채널이 깜빡인다
+constexpr double channelBoundaryHysteresisMeters = 0.3;
 constexpr int automaticBoundsExpansionFrameCount = 3;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
@@ -136,6 +143,7 @@ void RiskObjectTracker::reset() {
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
     worldPositionHistories_.clear();
+    channelIndexes_.clear();
     pendingExpansionBounds_ = {};
     pendingExpansionFrameCount_ = 0;
     lastArrivalTimeMsec_ = 0;
@@ -234,8 +242,10 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
             continue;
         }
 
+        // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는 시점이라
+        // 이상치가 가장 나오기 쉬운데, 이력을 버리면 돌아온 첫 좌표가 중앙값 필터를 못 받는다.
+        // 이력은 removeInactivePositionStates가 속도 상한 상태와 같은 기준으로 정리한다
         retainedObjects_.remove(iterator.key());
-        worldPositionHistories_.remove(iterator.key());
         iterator = lastSeenArrivalTimesMsec_.erase(iterator);
     }
 
@@ -308,7 +318,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
                                                                           : DigitalTwinObjectType::Vehicle;
         const QPointF targetPosition = normalizedWorldPosition(sourceObject.worldPosition);
         object.position = transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec);
-        object.channelIndex = channelIndexForPosition(object.position);
+        object.channelIndex = channelIndexForObject(sourceObject.globalId, object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);
@@ -529,6 +539,43 @@ void RiskObjectTracker::logAutomaticWorldBounds(const QString& reason) const {
 }
 
 bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
+
+/**
+ * @brief                     경계에서 채널이 왕복하지 않도록 이력을 반영해 채널을 정합니다.
+ * @param globalId            융합 객체 ID
+ * @param normalizedPosition  현재 표시 중인 0.0~1.0 좌표
+ * @return                    0부터 시작하는 채널 인덱스
+ *
+ * @details 채널은 담당 구역의 4사분면이므로 경계는 정규화 0.5의 두 축이다. 경계를 막 넘은
+ *          상태에서는 표시 지연과 좌표 흔들림만으로 판정이 뒤집히므로, 이전 채널에서 벗어나려면
+ *          경계를 channelBoundaryHysteresisMeters만큼 확실히 지나야 한다.
+ */
+int RiskObjectTracker::channelIndexForObject(qint64 globalId, const QPointF& normalizedPosition) {
+    const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
+    const double horizontalMargin =
+        bounds.width() > 0.0 ? channelBoundaryHysteresisMeters / bounds.width() : 0.0;
+    const double verticalMargin =
+        bounds.height() > 0.0 ? channelBoundaryHysteresisMeters / bounds.height() : 0.0;
+
+    const auto previousIterator = channelIndexes_.constFind(globalId);
+    const int measuredIndex = channelIndexForPosition(normalizedPosition);
+    if (previousIterator == channelIndexes_.cend()) {
+        channelIndexes_.insert(globalId, measuredIndex);
+        return measuredIndex;
+    }
+
+    const int previousIndex = *previousIterator;
+    const int previousColumn = previousIndex % 2;
+    const int previousRow = previousIndex / 2;
+    const int column = previousColumn == 0 ? (normalizedPosition.x() >= 0.5 + horizontalMargin ? 1 : 0)
+                                           : (normalizedPosition.x() < 0.5 - horizontalMargin ? 0 : 1);
+    const int row = previousRow == 0 ? (normalizedPosition.y() >= 0.5 + verticalMargin ? 1 : 0)
+                                     : (normalizedPosition.y() < 0.5 - verticalMargin ? 0 : 1);
+
+    const int channelIndex = row * 2 + column;
+    channelIndexes_.insert(globalId, channelIndex);
+    return channelIndex;
+}
 
 /** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로 만듭니다. */
 QString RiskObjectTracker::worldBoundsDescription() const {
@@ -869,6 +916,8 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
         }
 
         filteredPositions_.remove(iterator.key());
+        worldPositionHistories_.remove(iterator.key());
+        channelIndexes_.remove(iterator.key());
         iterator = filteredPositionTimesMsec_.erase(iterator);
     }
 }

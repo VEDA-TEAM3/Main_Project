@@ -196,6 +196,42 @@ void checkBackwardTimestampStillUpdates() {
     const double movedX = positionOf(tracker.buildSnapshot(timeMsec), 1).x();
     check(movedX > 0.11, "frames with a backward source timestamp must still be rendered");
 }
+/// 채널 경계 위에서 좌표가 흔들려도 채널이 왕복하면 안 된다 (위험 테두리/신고 채널 깜빡임 방지).
+void checkChannelDoesNotFlapAtBoundary() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-5.0, -5.0, 10.0, 10.0);  // 실제 담당 구역과 같은 10x10m
+
+    RiskObjectTracker tracker(config);
+    qint64 timeMsec = 1000;
+    tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(-0.5, -2.0))}), timeMsec);
+    const DigitalTwinSnapshot first = tracker.buildSnapshot(timeMsec);
+    const int startChannel = first.objects.isEmpty() ? -1 : first.objects.constFirst().channelIndex;
+    check(startChannel >= 0, "the object must be assigned a channel");
+
+    // 경계(x=0)를 사이에 두고 +-0.1m로 흔들리는 좌표
+    int changes = 0;
+    for (int step = 0; step < 20; ++step) {
+        timeMsec += 100;
+        const double x = (step % 2 == 0) ? 0.1 : -0.1;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(x, -2.0))}), timeMsec);
+        const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(timeMsec);
+        if (!snapshot.objects.isEmpty() && snapshot.objects.constFirst().channelIndex != startChannel) {
+            ++changes;
+        }
+    }
+    check(changes == 0, "jitter around the channel boundary must not change the channel");
+
+    // 경계를 확실히 넘어가면 채널은 바뀌어야 한다
+    for (int step = 0; step < 10; ++step) {
+        timeMsec += 100;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(2.0, -2.0))}), timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
+    const DigitalTwinSnapshot moved = tracker.buildSnapshot(timeMsec);
+    check(!moved.objects.isEmpty() && moved.objects.constFirst().channelIndex != startChannel,
+          "crossing the boundary for real must change the channel");
+}
 }  // namespace
 
 int main() {
@@ -206,6 +242,7 @@ int main() {
     checkIsolatedOutlierFrameIsRejected();
     checkStreamRestartKeepsWorldBounds();
     checkBackwardTimestampStillUpdates();
+    checkChannelDoesNotFlapAtBoundary();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

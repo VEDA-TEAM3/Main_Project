@@ -316,6 +316,7 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
         qInfo() << "[DigitalTwinMapWidget] Live risk stream activated";
         stopDemo();
         liveMode_ = true;
+        updateObjectAreaRect();
         riskObjectTracker_->reset();
         lastLiveSnapshotPublishMsec_ = 0;
         liveFrameExpiryTimer_.start();
@@ -730,9 +731,10 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
 void DigitalTwinMapWidget::updateObjectAreaRect() {
     objectAreaRect_ = mapRect_;
 
+    // 내장 데모 좌표는 맵 전체 폭을 쓰도록 만들어졌으므로 실데이터일 때만 보정한다
     const QRectF worldBounds = liveConfig_.world.bounds;
-    if (!liveConfig_.world.fixedBoundsEnabled || worldBounds.width() <= 0.0 || worldBounds.height() <= 0.0 ||
-        mapRect_.width() <= 0.0 || mapRect_.height() <= 0.0) {
+    if (!liveMode_ || !liveConfig_.world.fixedBoundsEnabled || worldBounds.width() <= 0.0 ||
+        worldBounds.height() <= 0.0 || mapRect_.width() <= 0.0 || mapRect_.height() <= 0.0) {
         return;
     }
 

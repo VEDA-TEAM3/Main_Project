@@ -56,6 +56,7 @@ private:
     bool worldBoundsReady() const;
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
+    int channelIndexForObject(qint64 globalId, const QPointF& normalizedPosition);
     QPointF rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition, qint64 arrivalTimeMsec);
     void logRateLimitedJump(qint64 globalId, double distance, double maximumDistance, qint64 localTimeMsec);
     void logFrameDiagnostics(const RiskFrameData& frame, const QVector<QPointF>& rawPositions,
@@ -70,6 +71,7 @@ private:
     QVector<RiskFrameData> history_;
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, QVector<QPointF>> worldPositionHistories_;
+    QHash<qint64, int> channelIndexes_;
     QHash<qint64, qint64> lastSeenArrivalTimesMsec_;
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;
