@@ -81,6 +81,12 @@ without that widening the surplus area would be clamped onto the map edges. The 
 scale settles once the site has been covered. Watch `[TOPVIEW MAP] Automatic world bounds estimated|expanded` in the
 log to see the extent Qt is actually using.
 
+Qt also caps how far an object may move between renders (0.9 of the map per second). Multi-camera fusion can
+represent one object by a different observation from frame to frame, which arrives as a single-frame teleport across
+the map and back; the cap absorbs those while genuine movement, which keeps arriving in the same direction, catches
+up within a few frames. Repeated `[TOPVIEW] Rate-limited jump` lines mean the upstream fusion or camera calibration
+is unstable — the client is only hiding it.
+
 The shared world-coordinate contract has positive Y pointing north/up. Qt therefore flips the
 Y axis when mapping it to screen coordinates. Set `VEDA_MAP_INVERT_Y=0` only when an upstream source already provides
 screen-style coordinates whose positive Y points down. Calibrated `VEDA_MAP_MIN_*` and `VEDA_MAP_MAX_*` values are

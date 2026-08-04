@@ -34,6 +34,8 @@ private:
     void logAutomaticWorldBounds(const QString& reason) const;
     bool worldBoundsReady() const;
     QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
+    QPointF rateLimitedPosition(const QString& objectId, const QPointF& measuredPosition, qint64 localTimeMsec);
+    void logRateLimitedJump(const QString& objectId, double distance, double maximumDistance, qint64 localTimeMsec);
     QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 sourceTimestamp,
                                  qint64 localTimeMsec);
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
@@ -45,6 +47,8 @@ private:
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;
     QHash<QString, QPointF> previousPositions_;
+    QHash<QString, QPointF> filteredPositions_;
+    QHash<QString, qint64> filteredPositionTimesMsec_;
     QHash<QString, PositionTransitionState> positionTransitions_;
     QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
     QHash<QString, qint64> nextPairPulseTimesMsec_;
@@ -53,9 +57,12 @@ private:
     QRectF configuredWorldBounds_;
     QRectF automaticWorldBounds_;
     QVector<QPointF> automaticWorldSamples_;
+    QRectF pendingExpansionBounds_;
     qint64 automaticBoundsStartSourceTimestamp_ = 0;
+    int pendingExpansionFrameCount_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
+    qint64 lastRateLimitLogMsec_ = 0;
     bool hasConfiguredWorldBounds_ = false;
     bool hasAutomaticWorldBounds_ = false;
     bool invertWorldY_ = true;

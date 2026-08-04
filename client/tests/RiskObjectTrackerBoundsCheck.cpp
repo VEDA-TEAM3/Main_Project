@@ -72,20 +72,69 @@ void checkOutOfRangePositionExpandsBounds() {
     tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(0.0, 0.0)), objectAt(2, QPointF(2.0, 2.0))}), 1000);
     tracker.buildSnapshot(1000);
 
-    tracker.submitFrame(frameAt(1100, {objectAt(1, QPointF(1.0, 1.0)), objectAt(3, QPointF(60.0, 60.0))}), 1100);
-    const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(1100);
+    // 경계 확장은 연속 관측을 요구하고, 확장 후 배율 변화는 속도 상한을 거쳐 반영된다
+    qint64 timeMsec = 1000;
+    for (int step = 0; step < 10; ++step) {
+        timeMsec += 100;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(1.0, 1.0)), objectAt(3, QPointF(60.0, 60.0))}),
+                            timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
 
+    const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(timeMsec);
     const QPointF farPosition = positionOf(snapshot, 3);
     const QPointF nearPosition = positionOf(snapshot, 1);
     check(farPosition.x() < 0.999 && farPosition.x() > 0.001, "out-of-range X must not clamp to the map edge");
     check(farPosition.y() < 0.999 && farPosition.y() > 0.001, "out-of-range Y must not clamp to the map edge");
     check(qAbs(farPosition.x() - nearPosition.x()) > 0.5, "expanded bounds must keep far and near objects apart");
 }
+/// 한 프레임짜리 순간 이동은 속도 상한까지만 반영되고, 되돌아오면 원위치여야 한다.
+void checkSingleFrameTeleportIsRateLimited() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;  // 경계 확장을 배제하고 필터만 본다
+    config.world.bounds = QRectF(0.0, 0.0, 100.0, 100.0);
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(10.0, 10.0))}), 1000);
+    const double settledX = positionOf(tracker.buildSnapshot(1000), 1).x();
+    check(qAbs(settledX - 0.1) < 0.01, "first sample must be shown as measured");
+
+    tracker.submitFrame(frameAt(1100, {objectAt(1, QPointF(90.0, 10.0))}), 1100);
+    const double jumpedX = positionOf(tracker.buildSnapshot(1100), 1).x();
+    check(jumpedX < 0.3, "one-frame teleport must not cross the map");
+
+    tracker.submitFrame(frameAt(1200, {objectAt(1, QPointF(10.0, 10.0))}), 1200);
+    const double recoveredX = positionOf(tracker.buildSnapshot(1200), 1).x();
+    check(qAbs(recoveredX - 0.1) < 0.02, "returning to the real position must not lag behind");
+}
+
+/// 실제 이동은 이상치와 달리 연속으로 들어오므로 몇 프레임 안에 따라잡아야 한다.
+void checkSustainedMovementCatchesUp() {
+    DigitalTwinRuntimeConfig config = checkConfig();
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(0.0, 0.0, 100.0, 100.0);
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frameAt(1000, {objectAt(1, QPointF(10.0, 10.0))}), 1000);
+    tracker.buildSnapshot(1000);
+
+    qint64 timeMsec = 1000;
+    for (int step = 0; step < 20; ++step) {
+        timeMsec += 100;
+        tracker.submitFrame(frameAt(timeMsec, {objectAt(1, QPointF(90.0, 10.0))}), timeMsec);
+        tracker.buildSnapshot(timeMsec);
+    }
+
+    const double followedX = positionOf(tracker.buildSnapshot(timeMsec), 1).x();
+    check(qAbs(followedX - 0.9) < 0.01, "sustained movement must reach the measured position");
+}
 }  // namespace
 
 int main() {
     checkNarrowObservationStaysCentered();
     checkOutOfRangePositionExpandsBounds();
+    checkSingleFrameTeleportIsRateLimited();
+    checkSustainedMovementCatchesUp();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

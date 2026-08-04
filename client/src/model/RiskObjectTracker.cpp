@@ -5,6 +5,7 @@
 #include <QProcessEnvironment>
 #include <QSet>
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -12,6 +13,12 @@ constexpr qint64 sourceRestartGapMsec = 5000;
 constexpr qint64 sourceTimestampRollbackResetMsec = 1000;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
+constexpr qint64 positionFilterResetGapMsec = 500;
+constexpr qint64 minimumPositionFilterStepMsec = 16;
+constexpr qint64 maximumPositionFilterStepMsec = 100;
+constexpr double maximumNormalizedSpeedPerSecond = 0.9;
+constexpr int automaticBoundsExpansionFrameCount = 3;
+constexpr qint64 rateLimitLogIntervalMsec = 1000;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
@@ -88,14 +95,19 @@ void RiskObjectTracker::reset() {
     opacityUpdateTimesMsec_.clear();
     previousPositions_.clear();
     positionTransitions_.clear();
+    filteredPositions_.clear();
+    filteredPositionTimesMsec_.clear();
     previousPairRiskLevels_.clear();
     nextPairPulseTimesMsec_.clear();
     pendingRiskEvents_.clear();
     automaticWorldBounds_ = {};
     automaticWorldSamples_.clear();
     automaticBoundsStartSourceTimestamp_ = 0;
+    pendingExpansionBounds_ = {};
+    pendingExpansionFrameCount_ = 0;
     lastArrivalTimeMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
+    lastRateLimitLogMsec_ = 0;
     hasAutomaticWorldBounds_ = false;
 }
 
@@ -209,7 +221,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
                                                                           : DigitalTwinObjectType::Vehicle;
-        const QPointF targetPosition = normalizedWorldPosition(sourceObject.worldPosition);
+        const QPointF measuredPosition = normalizedWorldPosition(sourceObject.worldPosition);
+        const QPointF targetPosition = rateLimitedPosition(object.objectId, measuredPosition, localTimeMsec);
         object.position = transitionedPosition(object.objectId, targetPosition, objectSourceTimestamp, localTimeMsec);
         object.channelIndex = channelIndexForPosition(object.position);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
@@ -395,16 +408,27 @@ void RiskObjectTracker::expandAutomaticWorldBounds(const RiskFrameData& frame) {
         bottom = qMax(bottom, object.worldPosition.y());
     }
 
-    const QRectF expandedBounds(left, top, right - left, bottom - top);
-    if (expandedBounds == automaticWorldBounds_) {
+    const QRectF candidateBounds(left, top, right - left, bottom - top);
+    if (candidateBounds == automaticWorldBounds_) {
+        pendingExpansionFrameCount_ = 0;
+        return;
+    }
+
+    // 융합 오류로 한 프레임만 튄 좌표에 지도 배율을 내주면 화면의 모든 객체가 한꺼번에 밀린다.
+    // 연속 프레임에서 계속 경계 밖일 때만 실제 이동으로 보고 넓힌다
+    pendingExpansionBounds_ =
+        pendingExpansionFrameCount_ > 0 ? pendingExpansionBounds_.united(candidateBounds) : candidateBounds;
+    if (++pendingExpansionFrameCount_ < automaticBoundsExpansionFrameCount) {
         return;
     }
 
     // 새 좌표가 경계선 위에 걸치면 다음 프레임에서 다시 확장이 돌므로 여백까지 함께 넓힌다
-    const double horizontalMargin = expandedBounds.width() * config_.world.automaticBoundsPaddingRatio;
-    const double verticalMargin = expandedBounds.height() * config_.world.automaticBoundsPaddingRatio;
+    const double horizontalMargin = pendingExpansionBounds_.width() * config_.world.automaticBoundsPaddingRatio;
+    const double verticalMargin = pendingExpansionBounds_.height() * config_.world.automaticBoundsPaddingRatio;
     automaticWorldBounds_ =
-        expandedBounds.adjusted(-horizontalMargin, -verticalMargin, horizontalMargin, verticalMargin);
+        pendingExpansionBounds_.adjusted(-horizontalMargin, -verticalMargin, horizontalMargin, verticalMargin);
+    pendingExpansionBounds_ = {};
+    pendingExpansionFrameCount_ = 0;
     logAutomaticWorldBounds(QStringLiteral("expanded"));
 }
 
@@ -434,6 +458,69 @@ QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition)
     const double sourceY = qBound(0.0, (worldPosition.y() - bounds.top()) / bounds.height(), 1.0);
     const double normalizedY = invertWorldY_ ? 1.0 - sourceY : sourceY;
     return QPointF(normalizedX, normalizedY);
+}
+
+/**
+ * @brief                    한 프레임 만에 도달할 수 없는 이동량을 잘라 목표 좌표를 만듭니다.
+ * @param objectId           추적 객체 식별자
+ * @param measuredPosition   RiskFrame에서 계산한 정규화 좌표
+ * @param localTimeMsec      현재 로컬 monotonic 시각
+ * @return                   속도 상한을 적용한 목표 정규화 좌표
+ *
+ * @details 다채널 융합은 같은 객체를 다른 카메라 관측으로 대표시키면서 한 프레임짜리 순간
+ *          이동을 만든다. 그대로 두면 객체가 지도 반대편까지 갔다가 다음 프레임에 돌아온다.
+ *          이동량을 실제 이동 속도 한계로 자르면 그런 이상치는 화면에서 거의 사라지고,
+ *          진짜 이동은 계속 같은 방향으로 들어오므로 몇 프레임 안에 따라잡는다.
+ */
+QPointF RiskObjectTracker::rateLimitedPosition(const QString& objectId, const QPointF& measuredPosition,
+                                               qint64 localTimeMsec) {
+    const auto positionIterator = filteredPositions_.constFind(objectId);
+    const qint64 previousTimeMsec = filteredPositionTimesMsec_.value(objectId, 0);
+    if (positionIterator == filteredPositions_.cend() || previousTimeMsec <= 0 || localTimeMsec <= previousTimeMsec ||
+        localTimeMsec - previousTimeMsec > positionFilterResetGapMsec) {
+        filteredPositions_.insert(objectId, measuredPosition);
+        filteredPositionTimesMsec_.insert(objectId, localTimeMsec);
+        return measuredPosition;
+    }
+
+    const QPointF previousPosition = *positionIterator;
+    QPointF displacement = measuredPosition - previousPosition;
+    const double distance = std::hypot(displacement.x(), displacement.y());
+    const qint64 elapsedMsec =
+        qBound(minimumPositionFilterStepMsec, localTimeMsec - previousTimeMsec, maximumPositionFilterStepMsec);
+    const double maximumDistance = maximumNormalizedSpeedPerSecond * static_cast<double>(elapsedMsec) / 1000.0;
+    if (distance > maximumDistance && distance > 0.0) {
+        displacement *= maximumDistance / distance;
+        logRateLimitedJump(objectId, distance, maximumDistance, localTimeMsec);
+    }
+
+    const QPointF limitedPosition(qBound(0.0, previousPosition.x() + displacement.x(), 1.0),
+                                  qBound(0.0, previousPosition.y() + displacement.y(), 1.0));
+    filteredPositions_.insert(objectId, limitedPosition);
+    filteredPositionTimesMsec_.insert(objectId, localTimeMsec);
+    return limitedPosition;
+}
+
+/**
+ * @brief                   잘라낸 순간 이동을 진단 로그로 남깁니다.
+ * @param objectId          추적 객체 식별자
+ * @param distance          측정된 이동량
+ * @param maximumDistance   허용 이동량
+ * @param localTimeMsec     현재 로컬 monotonic 시각
+ *
+ * @details 이 로그가 계속 찍히면 화면이 아니라 상류 융합/캘리브레이션이 흔들리는 것이다.
+ */
+void RiskObjectTracker::logRateLimitedJump(const QString& objectId, double distance, double maximumDistance,
+                                           qint64 localTimeMsec) {
+    if (localTimeMsec - lastRateLimitLogMsec_ < rateLimitLogIntervalMsec) {
+        return;
+    }
+    lastRateLimitLogMsec_ = localTimeMsec;
+
+    qInfo().noquote() << QStringLiteral("[TOPVIEW] Rate-limited jump object=%1 measured=%2 allowed=%3")
+                             .arg(objectId)
+                             .arg(distance, 0, 'f', 3)
+                             .arg(maximumDistance, 0, 'f', 3);
 }
 
 /**
@@ -527,6 +614,8 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
             renderedOpacities_.remove(objectId);
             opacityUpdateTimesMsec_.remove(objectId);
         }
+        filteredPositions_.remove(iterator.key());
+        filteredPositionTimesMsec_.remove(iterator.key());
         iterator = positionTransitions_.erase(iterator);
     }
 }
