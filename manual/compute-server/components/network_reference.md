@@ -12,6 +12,7 @@ CCTV와 **직접 TCP 소켓을 맺고 RTSP 프로토콜로 대화하는 최하�
 
 | Date | Version | Writer | Summary |
 | :--- | :--- | :--- | :--- |
+| 2026-08-06 | 1.1.0 | Mangjun | TLS 서버 검증, 완전 송신, 소켓 취소 동기화 반영 |
 | 2026-07-27 | 1.0.0 | Mangjun | INetwork 인터페이스 및 RtspClientV2 구현체 분석 (소켓 I/O, RTSP 프로토콜 통신 및 연결 수명주기 명세) |
 
 ---
@@ -49,8 +50,10 @@ public:
 소켓 생성부터 블로킹 모드 복원까지 한 함수에서 처리한다. 핵심은 **명시적 타임아웃**이다.
 
 ```cpp
-sock_ = socket(AF_INET, SOCK_STREAM, 0);
-cancelFd_.store(sock_, std::memory_order_release);   // 취소 스레드에 fd 공개
+const int newSocket = socket(AF_INET, SOCK_STREAM, 0);
+std::lock_guard<std::mutex> lock(socketMutex_);
+if (cancelled_) { close(newSocket); return false; }
+sock_ = newSocket;
 
 setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, ...);        // recv 타임아웃 (기본 5초)
 setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, ...);  // Nagle 지연 제거
@@ -89,20 +92,21 @@ fcntl(sock_, F_SETFL, origFlags);   // 이후 경로는 블로킹 전제 -> 원�
 
 ```cpp
 void RtspClientV2::closeSocket() noexcept {
-    cancelFd_.store(-1, std::memory_order_release);  // close '전에' 무효화
+    std::lock_guard<std::mutex> lock(socketMutex_);
     if (sock_ != -1) { close(sock_); sock_ = -1; }
 }
 ```
 
-소멸자에만 맡기면 **같은 인스턴스로 `connect()`를 재시도하는 순간 이전 fd가 새어나간다.** 멱등이며, `cancelFd_`를 먼저 -1로 만들어야 `cancel()`이 이미 닫힌(또는 번호가 재사용된) fd에 `shutdown`을 걸지 않는다.
+소멸자에만 맡기면 **같은 인스턴스로 `connect()`를 재시도하는 순간 이전 fd가 새어나간다.** `socketMutex_`가
+fd 공개, `shutdown`, `close`를 직렬화하므로 이미 닫혀 재사용된 fd를 취소하는 경합이 없다.
 
 ### 2.2 취소 경로 — `shutdown()`이 반드시 필요한 이유
 
 ```cpp
 void RtspClientV2::cancel() noexcept {
     cancelled_.store(true, std::memory_order_release);
-    const int fd = cancelFd_.load(std::memory_order_acquire);
-    if (fd != -1) ::shutdown(fd, SHUT_RDWR);   // 블로킹 recv()를 즉시 깨움
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (sock_ != -1) ::shutdown(sock_, SHUT_RDWR);   // 블로킹 I/O를 즉시 깨움
 }
 ```
 
@@ -165,7 +169,9 @@ cnonce_ = cnonceBuf;
 
 `nonceCount_`(nc)는 요청마다 증가하며 `%08x`로 포맷된다.
 
-> **⚠️ 평문 전송 주의**: RTSP 구간에는 TLS가 적용되지 않는다. (TLS는 MQTT 계층 전용) Digest가 비밀번호 자체는 해시로 보호하지만 nonce/response는 도청 가능하므로, **RTSP 구간은 신뢰된 LAN/VLAN 격리**를 전제로 한다.
+> **TLS 기본 활성화**: `rtspUseTls=true`가 기본이며 TLS 1.2 이상, CA 체인, 인증서 DNS 이름 또는 IP SAN을
+> 모두 검증한다. DNS 인증서는 `rtspServerName`으로 SNI와 hostname 검증을 설정한다. 평문은
+> `rtspUseTls=false`로 명시한 격리망에서만 허용한다.
 
 ### 2.5 Payload 버퍼링 (성능 핵심)
 
@@ -269,14 +275,16 @@ void RtspClientV2::keepAliveLoop() {
 
 ### 2.8 SIGPIPE 방어 — 모든 송신 경로
 
-카메라가 이미 연결을 끊은 상태에서 `send()`를 부르면 기본 동작상 **SIGPIPE로 프로세스가 죽는다.** 이 계층의 **네 개 송신 경로 전부**가 `MSG_NOSIGNAL`을 쓰고 반환값을 검사한다.
+카메라가 이미 연결을 끊은 상태에서 `send()`를 부르면 기본 동작상 **SIGPIPE로 프로세스가 죽는다.** 네 개
+송신 경로는 공통 `sendAll()`을 사용한다. 평문은 `MSG_NOSIGNAL`, TLS는 `SSL_write`를 사용하며, 둘 다
+부분 송신과 재시도 가능한 중단을 처리한다.
 
 | 송신 경로 | 보호 |
 |-----------|------|
-| `setup()` 1차 SETUP | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `setup()` 2차(인증) SETUP | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `play()` PLAY | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `keepAliveLoop()` GET_PARAMETER | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
+| `setup()` 1차 SETUP | `sendAll()` |
+| `setup()` 2차(인증) SETUP | `sendAll()` |
+| `play()` PLAY | `sendAll()` |
+| `keepAliveLoop()` GET_PARAMETER | `sendAll()` |
 
 `main.cpp`의 전역 `std::signal(SIGPIPE, SIG_IGN)`가 이중 안전망으로 깔려 있다.
 

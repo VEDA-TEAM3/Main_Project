@@ -8,6 +8,7 @@
 
 | Date | Version | Writer | Summary |
 | :--- | :--- | :--- | :--- |
+| 2026-08-06 | 1.1.0 | Mangjun | RTSP TLS 검증, 부분 송신 처리, fd 수명 동기화 반영 |
 | 2026-07-27 | 1.0.0 | Mangjun | 네트워크/RTSP 클라이언트 계층 I/O 병목 및 보안 취약점 감사, 성능 최적화 명세 |
 
 ---
@@ -24,7 +25,9 @@
 
 `INetwork`(push)는 *단일 연결 시도*(connect → setup → play → run)만 책임지고, **재연결/백오프는 상위 `RtspOnvifSourceV2`(pull 어댑터)** 가 맡는다. 이 분리 덕분에 `run()`은 "끊기면 그냥 리턴"이라는 단순 계약을 지키고, 재시도 폭풍 방지 같은 정책은 한 곳(Source)에 모인다.
 
-> **전송 암호화 주의**: 이 계층의 RTSP 트래픽은 **평문**이다. (TLS는 MQTT 계층에만 적용) Digest 인증(RFC 2617)이 비밀번호 자체는 해시로 보호하지만, nonce/response는 도청 가능하다. 따라서 **RTSP 구간은 신뢰된 로컬 네트워크(LAN/VLAN 격리)** 를 전제로 하며, 이는 배포상의 요구사항이다. `config.json`의 자격증명은 평문으로 저장되므로 파일 권한 관리가 필요하다.
+> **전송 암호화**: RTSP는 기본적으로 TLS 1.2 이상을 사용하고 CA 체인과 DNS 이름 또는 IP SAN을 검증한다.
+> `rtspUseTls=false`는 명시적 호환 옵션이며 신뢰된 LAN/VLAN에서만 사용한다. `config.json`의 자격증명은
+> 여전히 평문으로 저장되므로 파일 권한과 시크릿 배포 정책이 필요하다.
 
 ---
 
@@ -93,21 +96,24 @@
 
 ### 4.1 SIGPIPE 방어 — 계층 내 모든 `send()` 경로 확인 완료
 
-카메라가 이미 연결을 끊은 상태에서 `send()`를 호출하면 기본 동작상 **SIGPIPE로 프로세스가 죽는다.** 이 계층의 **모든 송신 경로**가 `MSG_NOSIGNAL`로 보호되며 반환값도 검사한다.
+카메라가 이미 연결을 끊은 상태에서 `send()`를 호출하면 기본 동작상 **SIGPIPE로 프로세스가 죽는다.** 모든
+송신 경로는 `sendAll()`을 사용해 부분 송신과 `EINTR`를 처리한다. 평문 경로는 `MSG_NOSIGNAL`, TLS 경로는
+`SSL_write`를 사용한다.
 
 | 송신 경로 | 보호 |
 |-----------|------|
-| `setup()` 1차 SETUP 요청 | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `setup()` 2차(인증) SETUP 요청 | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `play()` PLAY 요청 | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
-| `keepAliveLoop()` GET_PARAMETER | `send(..., MSG_NOSIGNAL)` + 반환 검사 |
+| `setup()` 1차 SETUP 요청 | `sendAll()` |
+| `setup()` 2차(인증) SETUP 요청 | `sendAll()` |
+| `play()` PLAY 요청 | `sendAll()` |
+| `keepAliveLoop()` GET_PARAMETER | `sendAll()` |
 
 > 감사 결과 이 계층에 `MSG_NOSIGNAL` 없이 쓰기를 수행하는 **다른 send/write 경로는 없다.** 또한 `main.cpp`가 전역 `signal(SIGPIPE, SIG_IGN)`를 이중 안전망으로 설치해, 향후 누락된 경로가 생겨도 프로세스가 죽지 않도록 방어 심층화되어 있다.
 
 ### 4.2 소켓 취소의 스레드 안전성 (cross-thread `close` 경합 차단)
 
 - 취소는 `close()`가 아니라 **`shutdown()`**을 쓴다. fd의 소유·close는 소유자 스레드(소멸자/워커)의 몫이며, 다른 스레드가 `close`하면 **fd 번호 재사용 경합**이 생긴다.
-- `cancelFd_`(atomic)로 fd를 공유하되, `closeSocket()`이 **close 직전에 `cancelFd_ = -1`** 로 무효화해, 이미 닫힌(또는 번호가 재사용된) fd에 `shutdown`이 걸리지 않도록 한다.
+- `socketMutex_`가 fd 공개, `shutdown`, `close`를 직렬화한다. 취소와 연결 생성이 겹치면 `connect()`가
+  `cancelled_`를 확인하고 새 fd를 공개하지 않으므로 닫힌 fd 번호 재사용 경합이 없다.
 - Source 측 UAF 방어: `stop()`은 `clientMutex_` 아래서 `activeClient_->cancel()`을 부르고, 워커는 클라이언트 파괴 **전에 반드시 `activeClient_ = nullptr`** 로 지운다.
 
 ### 4.3 목적지 주소 검증 (`inet_pton`)
@@ -132,7 +138,7 @@
 
 | # | 항목 | 성격 | 권고 |
 |---|------|------|------|
-| R1 | **RTSP 평문 전송** | 설계 전제 | RTSP 구간을 격리된 LAN/VLAN으로 한정 |
+| R1 | **명시적 RTSP 평문 모드** | 호환 옵션 | `rtspUseTls=false`는 격리된 LAN/VLAN으로 한정 |
 | R2 | **Slowloris식 느린 헤더 드립** | I/O (저위험) | `recvHeaders`는 64 KiB 크기 상한으로 결국 종료되나 **총 소요시간 상한은 없음** <br> 헤더 수신 전체에 deadline을 두면 더 견고 |
 | R3 | **응답 헤더 값의 후행 garbage 흡수** | 견고성 (저위험) | 닫는 따옴표 누락 시 `realm_`/`nonce_`가 응답 말미까지 흡수될 수 있음. (메모리 안전엔 무해) <br> 구분자 검증 추가 여지 |
 | R4 | **MD5 (OpenSSL) deprecated API** | 유지보수 | Digest 인증이 RFC상 MD5를 요구하므로 알고리즘 자체는 정당 <br> deprecated 컴파일 경고 해소를 위해 `EVP` 인터페이스로 이관 여지 |
@@ -144,7 +150,7 @@
 
 | 영역 | 판정 | 핵심 근거 |
 |------|------|-----------|
-| **보안 취약점** | ✅ All Clear (경미한 강화 여지 R3/R4) | 전 send 경로 `MSG_NOSIGNAL`, cross-thread `shutdown`(not close) + `cancelFd_` 무효화, `inet_pton` 검증, 무작위 cnonce, PLAY/프레이밍 검증 |
+| **보안 취약점** | ✅ All Clear (경미한 강화 여지 R3/R4) | TLS 서버 검증, `sendAll`, mutex로 직렬화한 cross-thread `shutdown`/`close`, `inet_pton` 검증, 무작위 cnonce, PLAY/프레이밍 검증 |
 | **I/O 병목** | ✅ All Clear | 모든 블로킹 호출에 타임아웃(connect=select, recv=SO_RCVTIMEO), 폴링/스핀 없음, 취소 즉시성 확보 |
 | **OOM 위험** | ✅ All Clear | 모든 버퍼 고정/상한(64 KiB·65535·1 MiB·링), 실패 경로 즉시 `closeSocket`, RAII 세션, 누수 없음 |
 | **스택 오버플로** | ✅ All Clear (구조적 면역) | 재귀 없음, 고정 지역 버퍼만 사용 |

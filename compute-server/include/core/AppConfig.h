@@ -30,6 +30,9 @@ struct AppConfig {
     std::string rtspPass;
     std::string rtspSetupUri;
     std::string rtspPlayUri;
+    bool rtspUseTls = true;      // TLS + 서버 인증서 검증 (평문은 명시적으로 false)
+    std::string rtspCaFile;      // 비어 있으면 시스템 CA 저장소 사용
+    std::string rtspServerName;  // 인증서 DNS 이름/SNI; 비어 있으면 rtspIp 검증
 
     // ==== RTSP Policy Config ====
     int rtspConnectTimeoutSec = 5;                // connect() 최대 대기 시간 (초)
@@ -127,6 +130,7 @@ struct AppConfig {
      * 1000 × 256 × 약 40B ≈ 10MB/Sink -- 라즈베리파이에서 두 Sink 를 합쳐도 감당 가능한 선.
      * 상한이 없으면 '프레임을 덜 버리려고' 큐를 키우는 자연스러운 대응이 그대로 OOM 이 된다
      */
+    static constexpr int kMaxRtspPolicySeconds = 3600;
     static constexpr int kMaxMqttQueueSize = 1000;
 
     /**
@@ -229,6 +233,9 @@ struct AppConfig {
         cfg.rtspPass = veda::detail::get_or<std::string>(j, "rtspPass", cfg.rtspPass);
         cfg.rtspSetupUri = veda::detail::get_or<std::string>(j, "rtspSetupUri", cfg.rtspSetupUri);
         cfg.rtspPlayUri = veda::detail::get_or<std::string>(j, "rtspPlayUri", cfg.rtspPlayUri);
+        cfg.rtspUseTls = veda::detail::get_or<bool>(j, "rtspUseTls", cfg.rtspUseTls);
+        cfg.rtspCaFile = veda::detail::get_or<std::string>(j, "rtspCaFile", cfg.rtspCaFile);
+        cfg.rtspServerName = veda::detail::get_or<std::string>(j, "rtspServerName", cfg.rtspServerName);
 
         // RTSP Policy Config
         cfg.rtspConnectTimeoutSec = veda::detail::get_or<int>(j, "rtspConnectTimeoutSec", cfg.rtspConnectTimeoutSec);
@@ -250,8 +257,8 @@ struct AppConfig {
         clampPositive(cfg.rtspReadBufBytes, 65536, "rtspReadBufBytes");
         clampPositive(cfg.rtspMaxMetadataFrameBytes, 1024 * 1024, "rtspMaxMetadataFrameBytes");
         clampPositive(cfg.rtspKeepAliveIntervalSec, 30, "rtspKeepAliveIntervalSec");
-        clampPositive(cfg.rtspReconnectBackoffInitialSec, 1, "rtspReconnectBackoffInitialSec");
-        clampPositive(cfg.rtspReconnectBackoffMaxSec, 30, "rtspReconnectBackoffMaxSec");
+        clampRange(cfg.rtspReconnectBackoffInitialSec, 1, kMaxRtspPolicySeconds, "rtspReconnectBackoffInitialSec");
+        clampRange(cfg.rtspReconnectBackoffMaxSec, 1, kMaxRtspPolicySeconds, "rtspReconnectBackoffMaxSec");
 
         if (cfg.rtspReconnectBackoffMaxSec < cfg.rtspReconnectBackoffInitialSec) {
             std::cerr << "[Config] 경고: rtspReconnectBackoffMaxSec 가 시작값보다 작습니다 — 시작값으로 맞춥니다.\n";

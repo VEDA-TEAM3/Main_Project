@@ -205,7 +205,9 @@ void RtspOnvifSourceV2::workerLoop() {
         }
 
         ... 로그 + cv_.wait_for(backoffSec) ...
-        backoffSec = std::min(backoffSec * 2, backoffMaxSec_);    // 지수 증가 (포화)
+        backoffSec = backoffSec > backoffMaxSec_ - backoffSec
+                         ? backoffMaxSec_
+                         : backoffSec * 2;    // overflow 없이 지수 증가 (포화)
     }
 }
 ```
@@ -229,7 +231,8 @@ void RtspOnvifSourceV2::stop() noexcept {
         }
     }
 
-    cv_.notify_all();   // 블로킹 중인 next() 와 백오프 대기를 깨움
+    std::lock_guard<std::mutex> lock(mtx_);
+    cv_.notify_all();   // lost wakeup 없이 next() 와 백오프 대기를 깨움
 }
 ```
 

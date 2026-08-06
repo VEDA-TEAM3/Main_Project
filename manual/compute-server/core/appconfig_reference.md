@@ -45,6 +45,11 @@
 | `rtspPass` | string | `""` | Digest 인증 비밀번호 |
 | `rtspSetupUri` | string | `""` | SETUP 대상 URI |
 | `rtspPlayUri` | string | `""` | PLAY 대상 URI |
+| `rtspUseTls` | bool | `true` | TLS 1.2 이상과 서버 인증서 검증 사용 |
+| `rtspCaFile` | string | `""` | CA bundle 경로. 빈 값이면 시스템 CA 저장소 사용 |
+| `rtspServerName` | string | `""` | 인증서 DNS 이름과 SNI. 빈 값이면 `rtspIp`를 IP SAN으로 검증 |
+
+> `rtspUseTls=true`에서는 TLS 1.2 이상과 CA/이름 검증이 모두 성공해야 연결된다. DNS 인증서를 쓰면 `rtspServerName`을 설정하고 SETUP/PLAY URI도 카메라의 RTSPS 주소로 맞춘다. `false`는 신뢰된 격리망에서만 명시적으로 사용한다.
 
 > ⚠️ 이 클라이언트는 DESCRIBE 없이 곧바로 SETUP 한다. `rtspSetupUri`/`rtspPlayUri`가 정확해야하며, **PLAY는 트랙이 아니라 세션 aggregate URL** 로 보내야 한다(**틀리면 404/455 로 즉시 끊김**).
 
@@ -65,7 +70,8 @@
 | `rtspReconnectBackoffInitialSec` | int | `1` | 재연결 백오프 시작(초) |
 | `rtspReconnectBackoffMaxSec` | int | `30` | 재연결 백오프 상한(초, 지수) |
 
-- 위 8개는 모두 `clampPositive()` 적용(0 이하 → 기본값 + 경고).
+- timeout/버퍼/keep-alive 값은 `clampPositive()` 적용(0 이하 → 기본값 + 경고).
+- 재연결 backoff는 1~3600초로 제한해 곱셈 overflow와 과도한 대기를 막는다.
 - `rtspReconnectBackoffMaxSec < Initial` 이면 시작값으로 맞춤(경고).
 
 > **조정 가이드**: 대부분 기본값 유지. 링크가 불안정하면 타임아웃을 조금 늘린다. 백오프는

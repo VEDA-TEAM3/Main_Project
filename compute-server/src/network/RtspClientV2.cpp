@@ -4,7 +4,10 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <openssl/err.h>
 #include <openssl/md5.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -16,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <random>
 #include <sstream>
 
@@ -28,6 +32,15 @@ constexpr const char* kIface = "Network";
 std::string statusLine(const std::string& response) {
     const size_t end = response.find("\r\n");
     return end == std::string::npos ? response : response.substr(0, end);
+}
+
+std::string tlsError() {
+    const unsigned long code = ERR_get_error();
+    if (code == 0)
+        return "unknown TLS error";
+    char buffer[256];
+    ERR_error_string_n(code, buffer, sizeof(buffer));
+    return buffer;
 }
 
 }  // namespace
@@ -66,10 +79,17 @@ RtspClientV2::~RtspClientV2() {
 }
 
 void RtspClientV2::closeSocket() noexcept {
-    // close 전에 무효화: 이후 cancel()이 들어와도 이미 닫힌(또는 번호가 재사용된) fd에 shutdown 하지 않음
-    cancelFd_.store(-1, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (ssl_ != nullptr) {
+        SSL_free(ssl_);
+        ssl_ = nullptr;
+    }
+    if (sslContext_ != nullptr) {
+        SSL_CTX_free(sslContext_);
+        sslContext_ = nullptr;
+    }
     if (sock_ != -1) {
-        close(sock_);
+        ::close(sock_);
         sock_ = -1;
     }
 }
@@ -77,34 +97,162 @@ void RtspClientV2::closeSocket() noexcept {
 void RtspClientV2::cancel() noexcept {
     cancelled_.store(true, std::memory_order_release);
 
-    // shutdown() 은 fd를 닫지 않고 연결만 끊으므로, 블로킹 중인 recv()가 즉시 0/-1로 반환된다.
-    // (close()를 쓰면 소유자 스레드가 같은 fd 번호를 다시 쓰는 순간 경합이 생김)
-    const int fd = cancelFd_.load(std::memory_order_acquire);
-    if (fd != -1) {
-        ::shutdown(fd, SHUT_RDWR);
+    // fd 조회와 shutdown을 close와 같은 임계영역에 둬 번호 재사용 사이의 TOCTOU를 없앤다.
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (sock_ != -1) {
+        ::shutdown(sock_, SHUT_RDWR);
     }
 }
 
+bool RtspClientV2::sendAll(std::string_view request, const char* operation) {
+    std::size_t sent = 0;
+    while (sent < request.size()) {
+        ssize_t result = 0;
+        if (ssl_ != nullptr) {
+            std::lock_guard<std::mutex> tlsLock(tlsIoMutex_);
+            const std::size_t remaining = request.size() - sent;
+            const int chunk =
+                static_cast<int>(std::min(remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+            result = SSL_write(ssl_, request.data() + sent, chunk);
+            if (result <= 0) {
+                const int error = SSL_get_error(ssl_, static_cast<int>(result));
+                if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+                    continue;
+                logError(kIface, std::string(operation) + " TLS 전송 실패 - " + tlsError());
+                return false;
+            }
+        } else {
+            result = ::send(sock_, request.data() + sent, request.size() - sent, MSG_NOSIGNAL);
+        }
+        if (result > 0) {
+            sent += static_cast<std::size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+
+        const char* reason = result == 0 ? "연결이 닫힘" : std::strerror(errno);
+        logError(kIface, std::string(operation) + " 전송 실패 - " + reason);
+        return false;
+    }
+    return true;
+}
+
+ssize_t RtspClientV2::recvSome(void* buffer, std::size_t length) noexcept {
+    if (ssl_ == nullptr) {
+        return ::recv(sock_, buffer, length, 0);
+    }
+
+    const int chunk = static_cast<int>(std::min(length, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+    for (;;) {
+        std::lock_guard<std::mutex> tlsLock(tlsIoMutex_);
+        const int result = SSL_read(ssl_, buffer, chunk);
+        if (result > 0)
+            return result;
+        const int error = SSL_get_error(ssl_, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+            continue;
+        return result;
+    }
+}
+
+bool RtspClientV2::startTls() {
+    sslContext_ = SSL_CTX_new(TLS_client_method());
+    if (sslContext_ == nullptr) {
+        logError(kIface, "TLS context 생성 실패 - " + tlsError());
+        return false;
+    }
+    if (SSL_CTX_set_min_proto_version(sslContext_, TLS1_2_VERSION) != 1) {
+        logError(kIface, "TLS 최소 버전 설정 실패 - " + tlsError());
+        return false;
+    }
+    SSL_CTX_set_verify(sslContext_, SSL_VERIFY_PEER, nullptr);
+
+    const int trustLoaded = cfg_.rtspCaFile.empty()
+                                ? SSL_CTX_set_default_verify_paths(sslContext_)
+                                : SSL_CTX_load_verify_locations(sslContext_, cfg_.rtspCaFile.c_str(), nullptr);
+    if (trustLoaded != 1) {
+        logError(kIface, "RTSP CA 로드 실패 - " + tlsError());
+        return false;
+    }
+
+    ssl_ = SSL_new(sslContext_);
+    if (ssl_ == nullptr || SSL_set_fd(ssl_, sock_) != 1) {
+        logError(kIface, "TLS session 초기화 실패 - " + tlsError());
+        return false;
+    }
+
+    X509_VERIFY_PARAM* verify = SSL_get0_param(ssl_);
+    if (verify == nullptr) {
+        logError(kIface, "RTSP 인증서 검증 context 조회 실패");
+        return false;
+    }
+    if (cfg_.rtspServerName.empty()) {
+        if (X509_VERIFY_PARAM_set1_ip_asc(verify, cfg_.rtspIp.c_str()) != 1) {
+            logError(kIface, "RTSP 인증서 IP 검증 설정 실패");
+            return false;
+        }
+    } else {
+        if (SSL_set_tlsext_host_name(ssl_, cfg_.rtspServerName.c_str()) != 1 ||
+            SSL_set1_host(ssl_, cfg_.rtspServerName.c_str()) != 1) {
+            logError(kIface, "RTSP 인증서 이름 검증 설정 실패 - " + tlsError());
+            return false;
+        }
+    }
+
+    if (SSL_connect(ssl_) != 1) {
+        logError(kIface, "RTSP TLS handshake 실패 - " + tlsError());
+        return false;
+    }
+    if (SSL_get_verify_result(ssl_) != X509_V_OK) {
+        logError(kIface, "RTSP 서버 인증서 검증 실패");
+        return false;
+    }
+    return true;
+}
+
 bool RtspClientV2::connect() {
-    sock_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_ < 0) {
-        sock_ = -1;  // 불변식 유지: 실패 시 항상 -1
+    const int newSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (newSocket < 0) {
         logError(kIface, "소켓 생성 실패");
         return false;
     }
 
-    // cancel() 이 다른 스레드에서 이 fd 에 shutdown() 을 걸 수 있도록 공개 (원자적)
-    cancelFd_.store(sock_, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        if (cancelled_.load(std::memory_order_acquire)) {
+            ::close(newSocket);
+            return false;
+        }
+        sock_ = newSocket;
+    }
+
+    const auto failSocketCall = [this](const char* operation) {
+        const int error = errno;
+        logError(kIface, std::string(operation) + " 실패 - " + std::strerror(error));
+        closeSocket();
+        return false;
+    };
 
     struct timeval tv {
         recvTimeoutSec_, 0
     };
-    setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        return failSocketCall("SO_RCVTIMEO 설정");
+    }
+    if (setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        return failSocketCall("SO_SNDTIMEO 설정");
+    }
 
     const int noDelay = 1;
-    setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
+    if (setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay)) < 0) {
+        return failSocketCall("TCP_NODELAY 설정");
+    }
 
-    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &socketRecvBufBytes_, sizeof(socketRecvBufBytes_));
+    if (setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &socketRecvBufBytes_, sizeof(socketRecvBufBytes_)) < 0) {
+        return failSocketCall("SO_RCVBUF 설정");
+    }
 
     struct sockaddr_in serverAddr {};
     serverAddr.sin_family = AF_INET;
@@ -120,7 +268,12 @@ bool RtspClientV2::connect() {
     // connect() 자체는 SO_RCVTIMEO의 영향을 받지 않으므로, 논블로킹으로 전환한 뒤
     // select()로 명시적 타임아웃을 건다 (카메라 무응답/방화벽 SYN drop 시 무한 대기 방지)
     const int origFlags = fcntl(sock_, F_GETFL, 0);
-    fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK);
+    if (origFlags < 0) {
+        return failSocketCall("socket flag 조회");
+    }
+    if (fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK) < 0) {
+        return failSocketCall("nonblocking 설정");
+    }
 
     const int connectResult = ::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr));
     if (connectResult < 0 && errno != EINPROGRESS) {
@@ -139,7 +292,10 @@ bool RtspClientV2::connect() {
         };
 
         const int selectResult = select(sock_ + 1, nullptr, &writeSet, nullptr, &connectTimeout);
-        if (selectResult <= 0) {
+        if (selectResult < 0) {
+            return failSocketCall("연결 대기");
+        }
+        if (selectResult == 0) {
             logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
                                  std::to_string(connectTimeoutSec_) + "초)");
             closeSocket();
@@ -148,7 +304,9 @@ bool RtspClientV2::connect() {
 
         int sockErr = 0;
         socklen_t sockErrLen = sizeof(sockErr);
-        getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen);
+        if (getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen) < 0) {
+            return failSocketCall("연결 결과 조회");
+        }
         if (sockErr != 0) {
             logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
                                  std::strerror(sockErr));
@@ -158,15 +316,25 @@ bool RtspClientV2::connect() {
     }
 
     // 이후 recvHeaders/readBytes 등은 블로킹 소켓을 전제로 하므로 원래 모드로 복원
-    fcntl(sock_, F_SETFL, origFlags);
+    if (fcntl(sock_, F_SETFL, origFlags) < 0) {
+        return failSocketCall("blocking mode 복원");
+    }
 
-    logSuccess(kIface, "연결 성공 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ")");
+    if (!cfg_.rtspUseTls) {
+        logError(kIface, "RTSP TLS가 명시적으로 비활성화됨 - 신뢰된 격리망에서만 사용하십시오");
+    } else if (!startTls()) {
+        closeSocket();
+        return false;
+    }
+
+    logSuccess(kIface, std::string(cfg_.rtspUseTls ? "TLS " : "평문 ") + "연결 성공 (" + cfg_.rtspIp + ":" +
+                           std::to_string(cfg_.rtspPort) + ")");
     return true;
 }
 
 bool RtspClientV2::fillReadBuffer() {
     sockBufPos_ = 0;
-    const ssize_t n = recv(sock_, sockBuf_.data(), sockBuf_.size(), 0);
+    const ssize_t n = recvSome(sockBuf_.data(), sockBuf_.size());
     ++metrics_.recvSyscalls;
     if (n <= 0) {
         sockBufLen_ = 0;
@@ -205,7 +373,7 @@ bool RtspClientV2::recvHeaders(std::string& out) {
     out.clear();
     char buf[4096];
     while (out.find("\r\n\r\n") == std::string::npos) {
-        const int n = recv(sock_, buf, sizeof(buf), 0);
+        const ssize_t n = recvSome(buf, sizeof(buf));
         if (n <= 0) {
             return false;
         }
@@ -222,9 +390,7 @@ bool RtspClientV2::setup() {
     std::string req1 = "SETUP " + cfg_.rtspSetupUri +
                        " RTSP/1.0\r\nCSeq: 1\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
-    // MSG_NOSIGNAL: 카메라가 이미 연결을 끊었으면 send() 가 SIGPIPE 를 내며 프로세스를 죽일 수 있음
-    if (send(sock_, req1.c_str(), req1.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("SETUP 1차 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req1, "SETUP 1차 요청")) {
         return false;
     }
 
@@ -252,8 +418,7 @@ bool RtspClientV2::setup() {
                        " RTSP/1.0\r\nCSeq: 2\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n" +
                        auth + "\r\n";
-    if (send(sock_, req2.c_str(), req2.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("SETUP 2차(인증) 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req2, "SETUP 2차(인증) 요청")) {
         return false;
     }
 
@@ -332,8 +497,7 @@ void RtspClientV2::play() {
     std::string auth = buildDigestHeader("PLAY", cfg_.rtspPlayUri);
     std::string req =
         "PLAY " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: 3\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
-    if (send(sock_, req.c_str(), req.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("PLAY 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req, "PLAY 요청")) {
         return;
     }
 
@@ -553,8 +717,7 @@ void RtspClientV2::keepAliveLoop() {
         std::string req = "GET_PARAMETER " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: " + std::to_string(cseq_++) +
                           "\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
 
-        if (send(sock_, req.c_str(), req.length(), MSG_NOSIGNAL) < 0) {
-            logError(kIface, "Keep-alive 전송 실패 - 연결 끊김 추정");
+        if (!sendAll(req, "Keep-alive")) {
             break;
         }
     }
