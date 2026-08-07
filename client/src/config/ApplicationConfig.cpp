@@ -457,8 +457,6 @@ bool parseMqtt(const QJsonObject& root, MqttRuntimeConfig& config, QString& clie
     return readObject(mqtt, QStringLiteral("dispatcher"), dispatcher, error) &&
            readInt(dispatcher, QStringLiteral("blurFlushIntervalMs"), 1, 60000, config.dispatcher.blurFlushIntervalMsec,
                    error) &&
-           readInt(dispatcher, QStringLiteral("blurMaximumPendingFramesPerChannel"), 1, 1000,
-                   config.dispatcher.blurMaximumPendingFramesPerChannel, error) &&
            readInt(dispatcher, QStringLiteral("blurSourceRestartGapMs"), 100, 600000,
                    config.dispatcher.blurSourceRestartGapMsec, error) &&
            readInteger(dispatcher, QStringLiteral("blurTimestampRestartThresholdMs"), 100, 600000,
@@ -466,9 +464,7 @@ bool parseMqtt(const QJsonObject& root, MqttRuntimeConfig& config, QString& clie
            readInt(dispatcher, QStringLiteral("riskFlushIntervalMs"), 1, 60000, config.dispatcher.riskFlushIntervalMsec,
                    error) &&
            readInt(dispatcher, QStringLiteral("riskSourceRestartGapMs"), 100, 600000,
-                   config.dispatcher.riskSourceRestartGapMsec, error) &&
-           readInteger(dispatcher, QStringLiteral("riskTimestampRollbackResetMs"), 100, 600000,
-                       config.dispatcher.riskTimestampRollbackResetMsec, error);
+                   config.dispatcher.riskSourceRestartGapMsec, error);
 }
 
 QString resolveConfigPath(QString& error) {

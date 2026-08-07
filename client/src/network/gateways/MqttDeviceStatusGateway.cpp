@@ -105,7 +105,13 @@ void MqttDeviceStatusGateway::handleConnectionChanged(bool connected) {
     emit brokerConnectionChanged(connected);
     if (connected) {
         subscribeToTopics();
-    } else if (riskDispatcher_) {
+        return;
+    }
+
+    if (blurDispatcher_) {
+        blurDispatcher_->reset();
+    }
+    if (riskDispatcher_) {
         riskDispatcher_->reset();
     }
 }

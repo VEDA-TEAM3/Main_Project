@@ -201,22 +201,55 @@ void BlurProcessor::submitFrame(BlurFrameData frame) {
 
     const qint64 arrivalTimeMsec = QDateTime::currentMSecsSinceEpoch();
     QMutexLocker locker(&mutex_);
-    const bool arrivalRestart =
-        lastMetadataArrivalMsec_ > 0 && arrivalTimeMsec - lastMetadataArrivalMsec_ > config_.sourceRestartGapMsec;
-    const bool timestampRestart =
-        arrivalRestart && latestSourceTimestamp_ > frame.sourceTimestamp &&
+
+    // lastMetadataArrivalMsec_는 마지막으로 "승인한" metadata 시각입니다.
+    // reject된 stale metadata가 이 값을 갱신하면 source restart 감지가 영원히 미뤄질 수 있습니다.
+    const qint64 lastAcceptedArrivalMsec = lastMetadataArrivalMsec_;
+    const bool acceptedFrameGapExpired =
+        lastAcceptedArrivalMsec > 0 && arrivalTimeMsec - lastAcceptedArrivalMsec >= config_.sourceRestartGapMsec;
+    const bool timestampRolledBack =
+        latestSourceTimestamp_ > frame.sourceTimestamp &&
         latestSourceTimestamp_ - frame.sourceTimestamp >= config_.sourceTimestampRestartThresholdMsec;
 
-    if (arrivalRestart || timestampRestart) {
+    // upstream/dispatcher가 재시작했거나 timestamp 기준점이 오염된 뒤 정상 값으로 돌아온 경우
+    // 일정 시간 동안 정상 metadata가 승인되지 않으면 history 전체를 재동기화합니다.
+    if (acceptedFrameGapExpired) {
+        qWarning().noquote()
+            << QStringLiteral(
+                   "[BLUR PROCESSOR RESET] channel=%1 acceptedGap=%2ms latestTs=%3 incomingTs=%4 rollback=%5")
+                   .arg(frame.channelIndex)
+                   .arg(arrivalTimeMsec - lastAcceptedArrivalMsec)
+                   .arg(latestSourceTimestamp_)
+                   .arg(frame.sourceTimestamp)
+                   .arg(timestampRolledBack ? QStringLiteral("true") : QStringLiteral("false"));
+
         history_.clear();
         latestSourceTimestamp_ = 0;
+        lastRejectedMetadataLogMsec_ = 0;
     }
 
-    lastMetadataArrivalMsec_ = arrivalTimeMsec;
+    // history 범위보다 지나치게 오래된 metadata는 사용하지 않습니다.
+    // 중요: 여기서 return하더라도 lastMetadataArrivalMsec_는 갱신하지 않습니다.
     if (latestSourceTimestamp_ > 0 && frame.sourceTimestamp < latestSourceTimestamp_ - config_.historyMsec) {
+        const qint64 rejectionLogIntervalMsec = std::max<qint64>(1000, config_.debugLogIntervalMsec);
+        if (lastRejectedMetadataLogMsec_ == 0 ||
+            arrivalTimeMsec - lastRejectedMetadataLogMsec_ >= rejectionLogIntervalMsec) {
+            qWarning().noquote()
+                << QStringLiteral(
+                       "[BLUR PROCESSOR DROP] channel=%1 incomingTs=%2 latestTs=%3 rollback=%4ms acceptedAge=%5ms")
+                       .arg(frame.channelIndex)
+                       .arg(frame.sourceTimestamp)
+                       .arg(latestSourceTimestamp_)
+                       .arg(latestSourceTimestamp_ - frame.sourceTimestamp)
+                       .arg(lastAcceptedArrivalMsec > 0 ? arrivalTimeMsec - lastAcceptedArrivalMsec : 0);
+            lastRejectedMetadataLogMsec_ = arrivalTimeMsec;
+        }
         return;
     }
 
+    // 승인된 metadata만 복구 감시 시각과 최신 timestamp를 전진시킵니다.
+    lastMetadataArrivalMsec_ = arrivalTimeMsec;
+    lastRejectedMetadataLogMsec_ = 0;
     latestSourceTimestamp_ = std::max(latestSourceTimestamp_, frame.sourceTimestamp);
     channelIndex_.store(frame.channelIndex, std::memory_order_relaxed);
 
@@ -271,6 +304,7 @@ void BlurProcessor::clear() {
     history_.clear();
     latestSourceTimestamp_ = 0;
     lastMetadataArrivalMsec_ = 0;
+    lastRejectedMetadataLogMsec_ = 0;
     utcClockMapper_.reset();
 }
 

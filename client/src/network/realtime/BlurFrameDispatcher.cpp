@@ -10,6 +10,7 @@
 
 namespace {
 constexpr int statisticsLogIntervalMsec = 5000;
+constexpr int rejectedFrameLogIntervalMsec = 5000;
 }
 
 /**
@@ -37,12 +38,20 @@ void BlurFrameDispatcher::start() { running_ = true; }
  */
 void BlurFrameDispatcher::stop() {
     running_ = false;
+    reset();
+}
+
+/**
+ * @brief 실행 상태는 유지하면서 대기 프레임과 채널별 timestamp 기준을 초기화합니다.
+ */
+void BlurFrameDispatcher::reset() {
     flushTimer_->stop();
     if (frameBuffer_) {
         frameBuffer_->clear();
     }
     latestSourceTimes_.clear();
     lastArrivalTimes_.clear();
+    lastRejectedLogTimes_.clear();
     lastStatisticsLogMsec_ = 0;
     deliveredFrameCount_ = 0;
 }
@@ -58,31 +67,57 @@ void BlurFrameDispatcher::submitFrame(BlurFrameData frame) {
 
     const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
     const int channelIndex = frame.channelIndex;
-    const qint64 lastArrivalMsec = lastArrivalTimes_.value(channelIndex, 0);
+    // lastArrivalTimes_는 "마지막 수신 시각"이 아니라 "마지막으로 승인한 프레임 시각"으로 사용합니다.
+    // 오래된 프레임을 버릴 때 이 값을 갱신하면 stale 프레임이 계속 들어오는 동안 restart gap이
+    // 영원히 성립하지 않아 채널이 복구 불가능한 상태에 빠질 수 있습니다.
+    const qint64 lastAcceptedArrivalMsec = lastArrivalTimes_.value(channelIndex, 0);
     qint64 latestSourceTimestamp = latestSourceTimes_.value(channelIndex, 0);
-    const bool arrivalRestart = lastArrivalMsec > 0 && nowMsec - lastArrivalMsec > config_.blurSourceRestartGapMsec;
-    const bool timestampRestart =
-        arrivalRestart && latestSourceTimestamp > frame.sourceTimestamp &&
+    const bool acceptedFrameGapExpired =
+        lastAcceptedArrivalMsec > 0 && nowMsec - lastAcceptedArrivalMsec >= config_.blurSourceRestartGapMsec;
+    const bool timestampRolledBack =
+        latestSourceTimestamp > frame.sourceTimestamp &&
         latestSourceTimestamp - frame.sourceTimestamp >= config_.blurTimestampRestartThresholdMsec;
-    if (arrivalRestart || timestampRestart) {
-        latestSourceTimes_.remove(channelIndex);
-        frameBuffer_->removeChannel(channelIndex);
 
-        if (timestampRestart) {
-            qWarning().noquote() << QStringLiteral("[MQTT BLUR] Channel %1 source timestamp restarted: %2 -> %3")
-                                        .arg(channelIndex)
-                                        .arg(latestSourceTimestamp)
-                                        .arg(frame.sourceTimestamp);
-        }
+    // 마지막 정상 프레임 이후 충분한 시간이 지났다면 timestamp 기준점을 버리고 현재 프레임부터 재동기화합니다.
+    // 이 경로가 미래 timestamp 1개로 오염된 채널을 자동 복구합니다.
+    if (acceptedFrameGapExpired) {
+        qWarning().noquote()
+            << QStringLiteral(
+                   "[MQTT BLUR RESET] channel=%1 acceptedGap=%2ms latestTs=%3 incomingTs=%4 rollback=%5")
+                   .arg(channelIndex)
+                   .arg(nowMsec - lastAcceptedArrivalMsec)
+                   .arg(latestSourceTimestamp)
+                   .arg(frame.sourceTimestamp)
+                   .arg(timestampRolledBack ? QStringLiteral("true") : QStringLiteral("false"));
+
+        latestSourceTimes_.remove(channelIndex);
+        lastRejectedLogTimes_.remove(channelIndex);
+        frameBuffer_->removeChannel(channelIndex);
         latestSourceTimestamp = 0;
     }
-    lastArrivalTimes_.insert(channelIndex, nowMsec);
 
+    // 기준 timestamp보다 지나치게 오래된 프레임은 버립니다.
+    // 중요: reject된 프레임은 lastArrivalTimes_를 갱신하지 않습니다. 그래야 restart gap 이후 자동 복구됩니다.
     if (latestSourceTimestamp > 0 &&
         frame.sourceTimestamp < latestSourceTimestamp - config_.blurTimestampRestartThresholdMsec) {
+        const qint64 lastRejectedLogMsec = lastRejectedLogTimes_.value(channelIndex, 0);
+        if (lastRejectedLogMsec == 0 || nowMsec - lastRejectedLogMsec >= rejectedFrameLogIntervalMsec) {
+            qWarning().noquote()
+                << QStringLiteral(
+                       "[MQTT BLUR DROP] channel=%1 incomingTs=%2 latestTs=%3 rollback=%4ms acceptedAge=%5ms")
+                       .arg(channelIndex)
+                       .arg(frame.sourceTimestamp)
+                       .arg(latestSourceTimestamp)
+                       .arg(latestSourceTimestamp - frame.sourceTimestamp)
+                       .arg(lastAcceptedArrivalMsec > 0 ? nowMsec - lastAcceptedArrivalMsec : 0);
+            lastRejectedLogTimes_.insert(channelIndex, nowMsec);
+        }
         return;
     }
 
+    // 승인된 프레임만 복구 감시 시각과 최신 timestamp를 전진시킵니다.
+    lastArrivalTimes_.insert(channelIndex, nowMsec);
+    lastRejectedLogTimes_.remove(channelIndex);
     latestSourceTimes_.insert(channelIndex, std::max(latestSourceTimestamp, frame.sourceTimestamp));
     if (frameBuffer_->submit(std::move(frame)) && !flushTimer_->isActive()) {
         flushTimer_->start();

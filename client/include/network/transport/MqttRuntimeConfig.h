@@ -16,12 +16,10 @@ struct MqttTopicsConfig {
 
 struct MqttDispatcherConfig {
     int blurFlushIntervalMsec = 0;
-    int blurMaximumPendingFramesPerChannel = 0;
     int blurSourceRestartGapMsec = 0;
     qint64 blurTimestampRestartThresholdMsec = 0;
     int riskFlushIntervalMsec = 0;
     int riskSourceRestartGapMsec = 0;
-    qint64 riskTimestampRollbackResetMsec = 0;
     bool logBlurDispatch = false;
     bool logRiskDispatch = false;
 };
