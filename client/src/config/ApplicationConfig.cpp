@@ -291,8 +291,6 @@ bool parseBlurConfig(const QJsonObject& receiver, BlurProcessorConfig& config, Q
            readInteger(blur, QStringLiteral("maximumHistorySize"), 1, 10000, maximumHistorySize, error) &&
            (config.maximumHistorySize = static_cast<qsizetype>(maximumHistorySize), true) &&
            readInteger(blur, QStringLiteral("sourceRestartGapMs"), 100, 120000, config.sourceRestartGapMsec, error) &&
-           readInteger(blur, QStringLiteral("sourceTimestampRestartThresholdMs"), 100, 120000,
-                       config.sourceTimestampRestartThresholdMsec, error) &&
            readDouble(blur, QStringLiteral("paddingRatio"), 0.0, 1.0, config.paddingRatio, error) &&
            readInt(blur, QStringLiteral("maximumCornerRadius"), 0, 512, config.maximumCornerRadius, error) &&
            readInt(blur, QStringLiteral("radiusDivisor"), 1, 100, config.radiusDivisor, error) &&

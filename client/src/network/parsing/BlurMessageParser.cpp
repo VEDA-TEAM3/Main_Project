@@ -3,12 +3,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QtGlobal>
 #include <cmath>
 #include <utility>
 
 namespace {
 constexpr int blurDeviceChannelCount = 4;
 constexpr int blurProtocolVersion = 1;
+constexpr qsizetype maximumBlurRegionsPerFrame = 64;
 
 /**
  * @brief        JSON 필드에서 손실 없는 정수 값을 읽습니다.
@@ -101,8 +103,10 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
     frame.sourceTimestamp = timestamp;
 
     const QJsonArray blurs = blursValue.toArray();
-    frame.regions.reserve(blurs.size());
-    for (const QJsonValue& blurValue : blurs) {
+    const qsizetype regionCount = qMin<qsizetype>(blurs.size(), maximumBlurRegionsPerFrame);
+    frame.regions.reserve(regionCount);
+    for (qsizetype index = 0; index < regionCount; ++index) {
+        const QJsonValue blurValue = blurs.at(index);
         if (!blurValue.isObject()) {
             error = QStringLiteral("Blur targets must be JSON objects on %1").arg(topic);
             return false;

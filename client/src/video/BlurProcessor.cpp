@@ -178,7 +178,9 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
  * @brief        블러 프레임 처리기를 생성합니다.
  * @param config JSON 검증을 통과한 블러 동기화 및 렌더링 설정
  */
-BlurProcessor::BlurProcessor(BlurProcessorConfig config) : config_(std::move(config)) {}
+BlurProcessor::BlurProcessor(BlurProcessorConfig config) : config_(std::move(config)) {
+    metadataClock_.start();
+}
 
 /**
  * @brief                     블러를 적용할 객체 유형을 설정합니다.
@@ -199,7 +201,7 @@ void BlurProcessor::submitFrame(BlurFrameData frame) {
         return;
     }
 
-    const qint64 arrivalTimeMsec = QDateTime::currentMSecsSinceEpoch();
+    const qint64 arrivalTimeMsec = qMax<qint64>(1, metadataClock_.elapsed());
     QMutexLocker locker(&mutex_);
 
     // lastMetadataArrivalMsec_는 마지막으로 "승인한" metadata 시각입니다.

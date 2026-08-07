@@ -49,6 +49,26 @@ qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
 }
 
+bool sameRiskObject(const RiskObjectData& first, const RiskObjectData& second) {
+    return first.globalId == second.globalId && first.objectClass == second.objectClass &&
+           first.worldPosition == second.worldPosition && first.riskLevel == second.riskLevel &&
+           first.nearestId == second.nearestId && first.distance == second.distance;
+}
+
+bool sameRiskFrame(const RiskFrameData& first, const RiskFrameData& second) {
+    if (first.sourceTimestamp != second.sourceTimestamp || first.riskLevel != second.riskLevel ||
+        first.objects.size() != second.objects.size()) {
+        return false;
+    }
+
+    for (qsizetype index = 0; index < first.objects.size(); ++index) {
+        if (!sameRiskObject(first.objects.at(index), second.objects.at(index))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool readConfiguredWorldBounds(QRectF& bounds) {
     const QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     bool minXOk = false;
@@ -159,6 +179,7 @@ RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(
 /** @brief 수신 이력과 객체 이동 이력을 초기화합니다. */
 void RiskObjectTracker::reset() {
     history_.clear();
+    lastAcceptedInputFrame_.reset();
     retainedObjects_.clear();
     lastSeenArrivalTimesMsec_.clear();
     renderedOpacities_.clear();
@@ -212,15 +233,14 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     }
     lastArrivalTimeMsec_ = arrivalTimeMsec;
 
-    // RiskFrame.ts는 단조 증가하지 않는다: control-server가 윈도우에 모인 채널 관측 중
-    // '가장 오래된' ts를 프레임 ts로 싣는데(ConcatFuser), 채널별 CCTV 시계가 서로 다르므로
-    // 어느 채널이 윈도우에 들어왔는지에 따라 ts가 뒤로 갈 수 있다. ts로 순서를 매기면 그동안의
-    // 프레임이 통째로 버려져 객체가 멈췄다가 한 번에 튄다. 순서는 도착 순(QoS 1, 토픽 내 순서
-    // 보장)으로 잡고, ts는 재전송된 같은 프레임을 걸러내는 데만 쓴다
-    if (!history_.isEmpty() && frame.sourceTimestamp == history_.constLast().sourceTimestamp) {
+    // RiskFrame.ts는 frame sequence가 아니므로 timestamp가 같아도 내용이 바뀌면 새 프레임입니다.
+    // 직전 스냅샷과 timestamp/상태/객체 내용이 모두 같은 실제 중복만 제거합니다.
+    // 이 검사는 동일 재전송 때문에 위치 transition이나 위험 pulse 상태가 불필요하게 재평가되는 것도 막습니다.
+    if (lastAcceptedInputFrame_.has_value() && sameRiskFrame(frame, *lastAcceptedInputFrame_)) {
         ++diagnostics_.duplicateCount;
         return false;
     }
+    lastAcceptedInputFrame_ = frame;
 
     ++frameSequence_;
 
@@ -344,7 +364,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
                                                                           : DigitalTwinObjectType::Vehicle;
         const QPointF targetPosition = normalizedWorldPosition(sourceObject.worldPosition);
         object.position = transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec);
-        object.channelIndex = channelIndexForObject(sourceObject.globalId, object.position);
+        object.channelIndex = channelIndexForObject(sourceObject.globalId, targetPosition);
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
         object.riskLevel = sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);

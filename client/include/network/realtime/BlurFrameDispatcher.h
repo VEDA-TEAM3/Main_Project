@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QMap>
 #include <QObject>
 #include <memory>
@@ -28,6 +29,7 @@ signals:
 private:
     void flushPendingFrames();
 
+    QElapsedTimer clock_;
     std::shared_ptr<BlurFrameBuffer> frameBuffer_;
     QMap<int, qint64> latestSourceTimes_;
     QMap<int, qint64> lastArrivalTimes_;

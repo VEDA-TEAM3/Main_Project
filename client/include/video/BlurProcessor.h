@@ -2,6 +2,7 @@
 
 #include <gst/video/video-frame.h>
 
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QRectF>
 #include <QVector>
@@ -28,6 +29,7 @@ private:
     QVector<QRectF> regionsFor(qint64 sourceTimestamp) const;
 
     BlurProcessorConfig config_;
+    QElapsedTimer metadataClock_;
     VideoUtcClockMapper utcClockMapper_;
     mutable QMutex mutex_;
     QVector<BlurFrameData> history_;

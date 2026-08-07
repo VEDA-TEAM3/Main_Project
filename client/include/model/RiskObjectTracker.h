@@ -5,6 +5,7 @@
 #include <QRectF>
 #include <QString>
 #include <QVector>
+#include <optional>
 
 #include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
@@ -78,6 +79,7 @@ private:
     void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions, qint64 localTimeMsec);
 
     QVector<RiskFrameData> history_;
+    std::optional<RiskFrameData> lastAcceptedInputFrame_;
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, QVector<QPointF>> worldPositionHistories_;
     QHash<qint64, int> channelIndexes_;

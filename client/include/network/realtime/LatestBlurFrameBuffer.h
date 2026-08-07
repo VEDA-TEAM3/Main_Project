@@ -2,6 +2,7 @@
 
 #include <QMap>
 #include <QMutex>
+#include <QQueue>
 
 #include "network/realtime/BlurFrameBuffer.h"
 
@@ -15,8 +16,10 @@ public:
     quint64 takeCoalescedFrameCount() override;
 
 private:
+    static constexpr qsizetype maximumPendingFramesPerChannel = 32;
+
     QMutex mutex_;
-    QMap<int, BlurFrameData> latestFrames_;
+    QMap<int, QQueue<BlurFrameData>> pendingFrames_;
     quint64 coalescedFrameCount_ = 0;
     bool deliveryPending_ = false;
 };

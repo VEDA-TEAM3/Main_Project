@@ -13,7 +13,6 @@ struct BlurProcessorConfig {
     qint64 holdLastMetadataMsec = 0;
     qsizetype maximumHistorySize = 0;
     qint64 sourceRestartGapMsec = 0;
-    qint64 sourceTimestampRestartThresholdMsec = 0;
     double paddingRatio = 0.0;
     int maximumCornerRadius = 0;
     int radiusDivisor = 0;

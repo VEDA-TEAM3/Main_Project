@@ -2,6 +2,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <optional>
 
 #include "model/MqttRealtimeData.h"
 #include "network/transport/MqttRuntimeConfig.h"
@@ -27,9 +28,9 @@ private:
 
     QElapsedTimer clock_;
     RiskFrameData pendingFrame_;
+    std::optional<RiskFrameData> lastAcceptedFrame_;
     QTimer* flushTimer_ = nullptr;
     MqttDispatcherConfig config_;
-    qint64 latestSourceTimestamp_ = 0;
     qint64 lastArrivalMsec_ = 0;
     qint64 debugWindowStartMsec_ = 0;
     int debugReceivedCount_ = 0;

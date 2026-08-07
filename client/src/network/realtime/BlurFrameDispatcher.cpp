@@ -1,6 +1,5 @@
 #include "network/realtime/BlurFrameDispatcher.h"
 
-#include <QDateTime>
 #include <QDebug>
 #include <QTimer>
 #include <algorithm>
@@ -20,6 +19,7 @@ constexpr int statisticsLogIntervalMsec = 5000;
 BlurFrameDispatcher::BlurFrameDispatcher(MqttDispatcherConfig config, std::shared_ptr<BlurFrameBuffer> frameBuffer,
                                          QObject* parent)
     : QObject(parent), frameBuffer_(std::move(frameBuffer)), config_(std::move(config)) {
+    clock_.start();
     flushTimer_ = new QTimer(this);
     flushTimer_->setInterval(config_.blurFlushIntervalMsec);
     flushTimer_->setSingleShot(true);
@@ -63,7 +63,7 @@ void BlurFrameDispatcher::submitFrame(BlurFrameData frame) {
         return;
     }
 
-    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+    const qint64 nowMsec = qMax<qint64>(1, clock_.elapsed());
     const int channelIndex = frame.channelIndex;
     // lastArrivalTimes_는 "마지막 수신 시각"이 아니라 "마지막으로 승인한 프레임 시각"으로 사용합니다.
     // 오래된 프레임을 버릴 때 이 값을 갱신하면 stale 프레임이 계속 들어오는 동안 restart gap이
@@ -109,13 +109,13 @@ void BlurFrameDispatcher::flushPendingFrames() {
     }
     deliveredFrameCount_ += static_cast<quint64>(frames.size());
 
-    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+    const qint64 nowMsec = qMax<qint64>(1, clock_.elapsed());
     if (config_.logBlurDispatch &&
         (lastStatisticsLogMsec_ == 0 || nowMsec - lastStatisticsLogMsec_ >= statisticsLogIntervalMsec)) {
-        const quint64 coalescedCount = frameBuffer_->takeCoalescedFrameCount();
-        qDebug().noquote() << QStringLiteral("[MQTT BLUR DISPATCH] delivered=%1 coalesced=%2")
+        const quint64 droppedCount = frameBuffer_->takeCoalescedFrameCount();
+        qDebug().noquote() << QStringLiteral("[MQTT BLUR DISPATCH] delivered=%1 dropped=%2")
                                   .arg(deliveredFrameCount_)
-                                  .arg(coalescedCount);
+                                  .arg(droppedCount);
         lastStatisticsLogMsec_ = nowMsec;
         deliveredFrameCount_ = 0;
     }
