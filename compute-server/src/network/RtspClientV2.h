@@ -13,15 +13,22 @@
  *     고정 크기 버퍼 재사용으로 전환
  */
 
+#include <sys/types.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include "core/AppConfig.h"
 #include "interfaces/INetwork.h"
+
+struct ssl_ctx_st;
+struct ssl_st;
 
 /**
  * @class   RtspClientV2
@@ -62,12 +69,16 @@ public:
 
 private:
     /**
-     * @brief   소켓을 닫고 sock_/cancelFd_ 를 무효화 (멱등)
+     * @brief   소켓을 닫고 sock_ 를 무효화 (멱등)
      * @details connect()의 모든 실패 경로에서 호출해 fd를 즉시 반납한다. 소멸자에만 의존하면
      *          같은 인스턴스로 connect()를 재시도하는 순간 이전 fd가 새어나감
-     * @warning cancelFd_를 먼저 -1 로 만들어야 cancel()이 이미 닫힌 fd에 shutdown 하지 않음
      */
     void closeSocket() noexcept;
+
+    /**  RTSP 요청 전체를 전송하며 TCP short write와 EINTR를 처리 */
+    bool sendAll(std::string_view request, const char* operation);
+    ssize_t recvSome(void* buffer, std::size_t length) noexcept;
+    bool startTls();
 
     /**
      * @brief   소켓에서 사용자 공간 버퍼(sockBuf_)를 한 번 채움 (recv() syscall 1회)
@@ -202,10 +213,12 @@ private:
     int rtpChannel_ = 0;
 
     AppConfig cfg_;
-    int sock_ = -1;  ///< 워커 스레드 전용 (생성/사용/close 모두 워커에서)
-
-    /// @brief cancel()이 다른 스레드에서 안전하게 읽기 위한 sock_ 사본 (소멸자에서 -1 로 무효화)
-    std::atomic<int> cancelFd_{-1};
+    /** @brief fd 공개·shutdown·close를 직렬화해 fd 번호 재사용 경쟁을 방지 */
+    mutable std::mutex socketMutex_;
+    std::mutex tlsIoMutex_;
+    int sock_ = -1;
+    ssl_ctx_st* sslContext_ = nullptr;
+    ssl_st* ssl_ = nullptr;
     /// @brief 취소 요청 여부 -- run() 루프가 매 반복 확인
     std::atomic<bool> cancelled_{false};
     /// @brief PLAY가 200 OK 였는가 (play()가 설정, workerLoop 가 run() 진입 판단에 사용)

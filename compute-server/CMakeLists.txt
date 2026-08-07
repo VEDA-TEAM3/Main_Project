@@ -47,6 +47,7 @@ target_compile_options(compute-server PRIVATE -O2)
 target_link_libraries(
     compute-server
     PRIVATE
+        OpenSSL::SSL
         OpenSSL::Crypto
         Threads::Threads
         PkgConfig::MOSQUITTO

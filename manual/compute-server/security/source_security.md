@@ -230,20 +230,14 @@ cv_.notify_all();
 >
 > **코드베이스 일관성**: `MqttFrameSink::start()`와 `MqttTransport::stop()`이 동일한 문제를 막기 위해 이미 같은 방어 패턴(뮤텍스 경유 후 notify)을 쓰고 있었다. 이번 패치로 **Source 계층까지 세 곳의 처리가 일관**되게 되었다.
 
-> **참고 — 워커 측은 원래도 자가 치유되었다**: 워커의 백오프 대기는 `cv_.wait_for(lk, backoffSec, pred)`로 **타임아웃이 있어** 알림을 놓쳐도 최대 `backoffSec`(≤30초) 후 깨어나 `stopping_`을 확인하고 종료한다. 반면 컨슈머의 `cv_.wait`은 **타임아웃이 없어** 스스로 회복하지 못했다. 그래서 실제 위험은 `next()` 쪽에 집중되어 있었고, 이번 패치가 정확히 그 경로를 막는다.
+> **참고 — 워커 측은 원래도 자가 치유되었다**: 워커의 백오프 대기는 `cv_.wait_for(lk, backoffSec, pred)`로 **타임아웃이 있어** 알림을 놓쳐도 설정된 상한(최대 3600초) 안에 깨어나 `stopping_`을 확인한다. 반면 컨슈머의 `cv_.wait`은 **타임아웃이 없어** 스스로 회복하지 못했다. 그래서 실제 위험은 `next()` 쪽에 집중되어 있었고, 이번 패치가 정확히 그 경로를 막는다.
 
-### 3.6 ⚠️ W2 — 취소 플래그가 핸드셰이크 단계에서 확인되지 않음
+### 3.6 ✅ W2 — 핸드셰이크 시작 전 취소 경합 차단
 
-`cancel()`은 `cancelled_ = true`를 세우고 소켓에 `shutdown()`을 건다. 그러나 **`cancelled_`를 검사하는 곳은 `run()`의 루프 상단뿐**이며, `connect()`/`setup()`/`play()`는 이를 확인하지 않는다.
-
-핸드셰이크 도중(특히 `activeClient_` 등록 직후, `connect()` 호출 직전)에 `stop()`이 도착하면:
-
-- `cancel()` 시점에 `cancelFd_`가 아직 `-1`이라 소켓 차단 효과가 없다
-- `connect()`가 **새 소켓**을 만들고 핸드셰이크를 끝까지 진행한다
-- **최악의 경우 지연** ≈ `connectTimeoutSec`(5s) + `recvTimeoutSec` × 3회(SETUP 2회 + PLAY 1회, 각 5s) ≈ **약 20초**
-- 그제서야 `run()`이 진입 즉시 `cancelled_`를 보고 break
-
-**영향**: 교착이 아니라 **종료 지연**이다. systemd 기본 `TimeoutStopSec`(90초) 안에는 들어오므로 SIGKILL로 이어지지는 않지만, 종료가 최대 20초 늘어질 수 있다. `connect()`/`setup()`/`play()` 진입부에 `cancelled_` 조기 반환을 넣으면 즉시 종료된다.
+`cancel()`은 먼저 `cancelled_`를 설정한 뒤 `socketMutex_` 아래에서 공개된 fd를 `shutdown()`한다. `connect()`도
+새 소켓을 같은 mutex 아래에서 공개하기 전에 취소 상태를 확인한다. 따라서 `activeClient_` 등록 직후와
+소켓 공개 사이에 `stop()`이 와도 새 연결을 시작하지 않는다. 이미 공개된 소켓의 핸드셰이크는
+`shutdown()`과 송수신 실패로 중단된다.
 
 ### 3.7 ✅ 종료 시맨틱 — 잔여 프레임 배출과 계약 준수
 
@@ -341,8 +335,8 @@ if (!report.empty()) { logSuccess(kIface, report); }   // I/O는 락 밖
 | # | 항목 | 등급 | 영향 | 상태 |
 |---|------|------|------|------|
 | **W1** | `stop()`의 유실 기상 창 (`notify_all` 전 `mtx_` 미획득) | Warning (최우선) | 낮은 확률로 `next()` 영구 블로킹 → 종료 불가 → MQTT dead 신호 미발행 | ✅ **패치 완료** — `notify_all()` 직전 `mtx_` 획득 (§3.5) |
-| **W2** | `cancelled_`가 connect/setup/play에서 미확인 | Warning | 종료 지연 최대 ~20초 (교착 아님) | ⬜ 미조치 — 각 진입부 조기 반환 권고 |
+| **W2** | 핸드셰이크 시작 전 취소 경합 | Warning | 취소 후 새 소켓 공개 가능 | ✅ 패치 완료 — fd 공개/취소/종료를 mutex로 직렬화 |
 | **W3** | 프로듀서가 `mtx_`를 쥔 채 페이로드 복사 | Info | 현 부하에서 무시 가능 | ⬜ 미조치 — 현재 불필요 (측정상 이득 없음) |
 | **I1** | Source가 `ringCapacity_`를 재검증하지 않음 (`AppConfig` 의존) | Info | 정상 경로 안전. 설정 계층 우회 시 0 나눗셈 가능 | ⬜ 미조치 — 생성자 가드 1줄로 해소 가능 |
 
-**총평**: Source 계층의 **메모리 상한 보장과 zero-copy 핸드오프는 설계대로 정확히 동작**하며, UAF·누수·교착에 대한 방어도 견고하다. Critical 결함은 없었고, 최우선 지적 사항이던 **W1(유실 기상)은 패치로 해소**되어 `stop()` → `next()` 기상이 결정론적으로 보장된다. 이로써 조건변수 알림 방어 패턴이 `MqttFrameSink`·`MqttTransport`·`RtspOnvifSourceV2` **세 곳에서 일관**되게 적용되었다. 잔여 항목(W2/W3/I1)은 모두 정보성 또는 선택적 개선 사항이다.
+**총평**: Source 계층의 **메모리 상한 보장과 zero-copy 핸드오프는 설계대로 정확히 동작**하며, UAF·누수·교착에 대한 방어도 견고하다. Critical 결함은 없었고, 최우선 지적 사항이던 **W1(유실 기상)은 패치로 해소**되어 `stop()` → `next()` 기상이 결정론적으로 보장된다. 이로써 조건변수 알림 방어 패턴이 `MqttFrameSink`·`MqttTransport`·`RtspOnvifSourceV2` **세 곳에서 일관**되게 적용되었다. 잔여 항목(W3/I1)은 모두 정보성 또는 선택적 개선 사항이다.

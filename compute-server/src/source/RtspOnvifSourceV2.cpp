@@ -141,7 +141,7 @@ void RtspOnvifSourceV2::workerLoop() {
         }
 
         // 다음 실패에 대비해 증가 (backoffMaxSec_ 에서 포화)
-        backoffSec = std::min(backoffSec * 2, backoffMaxSec_);
+        backoffSec = backoffSec > backoffMaxSec_ - backoffSec ? backoffMaxSec_ : backoffSec * 2;
     }
 }
 
