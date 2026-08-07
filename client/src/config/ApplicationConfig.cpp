@@ -590,7 +590,8 @@ bool parseLogging(const QJsonObject& root, ApplicationConfig& config, QString& e
     };
 
     bool blurApply = config.video.receiver.blur.debugLogIntervalMsec > 0;
-    if (!readFlag(QStringLiteral("mqttConnection"), config.mqtt.connection.debugLogging) ||
+    if (!readFlag(QStringLiteral("enabled"), config.logging.enabled) ||
+        !readFlag(QStringLiteral("mqttConnection"), config.mqtt.connection.debugLogging) ||
         !readFlag(QStringLiteral("mqttStatusPayload"), config.mqtt.logStatusPayload) ||
         !readFlag(QStringLiteral("mqttRisk"), config.mqtt.logRisk) ||
         !readFlag(QStringLiteral("mqttBlur"), config.mqtt.logBlur) ||
@@ -617,6 +618,22 @@ bool parseLogging(const QJsonObject& root, ApplicationConfig& config, QString& e
         config.video.receiver.blur.debugLogIntervalMsec = 0;
     }
     return true;
+}
+
+void applyLoggingMasterSwitch(ApplicationConfig& config) {
+    if (config.logging.enabled) {
+        return;
+    }
+
+    config.mqtt.connection.debugLogging = false;
+    config.mqtt.logStatusPayload = false;
+    config.mqtt.logRisk = false;
+    config.mqtt.logBlur = false;
+    config.mqtt.dispatcher.logBlurDispatch = false;
+    config.mqtt.dispatcher.logRiskDispatch = false;
+    config.digitalTwin.debugLogging = false;
+    config.digitalTwin.debugDetail = false;
+    config.video.receiver.blur.debugLogIntervalMsec = 0;
 }
 }  // namespace
 
@@ -657,6 +674,7 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
     }
 
     applyEnvironmentOverrides(result.config, clientIdPrefix);
+    applyLoggingMasterSwitch(result.config);
     if (!validateEffectiveConfig(result.config, result.error)) {
         return result;
     }

@@ -11,8 +11,13 @@ struct ApplicationWindowConfig {
     int height = 0;
 };
 
+struct ApplicationLoggingConfig {
+    bool enabled = true;
+};
+
 struct ApplicationConfig {
     ApplicationWindowConfig window;
+    ApplicationLoggingConfig logging;
     DigitalTwinRuntimeConfig digitalTwin;
     VideoRuntimeConfig video;
     MqttRuntimeConfig mqtt;

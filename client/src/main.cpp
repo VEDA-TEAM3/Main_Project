@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QLoggingCategory>
 #include <QStringList>
 #include <QtGlobal>
 #include <memory>
@@ -72,22 +73,27 @@ void loadApplicationStyle(QApplication& app) {
  * @return Qt 이벤트 루프 종료 코드
  */
 int main(int argc, char* argv[]) {
-    configureGstreamerMinGwRuntime();
-    gst_init(&argc, &argv);
-
     int ret = 0;
 
     {
         QApplication app(argc, argv);
         app.setWindowIcon(QIcon(QStringLiteral(":/icons/main.png")));
-        loadApplicationStyle(app);
 
         const ApplicationConfigLoadResult configResult = ApplicationConfigLoader::load();
         if (!configResult.successful) {
             qCritical().noquote() << QStringLiteral("[Config] %1").arg(configResult.error);
-            gst_deinit();
             return 1;
         }
+
+        if (!configResult.config.logging.enabled) {
+            QLoggingCategory::setFilterRules(
+                QStringLiteral("*.debug=false\n*.info=false\n*.warning=true\n*.critical=true"));
+        }
+
+        configureGstreamerMinGwRuntime();
+        gst_init(&argc, &argv);
+        loadApplicationStyle(app);
+
         qInfo().noquote() << QStringLiteral("[Config] Loaded %1").arg(configResult.sourcePath);
 
         {
