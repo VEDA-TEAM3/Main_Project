@@ -65,7 +65,7 @@ private:
      * @brief 핵심 알고리즘 흐름을 정의한 템플릿 메서드
      * @param frames 시간 윈도우 내에 수집된 프레임 묶음
      */
-    void processPipeline(std::vector<veda::TopViewFrame> frames);
+    void processPipeline(const std::vector<veda::TopViewFrame>& frames);
 
     std::shared_ptr<IChannelReceiver> receiver_;
     std::shared_ptr<IFrameAggregator> aggregator_;
@@ -80,6 +80,10 @@ private:
     /// @brief transform() 결과를 담는 재사용 버퍼 (윈도우마다 재할당하지 않기 위해 멤버로 둠).
     ///        processPipeline 은 단일 스레드에서만 도므로 락이 필요 없음
     std::vector<domain::ObservationFrame> observations_;
+
+    /// @brief 위험 판정 결과 버퍼. processPipeline 단일 스레드 전용이며 매 프레임 재사용된다
+    ///        (IRiskPolicy::evaluate 의 out-parameter 규약 -- 프레임당 할당 0)
+    domain::RiskEvaluation riskEval_;
 
     /**
      * @name 채널 생존 상태 (LWT + STM32 하트비트)

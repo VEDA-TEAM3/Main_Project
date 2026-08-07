@@ -37,8 +37,10 @@ Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_p
         this->onHardwareStatus(channel, alive, indicators);
     });
 
+    // 집계기가 풀에서 빌려 준 버퍼를 그대로 읽는다 (복사/이동 없음).
+    // processPipeline 은 frames 를 읽기만 하고 보관하지 않으므로 참조로 받아도 안전하다.
     aggregator_->setCallback(
-        [this](std::vector<veda::TopViewFrame> frames) { this->processPipeline(std::move(frames)); });
+        [this](const std::vector<veda::TopViewFrame>& frames) { this->processPipeline(frames); });
 }
 
 veda::ChannelStatus Controller::buildStatusLocked(std::size_t idx) const {
@@ -126,7 +128,7 @@ void Controller::start() { receiver_->start(); }
 
 void Controller::stop() { receiver_->stop(); }
 
-void Controller::processPipeline(std::vector<veda::TopViewFrame> frames) {
+void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) {
     if (frames.empty()) {
         return;
     }
@@ -139,7 +141,9 @@ void Controller::processPipeline(std::vector<veda::TopViewFrame> frames) {
 
     zoneMapper_->assign(worldFrame);
 
-    auto riskEval = riskPolicy_->evaluate(worldFrame);
+    // riskEval_ 은 멤버 버퍼 -- 매 프레임 재사용해 zoneLevels 재할당을 없앤다
+    riskPolicy_->evaluate(worldFrame, riskEval_);
+    const auto& riskEval = riskEval_;
 
     dispatcher_->dispatch(riskEval);
 
