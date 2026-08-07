@@ -31,7 +31,6 @@ private:
     std::shared_ptr<BlurFrameBuffer> frameBuffer_;
     QMap<int, qint64> latestSourceTimes_;
     QMap<int, qint64> lastArrivalTimes_;
-    QMap<int, qint64> lastRejectedLogTimes_;
     QTimer* flushTimer_ = nullptr;
     MqttDispatcherConfig config_;
     qint64 lastStatisticsLogMsec_ = 0;

@@ -33,7 +33,6 @@ private:
     QVector<BlurFrameData> history_;
     qint64 latestSourceTimestamp_ = 0;
     qint64 lastMetadataArrivalMsec_ = 0;
-    qint64 lastRejectedMetadataLogMsec_ = 0;
     std::vector<guint8> scratch_;
     std::atomic_int channelIndex_{-1};
     std::atomic_bool faceEnabled_{true};

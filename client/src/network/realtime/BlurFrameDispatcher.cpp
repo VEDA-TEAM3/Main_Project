@@ -10,7 +10,6 @@
 
 namespace {
 constexpr int statisticsLogIntervalMsec = 5000;
-constexpr int rejectedFrameLogIntervalMsec = 5000;
 }
 
 /**
@@ -51,7 +50,6 @@ void BlurFrameDispatcher::reset() {
     }
     latestSourceTimes_.clear();
     lastArrivalTimes_.clear();
-    lastRejectedLogTimes_.clear();
     lastStatisticsLogMsec_ = 0;
     deliveredFrameCount_ = 0;
 }
@@ -74,24 +72,10 @@ void BlurFrameDispatcher::submitFrame(BlurFrameData frame) {
     qint64 latestSourceTimestamp = latestSourceTimes_.value(channelIndex, 0);
     const bool acceptedFrameGapExpired =
         lastAcceptedArrivalMsec > 0 && nowMsec - lastAcceptedArrivalMsec >= config_.blurSourceRestartGapMsec;
-    const bool timestampRolledBack =
-        latestSourceTimestamp > frame.sourceTimestamp &&
-        latestSourceTimestamp - frame.sourceTimestamp >= config_.blurTimestampRestartThresholdMsec;
-
     // 마지막 정상 프레임 이후 충분한 시간이 지났다면 timestamp 기준점을 버리고 현재 프레임부터 재동기화합니다.
     // 이 경로가 미래 timestamp 1개로 오염된 채널을 자동 복구합니다.
     if (acceptedFrameGapExpired) {
-        qWarning().noquote()
-            << QStringLiteral(
-                   "[MQTT BLUR RESET] channel=%1 acceptedGap=%2ms latestTs=%3 incomingTs=%4 rollback=%5")
-                   .arg(channelIndex)
-                   .arg(nowMsec - lastAcceptedArrivalMsec)
-                   .arg(latestSourceTimestamp)
-                   .arg(frame.sourceTimestamp)
-                   .arg(timestampRolledBack ? QStringLiteral("true") : QStringLiteral("false"));
-
         latestSourceTimes_.remove(channelIndex);
-        lastRejectedLogTimes_.remove(channelIndex);
         frameBuffer_->removeChannel(channelIndex);
         latestSourceTimestamp = 0;
     }
@@ -100,24 +84,11 @@ void BlurFrameDispatcher::submitFrame(BlurFrameData frame) {
     // 중요: reject된 프레임은 lastArrivalTimes_를 갱신하지 않습니다. 그래야 restart gap 이후 자동 복구됩니다.
     if (latestSourceTimestamp > 0 &&
         frame.sourceTimestamp < latestSourceTimestamp - config_.blurTimestampRestartThresholdMsec) {
-        const qint64 lastRejectedLogMsec = lastRejectedLogTimes_.value(channelIndex, 0);
-        if (lastRejectedLogMsec == 0 || nowMsec - lastRejectedLogMsec >= rejectedFrameLogIntervalMsec) {
-            qWarning().noquote()
-                << QStringLiteral(
-                       "[MQTT BLUR DROP] channel=%1 incomingTs=%2 latestTs=%3 rollback=%4ms acceptedAge=%5ms")
-                       .arg(channelIndex)
-                       .arg(frame.sourceTimestamp)
-                       .arg(latestSourceTimestamp)
-                       .arg(latestSourceTimestamp - frame.sourceTimestamp)
-                       .arg(lastAcceptedArrivalMsec > 0 ? nowMsec - lastAcceptedArrivalMsec : 0);
-            lastRejectedLogTimes_.insert(channelIndex, nowMsec);
-        }
         return;
     }
 
     // 승인된 프레임만 복구 감시 시각과 최신 timestamp를 전진시킵니다.
     lastArrivalTimes_.insert(channelIndex, nowMsec);
-    lastRejectedLogTimes_.remove(channelIndex);
     latestSourceTimes_.insert(channelIndex, std::max(latestSourceTimestamp, frame.sourceTimestamp));
     if (frameBuffer_->submit(std::move(frame)) && !flushTimer_->isActive()) {
         flushTimer_->start();
