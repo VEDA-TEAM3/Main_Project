@@ -20,7 +20,7 @@
         "snapshotPublishIntervalMs": 50,
         "frameExpiryMs": 5000,
         "frameExpiryPollMs": 1000,
-        "positionTransitionMs": 100,
+        "positionTransitionMs": 66,
         "fadeInMs": 120,
         "missingGraceMs": 100,
         "fadeOutMs": 180,
@@ -128,7 +128,7 @@
             "blurFlushIntervalMs": 10,
             "blurSourceRestartGapMs": 5000,
             "blurTimestampRestartThresholdMs": 2000,
-            "riskFlushIntervalMs": 10,
+            "riskFlushIntervalMs": 5,
             "riskSourceRestartGapMs": 5000
         }
     }
