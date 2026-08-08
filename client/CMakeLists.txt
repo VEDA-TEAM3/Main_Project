@@ -164,8 +164,10 @@ set(QTCCTV_LOCAL_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/config/app_config.json")
 set(QTCCTV_EXAMPLE_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/config/app_config.example.json")
 if(EXISTS "${QTCCTV_LOCAL_CONFIG}")
     set(QTCCTV_CONFIG_SOURCE "${QTCCTV_LOCAL_CONFIG}")
-else()
+elseif(EXISTS "${QTCCTV_EXAMPLE_CONFIG}")
     set(QTCCTV_CONFIG_SOURCE "${QTCCTV_EXAMPLE_CONFIG}")
+else()
+    message(FATAL_ERROR "Neither config/app_config.json nor config/app_config.example.json exists")
 endif()
 configure_file("${QTCCTV_CONFIG_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/config/app_config.json" COPYONLY)
 
@@ -305,4 +307,31 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+
+    add_executable(video_utc_clock_mapper_check
+        tests/VideoUtcClockMapperCheck.cpp
+        src/video/VideoUtcClockMapper.cpp
+    )
+
+    target_include_directories(video_utc_clock_mapper_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_include_directories(video_utc_clock_mapper_check SYSTEM PRIVATE
+        "${GSTREAMER_ROOT}/include/gstreamer-1.0"
+        "${GSTREAMER_ROOT}/include/glib-2.0"
+        "${GSTREAMER_ROOT}/lib/glib-2.0/include"
+    )
+
+    target_link_directories(video_utc_clock_mapper_check PRIVATE
+        "${GSTREAMER_ROOT}/lib"
+    )
+
+    target_link_libraries(video_utc_clock_mapper_check PRIVATE
+        Qt6::Core
+        gstreamer-1.0
+        gobject-2.0
+        glib-2.0
+        intl
+    )
 endif()

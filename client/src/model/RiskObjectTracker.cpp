@@ -124,8 +124,9 @@ QString formatPoint(const QPointF& point) {
  * @param position  0.0~1.0 정규화 좌표 (y는 화면 기준 아래쪽이 큼)
  * @return          0부터 시작하는 채널 인덱스
  *
- * @details 카메라 4대가 중심에서 상/우/하/좌를 바라보므로 경계는 사분면이 아니라 45도
- *          대각선 두 개다. 위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04 순서다.
+ * @details 카메라 4대가 중심에서 상/좌/하/우를 바라보므로 경계는 사분면이 아니라 45도
+ *          대각선 두
+ * 개다. 위 CH01, 왼쪽 CH02, 아래 CH03, 오른쪽 CH04 순서다.
  */
 int channelIndexForPosition(const QPointF& position) {
     const double offsetX = position.x() - 0.5;
@@ -134,7 +135,7 @@ int channelIndexForPosition(const QPointF& position) {
     if (qAbs(offsetY) >= qAbs(offsetX)) {
         return offsetY < 0.0 ? 0 : 2;
     }
-    return offsetX > 0.0 ? 1 : 3;
+    return offsetX < 0.0 ? 1 : 3;
 }
 
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
@@ -528,9 +529,8 @@ void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
     const double horizontalMargin = width * config_.world.automaticBoundsPaddingRatio;
     const double verticalMargin = height * config_.world.automaticBoundsPaddingRatio;
 
-    automaticWorldBounds_ =
-        QRectF(centerX - width * 0.5 - horizontalMargin, centerY - height * 0.5 - verticalMargin,
-               width + horizontalMargin * 2.0, height + verticalMargin * 2.0);
+    automaticWorldBounds_ = QRectF(centerX - width * 0.5 - horizontalMargin, centerY - height * 0.5 - verticalMargin,
+                                   width + horizontalMargin * 2.0, height + verticalMargin * 2.0);
     hasAutomaticWorldBounds_ = true;
     automaticWorldSamples_.clear();
     logAutomaticWorldBounds(QStringLiteral("estimated"));
@@ -618,8 +618,7 @@ int RiskObjectTracker::channelIndexForObject(qint64 globalId, const QPointF& nor
     if (measuredIndex != previousIndex) {
         const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
         const double extent = qMax(bounds.width(), bounds.height());
-        const double margin =
-            extent > 0.0 ? channelBoundaryHysteresisMeters / extent * std::numbers::sqrt2 : 0.0;
+        const double margin = extent > 0.0 ? channelBoundaryHysteresisMeters / extent * std::numbers::sqrt2 : 0.0;
         const double offsetX = qAbs(normalizedPosition.x() - 0.5);
         const double offsetY = qAbs(normalizedPosition.y() - 0.5);
         if (qAbs(offsetX - offsetY) <= margin) {
@@ -662,9 +661,8 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
         if (timestampDelta < 0) {
             ++diagnostics_.backwardTimestampCount;
         }
-        diagnostics_.minTimestampDeltaMsec = diagnostics_.frameCount == 1
-                                                 ? timestampDelta
-                                                 : qMin(diagnostics_.minTimestampDeltaMsec, timestampDelta);
+        diagnostics_.minTimestampDeltaMsec =
+            diagnostics_.frameCount == 1 ? timestampDelta : qMin(diagnostics_.minTimestampDeltaMsec, timestampDelta);
         diagnostics_.maximumTimestampDeltaMsec = qMax(diagnostics_.maximumTimestampDeltaMsec, timestampDelta);
     }
     diagnostics_.previousSourceTimestamp = frame.sourceTimestamp;
@@ -681,8 +679,9 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             // gid마다 주기적으로만 남기되, 필터가 실제로 개입한 프레임은 주기와 무관하게 남긴다
             const QPointF medianDelta = medianPositions.at(index) - rawPosition;
             const QPointF limitDelta = object.worldPosition - medianPositions.at(index);
-            const bool filterIntervened = std::hypot(medianDelta.x(), medianDelta.y()) > notableFilterCorrectionMeters ||
-                                          std::hypot(limitDelta.x(), limitDelta.y()) > 0.001;
+            const bool filterIntervened =
+                std::hypot(medianDelta.x(), medianDelta.y()) > notableFilterCorrectionMeters ||
+                std::hypot(limitDelta.x(), limitDelta.y()) > 0.001;
             // 이상치 하나를 따라잡는 동안 상한이 여러 프레임 연속으로 걸리므로, 개입 로그도
             // 더 짧은 주기로만 남긴다. 그래야 이상치 발생 사실은 놓치지 않으면서 줄 수가 안 터진다
             const qint64 lastLogMsec = diagnostics_.lastObjectLogMsec.value(object.globalId, 0);
@@ -696,12 +695,12 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             // 한 줄이 길면 붙여넣기·수집 과정에서 잘린다. 80자 안쪽으로 유지한다
             const bool boundsReady = worldBoundsReady();
             const QPointF normalized = boundsReady ? normalizedWorldPosition(object.worldPosition) : QPointF();
-            QString line = QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
-                               .arg(object.globalId)
-                               .arg(formatPoint(rawPosition))
-                               .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
-                               .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1)
-                                                : QStringLiteral("-"));
+            QString line =
+                QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
+                    .arg(object.globalId)
+                    .arg(formatPoint(rawPosition))
+                    .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
+                    .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1) : QStringLiteral("-"));
             if (filterIntervened) {
                 line += QStringLiteral(" cut med=%1 lim=%2")
                             .arg(std::hypot(medianDelta.x(), medianDelta.y()), 0, 'f', 2)
@@ -887,16 +886,15 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
  * @return                  현재 렌더 시점의 정규화 좌표
  */
 QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const QPointF& targetPosition,
-                                                 qint64 frameSequence, qint64 localTimeMsec) {
+                                                qint64 frameSequence, qint64 localTimeMsec) {
     auto currentPosition = [this, localTimeMsec](const PositionTransitionState& state) {
         if (config_.positionTransitionMsec <= 0 || state.transitionStartMsec <= 0) {
             return state.targetPosition;
         }
 
         const qint64 elapsedMsec = qMax<qint64>(0, localTimeMsec - state.transitionStartMsec);
-        const double ratio = qBound(0.0, static_cast<double>(elapsedMsec) /
-                                            static_cast<double>(config_.positionTransitionMsec),
-                                    1.0);
+        const double ratio =
+            qBound(0.0, static_cast<double>(elapsedMsec) / static_cast<double>(config_.positionTransitionMsec), 1.0);
         return interpolatePosition(state.startPosition, state.targetPosition, ratio);
     };
 

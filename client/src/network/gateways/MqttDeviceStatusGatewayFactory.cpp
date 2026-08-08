@@ -3,13 +3,13 @@
 #include <QVector>
 #include <memory>
 
+#include "network/gateways/MqttDeviceStatusGateway.h"
 #include "network/routing/BlurTopicHandler.h"
 #include "network/routing/DeviceStatusTopicHandler.h"
-#include "network/transport/MqttConnectionConfig.h"
-#include "network/gateways/MqttDeviceStatusGateway.h"
 #include "network/routing/MqttMessageRouter.h"
-#include "network/transport/QtMqttTransportFactory.h"
 #include "network/routing/RiskTopicHandler.h"
+#include "network/transport/MqttConnectionConfig.h"
+#include "network/transport/QtMqttTransportFactory.h"
 
 MqttDeviceStatusGatewayFactory::MqttDeviceStatusGatewayFactory(MqttRuntimeConfig config) : config_(std::move(config)) {}
 

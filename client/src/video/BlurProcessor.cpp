@@ -178,9 +178,7 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
  * @brief        블러 프레임 처리기를 생성합니다.
  * @param config JSON 검증을 통과한 블러 동기화 및 렌더링 설정
  */
-BlurProcessor::BlurProcessor(BlurProcessorConfig config) : config_(std::move(config)) {
-    metadataClock_.start();
-}
+BlurProcessor::BlurProcessor(BlurProcessorConfig config) : config_(std::move(config)) { metadataClock_.start(); }
 
 /**
  * @brief                     블러를 적용할 객체 유형을 설정합니다.

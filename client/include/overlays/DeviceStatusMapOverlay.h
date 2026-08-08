@@ -9,7 +9,6 @@
 
 class QGraphicsPixmapItem;
 class QGraphicsScene;
-class QGraphicsSimpleTextItem;
 
 class DeviceStatusMapOverlay final {
 public:
@@ -22,7 +21,6 @@ private:
     struct ChannelVisualItems {
         QGraphicsPixmapItem* led = nullptr;
         QGraphicsPixmapItem* sensor = nullptr;
-        QGraphicsSimpleTextItem* channelLabel = nullptr;
         DeviceChannelStatus status;
         bool hasStatus = false;
         bool receivedInCurrentSession = false;

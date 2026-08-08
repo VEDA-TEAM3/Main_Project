@@ -12,8 +12,8 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QShowEvent>
 #include <QShortcut>
+#include <QShowEvent>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
@@ -28,8 +28,8 @@
 
 #include "model/DigitalTwinTypes.h"
 #include "network/gateways/DeviceStatusGatewayFactory.h"
-#include "network/services/DeviceStatusService.h"
 #include "network/gateways/ReportGateway.h"
+#include "network/services/DeviceStatusService.h"
 #include "ui/ClickableVideoWidget.h"
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
@@ -673,7 +673,6 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
         new StreamSessionManager(std::move(receiverFactory), videoConfig_.receiverStartSpacingMsec, this);
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
     streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
-
 
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,

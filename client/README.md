@@ -11,12 +11,12 @@ Qt 6와 GStreamer로 구현한 4채널 주차장 안전 관제 애플리케이�
 - 얼굴과 차량 번호판 선택적 블러 처리
 - 실시간 객체 목록과 이벤트 로그
 - 채널별 장비 상태 및 CCTV 위험 테두리 표시
-- 채널 신고 확인 및 완료 다이얼로그
+- 채널 신고 확인 및 Slack DM/채널 전송
 
 ## 구조
 
 ```text
-Qt_Demo/
+client/
 ├─ assets/icons/          UI와 맵 아이콘
 ├─ config/                실행 설정 예제와 로컬 설정
 ├─ include/
@@ -107,15 +107,9 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `topviewDetail` | `[TOPVIEW DBG]` 객체별 프레임 좌표 상세 | `false` |
 | `topviewDetailIntervalMs` | 위 상세 로그를 gid마다 이 주기로 제한 (`0`이면 매 프레임) | `1000` |
 
-로그를 파일로 받을 때는 stderr 리다이렉트 대신 `VEDA_LOG_FILE`을 씁니다. GUI 서브시스템 실행 파일에는
-콘솔이 없어 Qt 기본 핸들러가 메시지를 `OutputDebugString`으로 보내는데, 이 경로는 디버거의 공유 버퍼를
-거치므로 긴 줄이 잘리고 여러 스레드의 줄이 섞입니다. `VEDA_LOG_FILE`은 메시지 핸들러를 직접 설치해
-뮤텍스로 직렬화한 뒤 파일에 온전히 기록합니다.
-
 `topviewDetail`은 gid마다 `topviewDetailIntervalMs` 주기로만 남기되, **중앙값 필터나 속도 상한이 실제로
 개입한 프레임은 주기와 무관하게 항상 남깁니다.** 평상시 분량을 20분의 1로 줄이면서 이상치는 하나도
 놓치지 않습니다.
-- TopView 최신 Risk 상태의 로컬 위치 전환(`digitalTwin.positionTransitionMs`)
 
 운영 자동화와 비밀 정보 주입을 위해 아래 환경 변수는 JSON보다 우선합니다.
 
@@ -129,15 +123,22 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | `VEDA_MQTT_CLIENT_ID` | 고정 MQTT Client ID |
 | `VEDA_MQTT_DEBUG` | MQTT 연결/구독 로그 활성화 (`logging.mqttConnection` 대체) |
 | `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`0`/`1`/`2`, `logging.topview*` 대체) |
-| `VEDA_LOG_FILE` | 모든 로그를 이 파일에 그대로 기록 (콘솔 경유 잘림·뒤섞임 방지) |
+| `VEDA_MAP_MIN_X`, `VEDA_MAP_MIN_Y` | 탑뷰 월드 좌표의 왼쪽·위쪽 경계 |
+| `VEDA_MAP_MAX_X`, `VEDA_MAP_MAX_Y` | 탑뷰 월드 좌표의 오른쪽·아래쪽 경계 |
+| `VEDA_MAP_INVERT_Y` | 월드 Y축을 화면 Y축으로 뒤집을지 여부 (`0`/`1`) |
 | `QTCCTV_BLUR_SYNC_OFFSET_MS` | 영상과 블러 메타데이터 동기화 보정값 |
 | `QTCCTV_DECODER_MODE` | `auto`, `software`, `d3d11` 디코더 선택 |
+| `SLACK_BOT_TOKEN` | 신고 전송용 Slack Bot User OAuth Token |
+| `SLACK_REPORT_TARGET` | 신고 대상 종류 (`dm` 또는 `channel`) |
+| `SLACK_REPORT_USER_ID` | DM 수신 사용자 ID (`SLACK_REPORT_TARGET=dm`) |
+| `SLACK_REPORT_CHANNEL_ID` | 수신 채널 ID (`SLACK_REPORT_TARGET=channel`) |
 
 Windows Qt Creator에서는 **Projects > Run > Environment**에 환경 변수를 등록합니다.
 
-영상과 TopView는 더 이상 영상 프레임 timestamp를 기준으로 직접 동기화하지 않습니다. `video.receiver.latencyMs`는
-RTSP/RTP 네트워크 지터 흡수용으로 유지하고, `video.receiver.alignmentDelayMs`는 AI/MQTT 처리 시간에 맞추기 위한
-의도적 표시 지연으로 별도 관리합니다. TopView는 최신 `RiskFrame`을 즉시 상태로 반영하고 객체 위치만
+`video.receiver.latencyMs`는 RTSP/RTP 네트워크 지터 흡수량이고, `video.receiver.alignmentDelayMs`는
+AI/MQTT 처리 결과와 맞추기 위한 의도적 영상 표시 지연입니다. 서로 목적이 다르므로 독립적으로 조정합니다.
+블러는 영상 프레임의 UTC와 MQTT `ts`를 비교해 가장 가까운 메타데이터를 적용합니다. TopView는 영상
+프레임과 직접 동기화하지 않고 최신 `RiskFrame`을 수신 순서대로 반영하며, 객체 위치만
 `digitalTwin.positionTransitionMs` 동안 부드럽게 전환합니다.
 
 ## MQTT

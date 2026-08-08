@@ -2,8 +2,8 @@
 
 #include <utility>
 
-#include "network/routing/MqttTopicFilter.h"
 #include "network/parsing/RiskMessageParser.h"
+#include "network/routing/MqttTopicFilter.h"
 
 RiskTopicHandler::RiskTopicHandler(MqttSubscription subscription) : subscription_(std::move(subscription)) {}
 

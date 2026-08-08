@@ -19,8 +19,7 @@ StreamSessionManager::StreamSessionManager(std::shared_ptr<StreamReceiverFactory
                                            int receiverStartSpacingMsec, QObject* parent)
     : QObject(parent),
       receiverFactory_(std::move(receiverFactory)),
-      receiverStartSpacingMsec_(receiverStartSpacingMsec) {
-}
+      receiverStartSpacingMsec_(receiverStartSpacingMsec) {}
 
 /**
  * @brief 실행 중인 모든 수신기와 worker thread를 정리합니다.

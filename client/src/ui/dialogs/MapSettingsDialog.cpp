@@ -1,7 +1,5 @@
 #include "ui/dialogs/MapSettingsDialog.h"
 
-#include "ui/dialogs/InformationDialog.h"
-
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
@@ -24,6 +22,8 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include "ui/dialogs/InformationDialog.h"
 
 namespace {
 constexpr int dialogPanelWidth = 800;

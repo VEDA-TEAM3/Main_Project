@@ -32,7 +32,7 @@ constexpr double opacityIncrementPerTick = static_cast<double>(updateIntervalMse
 /**
  * @brief           정규화 좌표를 중심에서 X자로 나눠 CCTV 채널을 계산합니다.
  * @param position  0.0~1.0 기준 객체 위치
- * @return          위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04 순의 0~3 채널 인덱스
+ * @return          위 CH01, 왼쪽 CH02, 아래 CH03, 오른쪽 CH04 순의 0~3 채널 인덱스
  */
 int channelIndexForPosition(const QPointF& position) {
     const double offsetX = position.x() - 0.5;
@@ -41,7 +41,7 @@ int channelIndexForPosition(const QPointF& position) {
     if (qAbs(offsetY) >= qAbs(offsetX)) {
         return offsetY < 0.0 ? 0 : 2;
     }
-    return offsetX > 0.0 ? 1 : 3;
+    return offsetX < 0.0 ? 1 : 3;
 }
 
 /**

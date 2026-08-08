@@ -232,7 +232,7 @@ void checkChannelDoesNotFlapAtBoundary() {
     check(!moved.objects.isEmpty() && moved.objects.constFirst().channelIndex != startChannel,
           "crossing the boundary for real must change the channel");
 }
-/// 중심에서 X자로 자른 네 구역과 채널 번호의 대응. 위 CH01, 오른쪽 CH02, 아래 CH03, 왼쪽 CH04.
+/// 중심에서 X자로 자른 네 구역과 채널 번호의 대응. 위 CH01, 왼쪽 CH02, 아래 CH03, 오른쪽 CH04.
 void checkWedgeChannelMapping() {
     DigitalTwinRuntimeConfig config = checkConfig();
     config.world.fixedBoundsEnabled = true;
@@ -251,11 +251,11 @@ void checkWedgeChannelMapping() {
         if (object.objectId == QStringLiteral("G-1")) {
             check(object.channelIndex == 0, "the north wedge must be CH01");
         } else if (object.objectId == QStringLiteral("G-2")) {
-            check(object.channelIndex == 1, "the east wedge must be CH02");
+            check(object.channelIndex == 3, "the east wedge must be CH04");
         } else if (object.objectId == QStringLiteral("G-3")) {
             check(object.channelIndex == 2, "the south wedge must be CH03");
         } else if (object.objectId == QStringLiteral("G-4")) {
-            check(object.channelIndex == 3, "the west wedge must be CH04");
+            check(object.channelIndex == 1, "the west wedge must be CH02");
         }
     }
 }

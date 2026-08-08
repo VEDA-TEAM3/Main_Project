@@ -20,7 +20,7 @@ public:
 private:
     static std::optional<qint64> referenceUtcMsec(const GstBuffer* buffer);
     static std::optional<qint64> ptsMsec(const GstBuffer* buffer);
-    void updateAnchor(qint64 ptsMsec, qint64 utcMsec, bool senderClock);
+    bool updateAnchor(qint64 ptsMsec, qint64 utcMsec, bool senderClock);
 
     QMutex mutex_;
     qint64 anchorPtsMsec_ = 0;

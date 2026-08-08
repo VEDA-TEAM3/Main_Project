@@ -1,7 +1,7 @@
 #pragma once
 
-#include "network/transport/MqttRuntimeConfig.h"
 #include "network/routing/MqttTopicHandler.h"
+#include "network/transport/MqttRuntimeConfig.h"
 
 class DeviceStatusTopicHandler final : public MqttTopicHandler {
 public:

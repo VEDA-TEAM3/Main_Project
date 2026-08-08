@@ -74,8 +74,11 @@ std::optional<VideoUtcTimestamp> VideoUtcClockMapper::timestampFor(const GstBuff
     QMutexLocker locker(&mutex_);
 
     if (referenceUtc.has_value()) {
-        updateAnchor(*pts, *referenceUtc, true);
-        return VideoUtcTimestamp{*referenceUtc, true};
+        if (updateAnchor(*pts, *referenceUtc, true)) {
+            return VideoUtcTimestamp{*referenceUtc, true};
+        }
+
+        return VideoUtcTimestamp{anchorUtcMsec_ + (*pts - anchorPtsMsec_), senderClockReady_};
     }
 
     if (!anchorReady_) {
@@ -135,14 +138,13 @@ std::optional<qint64> VideoUtcClockMapper::ptsMsec(const GstBuffer* buffer) {
  * @param ptsMsec     GStreamer PTS millisecond
  * @param utcMsec     대응하는 절대 UTC millisecond
  * @param senderClock RTCP 또는 명시적 sender clock에서 얻은 값인지 여부
+ * @return            기준점을 적용했거나 현재 기준과 일치하면 true
  */
-void VideoUtcClockMapper::updateAnchor(qint64 ptsMsec, qint64 utcMsec, bool senderClock) {
+bool VideoUtcClockMapper::updateAnchor(qint64 ptsMsec, qint64 utcMsec, bool senderClock) {
     if (anchorReady_ && senderClockReady_ && senderClock) {
         const qint64 predictedUtc = anchorUtcMsec_ + (ptsMsec - anchorPtsMsec_);
-        if (qAbs(predictedUtc - utcMsec) <= maximumAnchorDiscontinuityMsec) {
-            anchorPtsMsec_ = ptsMsec;
-            anchorUtcMsec_ = utcMsec;
-            return;
+        if (qAbs(predictedUtc - utcMsec) > maximumAnchorDiscontinuityMsec) {
+            return false;
         }
     }
 
@@ -151,5 +153,8 @@ void VideoUtcClockMapper::updateAnchor(qint64 ptsMsec, qint64 utcMsec, bool send
         anchorUtcMsec_ = utcMsec;
         anchorReady_ = true;
         senderClockReady_ = senderClock;
+        return true;
     }
+
+    return false;
 }

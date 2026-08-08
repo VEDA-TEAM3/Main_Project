@@ -6,10 +6,10 @@
 
 #include "network/realtime/BlurFrameDispatcher.h"
 #include "network/realtime/LatestBlurFrameBuffer.h"
+#include "network/realtime/RiskFrameDispatcher.h"
 #include "network/routing/MqttMessageRouter.h"
 #include "network/transport/MqttTransport.h"
 #include "network/transport/MqttTransportFactory.h"
-#include "network/realtime/RiskFrameDispatcher.h"
 
 namespace {
 constexpr int mqttDeviceChannelCount = 4;

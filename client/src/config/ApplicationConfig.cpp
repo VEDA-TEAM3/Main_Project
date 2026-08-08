@@ -354,8 +354,7 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
                      config.alignmentQueueMaximumTimeMsec, error)) {
         return false;
     }
-    if (config.alignmentDelayMsec > 0 &&
-        config.alignmentQueueMaximumTimeMsec < config.alignmentDelayMsec) {
+    if (config.alignmentDelayMsec > 0 && config.alignmentQueueMaximumTimeMsec < config.alignmentDelayMsec) {
         error = QStringLiteral("video.receiver.alignmentQueueMaximumTimeMs must be >= alignmentDelayMs");
         return false;
     }

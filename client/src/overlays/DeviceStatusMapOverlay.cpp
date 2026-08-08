@@ -1,10 +1,7 @@
 #include "overlays/DeviceStatusMapOverlay.h"
 
-#include <QColor>
-#include <QFont>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
-#include <QGraphicsSimpleTextItem>
 #include <QPointF>
 #include <QString>
 #include <QtGlobal>
@@ -13,18 +10,17 @@ namespace {
 constexpr int channelCount = 4;
 constexpr int iconSize = 38;
 constexpr int centralCctvIconSize = 74;
-constexpr double iconGap = 5.0;
+constexpr double iconGap = 6.0;
 constexpr double centralCctvZValue = 3.0;
 constexpr double overlayZValue = 40.0;
 const QPointF centralCctvPosition(500.0, 260.0);
 
-// 인덱스가 곧 채널이다. 카메라가 중심에서 상/우/하/좌를 보므로 각 구역 한가운데,
-// 주차면이 없는 통로(중앙 세로 470~566, 가로 띠 190~326)에 올린다
+// 인덱스가 곧 채널이다. 구역 이름과 겹치지 않도록 상·하 장치는 외곽 벽 쪽에 배치한다.
 const std::array<QPointF, channelCount> channelAnchors = {
-    QPointF(518.0, 110.0),
-    QPointF(880.0, 258.0),
-    QPointF(518.0, 385.0),
-    QPointF(120.0, 258.0),
+    QPointF(500.0, 88.0),
+    QPointF(120.0, 252.0),
+    QPointF(500.0, 416.0),
+    QPointF(880.0, 252.0),
 };
 }  // namespace
 
@@ -45,10 +41,6 @@ void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene) {
     cctvItem_->setZValue(centralCctvZValue);
     cctvItem_->setTransformationMode(Qt::SmoothTransformation);
 
-    QFont channelLabelFont(QStringLiteral("Segoe UI"));
-    channelLabelFont.setPointSizeF(9.0);
-    channelLabelFont.setBold(true);
-
     for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
         ChannelVisualItems& items = channels_[channelIndex];
         const QPointF anchor = channelAnchors[channelIndex];
@@ -65,13 +57,6 @@ void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene) {
         items.sensor->setPos(left + iconSize + iconGap, top);
         items.sensor->setZValue(overlayZValue);
         items.sensor->setTransformationMode(Qt::SmoothTransformation);
-
-        items.channelLabel =
-            scene->addSimpleText(QStringLiteral("CH %1").arg(channelIndex + 1, 2, 10, QChar('0')), channelLabelFont);
-        items.channelLabel->setBrush(QColor(QStringLiteral("#65baff")));
-        items.channelLabel->setZValue(overlayZValue + 1.0);
-        const QRectF labelBounds = items.channelLabel->boundingRect();
-        items.channelLabel->setPos(anchor.x() - labelBounds.width() / 2.0, top - labelBounds.height() - 4.0);
     }
 
     updateAllChannels();
@@ -170,14 +155,12 @@ void DeviceStatusMapOverlay::updateChannel(int channelIndex) {
     }
 
     ChannelVisualItems& items = channels_[channelIndex];
-    if (!items.led || !items.sensor || !items.channelLabel) {
+    if (!items.led || !items.sensor) {
         return;
     }
 
     items.led->setVisible(displaySettings_.showLed);
     items.sensor->setVisible(displaySettings_.showAlertDevice);
-    items.channelLabel->setVisible(displaySettings_.showLed || displaySettings_.showAlertDevice);
-
     if (!hasValidSignal(items)) {
         items.led->setPixmap(ledOffPixmap_);
         items.sensor->setPixmap(sensorOffPixmap_);
