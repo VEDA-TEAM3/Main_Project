@@ -82,7 +82,42 @@ void checkServerZoneIdPassThrough() {
 }
 
 /**
- * @brief 서로 다른 물리 CCTV 구역의 객체가 하나의 위험 쌍으로 결합되지 않는지 검사합니다.
+ * @brief 서버의 8개 zoneId와 양수 X 월드 좌표가 추적기에서 손실되지 않는지
+ * 확인합니다.
+ */
+void checkSecondPhysicalCctvObjects() {
+    DigitalTwinRuntimeConfig config;
+    config.positionTransitionMsec = 0;
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+
+    RiskFrameData frame;
+    frame.sourceTimestamp = 1500;
+    for (int zoneId = 0; zoneId < 8; ++zoneId) {
+        const double x = zoneId < 4 ? -50.0 : 50.0;
+        frame.objects.append(objectAt(zoneId + 1, QPointF(x, zoneId - 3.5), zoneId));
+    }
+
+    RiskObjectTracker tracker(config);
+    check(tracker.submitFrame(frame, 1500), "eight-channel frame must be accepted");
+    const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(1500);
+    check(snapshot.objects.size() == 8, "objects from both physical CCTV regions must be retained");
+
+    for (int zoneId = 0; zoneId < 8; ++zoneId) {
+        const DigitalTwinObject* object = findObject(snapshot, zoneId + 1);
+        check(object != nullptr, "every server GID must produce a tracked object");
+        check(object != nullptr && object->channelIndex == zoneId, "zoneId 0..7 must pass through unchanged");
+        if (zoneId >= 4) {
+            check(object != nullptr && object->position.x() > 0.0,
+                  "second physical CCTV object must keep its positive world X "
+                  "coordinate");
+        }
+    }
+}
+
+/**
+ * @brief 서로 다른 물리 CCTV 구역의 객체가 하나의 위험 쌍으로 결합되지 않는지
+ * 검사합니다.
  */
 void checkPhysicalCctvRiskIsolation() {
     DigitalTwinRuntimeConfig config;
@@ -109,7 +144,8 @@ void checkPhysicalCctvRiskIsolation() {
 }
 
 /**
- * @brief 누락 객체가 100ms 동안만 유지되고 위험 판단에서는 제외되는지 검사합니다.
+ * @brief 누락 객체가 100ms 동안만 유지되고 위험 판단에서는 제외되는지
+ * 검사합니다.
  */
 void checkMissingObjectGracePeriod() {
     DigitalTwinRuntimeConfig config;
@@ -162,6 +198,7 @@ void checkMissingObjectGracePeriod() {
 
 int main() {
     checkServerZoneIdPassThrough();
+    checkSecondPhysicalCctvObjects();
     checkPhysicalCctvRiskIsolation();
     checkMissingObjectGracePeriod();
 

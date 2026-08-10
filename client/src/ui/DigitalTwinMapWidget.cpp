@@ -622,6 +622,23 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
 
     updateMarkerPixmap(&demoItems_.last());
     updateVisualItem(&demoItems_.last());
+
+    if (liveMode_ && liveConfig_.debugDetail && object.position.x() > 0.0 && object.channelIndex >= channelsPerZone &&
+        object.channelIndex < digitalTwinChannelCount) {
+        const QPointF scenePosition = scenePointForObject(object.position, object.channelIndex);
+        const int mapIndex = object.position.x() <= liveConfig_.world.bounds.center().x() ? 0 : 1;
+        qDebug().noquote() << QStringLiteral(
+                                  "[TV SCENE] CREATE gid=%1 world=(%2,%3) zoneId=%4 "
+                                  "scene=(%5,%6) inside=%7")
+                                  .arg(object.objectId)
+                                  .arg(object.position.x(), 0, 'f', 2)
+                                  .arg(object.position.y(), 0, 'f', 2)
+                                  .arg(object.channelIndex)
+                                  .arg(scenePosition.x(), 0, 'f', 1)
+                                  .arg(scenePosition.y(), 0, 'f', 1)
+                                  .arg(objectAreaRects_[mapIndex].contains(scenePosition) ? QStringLiteral("yes")
+                                                                                          : QStringLiteral("no"));
+    }
 }
 
 /**
@@ -750,7 +767,8 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
 }
 
 /**
- * @brief 각 정사각형 구역 안에서 객체가 그려질 영역을 계산합니다.
+ * @brief 각 정사각형 구역 안에서 객체가 그려질 영역을
+ * 계산합니다.
 
  */
 void DigitalTwinMapWidget::updateObjectAreaRect() {
@@ -760,7 +778,8 @@ void DigitalTwinMapWidget::updateObjectAreaRect() {
 }
 
 /**
- * @brief 월드 좌표를 해당 물리 CCTV의 정사각형 scene 좌표로 변환합니다.
+ * @brief 월드 좌표를 해당 물리 CCTV의 정사각형 scene 좌표로
+ * 변환합니다.
 
  */
 QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, int channelIndex) const {
@@ -773,9 +792,10 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
                        demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
     }
 
-    int zoneIndex = channelIndex >= 0 ? channelIndex / channelsPerZone : (worldPosition.x() < 0.0 ? 0 : 1);
-    zoneIndex = qBound(0, zoneIndex, static_cast<int>(objectAreaRects_.size()) - 1);
-
+    // zoneId is a hardware/direction identifier. Live map placement is derived
+    // only from RiskObject.pos.
+    const double worldCenterX = worldBounds.center().x();
+    const int zoneIndex = worldPosition.x() <= worldCenterX ? 0 : 1;
     const double halfWidth = worldBounds.width() * 0.5;
     const double zoneMinimumX = worldBounds.left() + zoneIndex * halfWidth;
     const double normalizedX = qBound(0.0, (worldPosition.x() - zoneMinimumX) / halfWidth, 1.0);

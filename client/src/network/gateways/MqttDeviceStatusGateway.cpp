@@ -14,6 +14,18 @@
 namespace {
 constexpr int mqttDeviceChannelCount = 4;
 
+QString riskLevelName(DigitalTwinRiskLevel riskLevel) {
+    switch (riskLevel) {
+        case DigitalTwinRiskLevel::Warning:
+            return QStringLiteral("warning");
+        case DigitalTwinRiskLevel::Danger:
+            return QStringLiteral("danger");
+        case DigitalTwinRiskLevel::Normal:
+        default:
+            return QStringLiteral("normal");
+    }
+}
+
 QString debugPayloadText(const QByteArray& payload, qsizetype maximumLength) {
     QString text = QString::fromUtf8(payload).simplified();
     if (maximumLength > 0 && text.size() > maximumLength) {
@@ -128,7 +140,8 @@ void MqttDeviceStatusGateway::subscribeToTopics() {
 }
 
 /**
- * @brief          MQTT 메시지를 토픽 handler로 변환한 뒤 기존 domain signal로 전달합니다.
+ * @brief          MQTT 메시지를 토픽 handler로 변환한 뒤 기존 domain signal로
+ * 전달합니다.
  * @param payload  MQTT payload
  * @param topic    실제 수신 토픽
  */
@@ -159,7 +172,8 @@ void MqttDeviceStatusGateway::handleMessage(const QByteArray& payload, const QSt
     dispatchMessages(std::move(result.messages));
 }
 
-/** @brief 변환된 도메인 메시지를 서비스 signal 또는 최신값 dispatcher로 전달합니다. */
+/** @brief 변환된 도메인 메시지를 서비스 signal 또는 최신값 dispatcher로
+ * 전달합니다. */
 void MqttDeviceStatusGateway::dispatchMessages(MqttMessageBatch messages) {
     for (DeviceStatusReport& report : messages.reports) {
         emit reportReceived(std::move(report));
@@ -175,7 +189,8 @@ void MqttDeviceStatusGateway::dispatchMessages(MqttMessageBatch messages) {
     }
 }
 
-/** @brief 상태 및 이벤트 MQTT 메시지를 읽기 쉬운 제한 길이 텍스트로 출력합니다. */
+/** @brief 상태 및 이벤트 MQTT 메시지를 읽기 쉬운 제한 길이 텍스트로 출력합니다.
+ */
 void MqttDeviceStatusGateway::logReceivedMessage(const QByteArray& payload, const QString& topic) const {
     qInfo().noquote() << QStringLiteral("[MQTT RX] topic=%1 bytes=%2 payload=%3")
                              .arg(topic)
@@ -220,6 +235,20 @@ void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrame
                              .arg(topic)
                              .arg(frame.sourceTimestamp)
                              .arg(frame.objects.size());
+
+    for (const RiskObjectData& object : frame.objects) {
+        if (object.worldPosition.x() <= 0.0 || object.zoneId < 4 || object.zoneId > 7) {
+            continue;
+        }
+
+        qInfo().noquote() << QStringLiteral("[MQTT RISK Z2] gid=%1 pos=(%2,%3) cls=%4 risk=%5 zoneId=%6")
+                                 .arg(object.globalId)
+                                 .arg(object.worldPosition.x(), 0, 'f', 2)
+                                 .arg(object.worldPosition.y(), 0, 'f', 2)
+                                 .arg(object.objectClass)
+                                 .arg(riskLevelName(object.riskLevel))
+                                 .arg(object.zoneId);
+    }
 }
 
 /** @brief MQTT 계약 또는 전송 오류를 기존 상태 서비스 경로로 전달합니다. */
