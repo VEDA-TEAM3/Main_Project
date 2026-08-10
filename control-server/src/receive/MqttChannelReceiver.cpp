@@ -32,8 +32,11 @@ bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noex
 }  // namespace
 
 MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
-                                         std::uint64_t retryIntervalMs)
-    : transport_(std::move(transport)), channelCount_(channelCount), retryInterval_(retryIntervalMs) {}
+                                         std::uint64_t retryIntervalMs, bool demoPedestrianProxy)
+    : transport_(std::move(transport)),
+      channelCount_(channelCount),
+      retryInterval_(retryIntervalMs),
+      demoPedestrianProxy_(demoPedestrianProxy) {}
 
 MqttChannelReceiver::~MqttChannelReceiver() { stop(); }
 
@@ -56,6 +59,14 @@ void MqttChannelReceiver::start() {
         running_.store(false, std::memory_order_release);
         logError(kIface, "transport가 null임 (AppContext에서 공유 MqttTransport 주입 필요)");
         return;
+    }
+
+    // 켜져 있는 줄 모른 채 운영에 나가면 실제 보행자가 전부 차량으로 판정된다.
+    // 기본 로그 레벨(info)에서도 보이도록 에러 레벨로 남긴다.
+    if (demoPedestrianProxy_) {
+        logError(kIface,
+                 "[데모 모드] demoPedestrianProxy=true — 수신되는 Human 을 전부 Vehicle 로 치환함. "
+                 "운영 배포에서는 반드시 false 로 둘 것");
     }
 
     // PipelineWorker 를 먼저 띄운다 (메시지가 들어오기 전에 소비자 준비). mosquitto 콜백 스레드를
@@ -211,7 +222,7 @@ void MqttChannelReceiver::pipelineLoop() noexcept {
 
 void MqttChannelReceiver::processMessage(std::string_view topic, std::string_view payload) noexcept {
     if (const auto channel = parseChannel(topic, "/topview")) {
-        const veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
+        veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
         if (!isValidTopViewFrame(frame, channelCount_)) {
             recordDrop(topic, "invalid TopViewFrame");
             return;
@@ -219,6 +230,20 @@ void MqttChannelReceiver::processMessage(std::string_view topic, std::string_vie
         if (frame.ch != *channel) {
             recordDrop(topic, "topic/payload channel mismatch");
             return;
+        }
+
+        // [데모 전용 엣지 치환] 사람을 차량으로 바꿔 넣는다. 위험 판정은 차량 중심이라
+        // (원칙 1: 차량이 없으면 전부 None) 사람만 걸어서는 경보가 하나도 울리지 않는데,
+        // 판정 규칙을 데모용으로 고치면 시연한 것과 배포하는 것이 달라진다. 그래서 핵심
+        // 로직(ThresholdRiskPolicy/Fuser/ZoneMapper)은 전혀 건드리지 않고 파이프라인
+        // 최외곽 -- 디코드/검증 직후, 집계기에 들어가기 전 -- 에서 cls 만 바꾼다.
+        // 하류는 이것이 원래부터 차량이었던 것처럼 처리한다.
+        if (demoPedestrianProxy_) {
+            for (veda::TopViewObject& object : frame.objects) {
+                if (object.cls == veda::ObjectClass::Human) {
+                    object.cls = veda::ObjectClass::Vehicle;
+                }
+            }
         }
 
         FrameCallback callback;

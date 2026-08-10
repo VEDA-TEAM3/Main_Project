@@ -42,8 +42,11 @@ public:
      * @param transport         sink와 공유하는 MQTT 연결 (null이면 start()가 실패하고 로그만 남김)
      * @param channelCount      frame.ch / topic 채널 번호의 유효 범위 [0, channelCount) (AppConfig::channelCount)
      * @param retryIntervalMs   최초 연결 실패 시 재시도 간격 (AppConfig::mqttReceiverRetryIntervalMs)
+     * @param demoPedestrianProxy [데모 전용] true 면 수신한 Human 을 Vehicle 로 치환
+     *                            (AppConfig::demoPedestrianProxy). 기본 false — 기존 호출부는 그대로 컴파일된다
      */
-    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs);
+    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs,
+                        bool demoPedestrianProxy = false);
     ~MqttChannelReceiver() override;
 
     MqttChannelReceiver(const MqttChannelReceiver&) = delete;
@@ -71,6 +74,7 @@ private:
     std::shared_ptr<MqttTransport> transport_;
     int channelCount_;
     std::chrono::milliseconds retryInterval_;
+    bool demoPedestrianProxy_;  ///< [데모 전용] processMessage 에서 Human -> Vehicle 치환 (생성 후 불변)
 
     mutable std::mutex callbackMutex_;
     FrameCallback frameCallback_;

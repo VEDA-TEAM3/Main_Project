@@ -120,8 +120,8 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
 
     for (const auto& zone : eval.zoneLevels) {
         if (!serial_event::isValidChannelId(zone.zoneId)) {
-            logError(kIface, "UART 통지 생략: zoneId=" + std::to_string(zone.zoneId) +
-                                 " 는 channel_id(uint8_t) 범위를 벗어남");
+            logError(kIface,
+                     "UART 통지 생략: zoneId=" + std::to_string(zone.zoneId) + " 는 channel_id(uint8_t) 범위를 벗어남");
             continue;
         }
 
@@ -137,14 +137,14 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
         memset(&ev, 0, sizeof(ev));
         ev.channel_id = static_cast<uint8_t>(zone.zoneId);
         ev.risk_level = static_cast<uint8_t>(zone.level);
-        ev.timestamp_ms = eval.timestamp;
-        ev.dist_mm = serial_event::encodeDistanceMm(zone.minDist);
+        veda_write_i64_le(&ev.timestamp_ms, eval.timestamp);
+        veda_write_u16_le(&ev.dist_mm, serial_event::encodeDistanceMm(zone.minDist));
         if (!std::isfinite(zone.minDist)) {
-            logError(kIface, "채널 " + std::to_string(zone.zoneId) +
-                                 " 최소 거리가 유한수가 아님 — dist_mm=VEDA_DIST_MM_NONE");
+            logError(kIface,
+                     "채널 " + std::to_string(zone.zoneId) + " 최소 거리가 유한수가 아님 — dist_mm=VEDA_DIST_MM_NONE");
         } else if (zone.minDist >= serial_event::kFirstReservedDistanceMeters) {
-            logError(kIface, "채널 " + std::to_string(zone.zoneId) + " 최소 거리 " +
-                                 std::to_string(zone.minDist) + "m가 UART 표현 범위를 벗어남 — dist_mm=" +
+            logError(kIface, "채널 " + std::to_string(zone.zoneId) + " 최소 거리 " + std::to_string(zone.minDist) +
+                                 "m가 UART 표현 범위를 벗어남 — dist_mm=" +
                                  std::to_string(serial_event::kMaxValidDistanceMm) + "로 포화");
         }
 
@@ -238,7 +238,11 @@ void SerialHwEventDispatcher::readerLoop() {
                 if (byte == VEDA_END_BYTE && veda_checksum(payloadBuf, sizeof(payloadBuf)) == rxChecksum) {
                     veda_uplink_packet_t pkt;
                     memcpy(&pkt, payloadBuf, sizeof(pkt));
-                    handleUplinkFrame(pkt);
+                    if (veda_uplink_payload_is_valid(&pkt)) {
+                        handleUplinkFrame(pkt);
+                    } else {
+                        logError(kIface, "UART 상행 payload 필드 검증 실패");
+                    }
                 }
                 state = WAIT_START;
                 break;
@@ -334,10 +338,11 @@ void SerialHwEventDispatcher::resendLastCommand(veda::ChannelId ch, veda::RiskLe
     memset(&ev, 0, sizeof(ev));
     ev.channel_id = static_cast<uint8_t>(ch);
     ev.risk_level = static_cast<uint8_t>(level);
-    ev.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count();
-    ev.dist_mm = VEDA_DIST_MM_NONE;
+    const auto timestampMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    veda_write_i64_le(&ev.timestamp_ms, timestampMs);
+    veda_write_u16_le(&ev.dist_mm, VEDA_DIST_MM_NONE);
 
     veda_downlink_frame_t frame;
     frame.start_byte = VEDA_START_BYTE;
