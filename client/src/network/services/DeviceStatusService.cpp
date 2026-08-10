@@ -12,13 +12,14 @@
 #include "network/realtime/LatestRiskFrameBuffer.h"
 
 namespace {
-constexpr int statusServiceChannelCount = 4;
+constexpr int statusServiceChannelCount = 8;
 constexpr int maximumRecentReportKeys = 128;
 constexpr int uiFlushIntervalMsec = 50;
 }  // namespace
 
 /**
- * @brief                 장비 상태 service를 생성하고 UI 갱신 병합기를 준비합니다.
+ * @brief                 장비 상태 service를 생성하고 UI 갱신 병합기를
+ * 준비합니다.
  * @param gatewayFactory  실제 MQTT 또는 demo gateway 생성 factory
  * @param parent          Qt 객체 소유권을 연결할 부모 객체
  */
@@ -27,7 +28,8 @@ DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFact
                           std::make_shared<LatestRiskFrameBuffer>(), parent) {}
 
 /**
- * @brief                  장비 상태 service를 교체 가능한 실시간 프레임 버퍼와 함께 생성합니다.
+ * @brief                  장비 상태 service를 교체 가능한 실시간 프레임 버퍼와
+ * 함께 생성합니다.
  * @param gatewayFactory   실제 MQTT 또는 demo gateway 생성 factory
  * @param blurFrameBuffer  채널별 최신 블러 프레임 버퍼
  * @param riskFrameBuffer  최신 위험 프레임 버퍼
@@ -100,7 +102,8 @@ void DeviceStatusService::stop() {
             Qt::BlockingQueuedConnection);
 
         if (!stopped) {
-            qWarning() << "[DeviceStatusService] Failed to stop gateway in its worker thread";
+            qWarning() << "[DeviceStatusService] Failed to stop gateway in its "
+                          "worker thread";
         }
     }
 
@@ -167,7 +170,8 @@ void DeviceStatusService::queueBlurFrame(BlurFrameData frame) {
 }
 
 /**
- * @brief UI 이벤트 루프에는 채널별 도착 순서를 보존한 블러 프레임 묶음을 전달합니다.
+ * @brief UI 이벤트 루프에는 채널별 도착 순서를 보존한 블러 프레임 묶음을
+ * 전달합니다.
  */
 void DeviceStatusService::flushPendingBlurFrames() {
     QVector<BlurFrameData> frames = blurFrameBuffer_->takeLatestFrames();
@@ -177,7 +181,8 @@ void DeviceStatusService::flushPendingBlurFrames() {
 }
 
 /**
- * @brief        MQTT 작업 스레드에서 받은 위험 프레임을 최신값 버퍼에 병합합니다.
+ * @brief        MQTT 작업 스레드에서 받은 위험 프레임을 최신값 버퍼에
+ * 병합합니다.
  * @param frame  timestamp 정렬과 계약 검증을 통과한 위험 프레임
  */
 void DeviceStatusService::queueRiskFrame(RiskFrameData frame) {
@@ -192,7 +197,8 @@ void DeviceStatusService::queueRiskFrame(RiskFrameData frame) {
     }
 }
 
-/** @brief UI 이벤트 루프에는 대기 중인 가장 최신 위험 프레임 하나만 전달합니다. */
+/** @brief UI 이벤트 루프에는 대기 중인 가장 최신 위험 프레임 하나만 전달합니다.
+ */
 void DeviceStatusService::flushPendingRiskFrame() {
     std::optional<RiskFrameData> frame = riskFrameBuffer_->takeLatestFrame();
     if (frame.has_value()) {
@@ -256,7 +262,8 @@ void DeviceStatusService::handleReport(DeviceStatusReport report) {
 }
 
 /**
- * @brief         채널 상태 스냅샷에서 HW 연결 상태와 유효한 출력 상태를 함께 반영합니다.
+ * @brief         채널 상태 스냅샷에서 HW 연결 상태와 유효한 출력 상태를 함께
+ * 반영합니다.
  * @param report  shared/Contract.h의 ChannelStatus 규약으로 검증된 보고
  */
 void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& report) {
@@ -315,7 +322,8 @@ void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& r
 }
 
 /**
- * @brief         성공적으로 확인된 실제 HW 출력만 마지막 확정 상태로 저장합니다.
+ * @brief         성공적으로 확인된 실제 HW 출력만 마지막 확정 상태로
+ * 저장합니다.
  * @param report  state가 검증된 성공 피드백 보고
  */
 void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& report) {
@@ -337,7 +345,8 @@ void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& repo
 }
 
 /**
- * @brief         실패 Payload의 state를 무시하고 마지막 확정 출력 상태를 유지합니다.
+ * @brief         실패 Payload의 state를 무시하고 마지막 확정 출력 상태를
+ * 유지합니다.
  * @param report  UART timeout 등 상태 확인 실패 보고
  */
 void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report) {
@@ -414,7 +423,8 @@ bool DeviceStatusService::isDuplicateReport(const DeviceStatusReport& report) {
 }
 
 /**
- * @brief         수정할 수 없는 Payload 필드 조합으로 중복 판별 key를 생성합니다.
+ * @brief         수정할 수 없는 Payload 필드 조합으로 중복 판별 key를
+ * 생성합니다.
  * @param report  key를 만들 상태 보고
  * @return        timestamp가 없으면 빈 문자열, 있으면 bounded cache용 key
  */

@@ -45,18 +45,28 @@ QString objectTypeIconPath(DigitalTwinObjectType objectType) {
  * @return        0~100 기준 좌표 문자열
  */
 QString positionTextForObject(const DigitalTwinObject& object) {
-    return QStringLiteral("(%1, %2)")
-        .arg(object.position.x() * 100.0, 0, 'f', 1)
-        .arg(object.position.y() * 100.0, 0, 'f', 1);
+    return QStringLiteral("(%1, %2)").arg(object.position.x(), 0, 'f', 1).arg(object.position.y(), 0, 'f', 1);
 }
 
 /**
- * @brief         구역 판정 구현 전까지 사용할 안정적인 더미 구역명을 반환합니다.
- * @param object  더미 구역을 배정할 객체
- * @return        CH-01~CH-04 중 하나
+ * @brief         서버 채널 기준의 물리 CCTV 구역명을 반환합니다.
+ * @param object  구역명을 표시할 객체
+ * @return        구역 내 CH-01~CH-04 또는 미배정 표시
  */
-QString dummyAreaForObject(const DigitalTwinObject& object) {
-    return QStringLiteral("CH-%1").arg(object.channelIndex + 1, 2, 10, QLatin1Char('0'));
+QString zoneTextForChannel(int channelIndex) {
+    if (channelIndex < 0) {
+        return QStringLiteral("미배정");
+    }
+
+    return QStringLiteral("%1구역").arg(channelIndex / 4 + 1);
+}
+
+QString channelText(int channelIndex) {
+    if (channelIndex < 0) {
+        return QStringLiteral("-");
+    }
+
+    return QStringLiteral("CH-%1").arg(channelIndex % 4 + 1, 2, 10, QLatin1Char('0'));
 }
 
 /**
@@ -159,8 +169,10 @@ QVariant DigitalTwinObjectTableModel::data(const QModelIndex& index, int role) c
             return objectTypeText(object.type);
         case ObjectPositionColumn:
             return positionTextForObject(object);
-        case ObjectAreaColumn:
-            return dummyAreaForObject(object);
+        case ObjectZoneColumn:
+            return zoneTextForChannel(object.channelIndex);
+        case ObjectChannelColumn:
+            return channelText(object.channelIndex);
         default:
             return {};
     }
@@ -185,7 +197,9 @@ QVariant DigitalTwinObjectTableModel::headerData(int section, Qt::Orientation or
             return QStringLiteral("유형");
         case ObjectPositionColumn:
             return QStringLiteral("위치 (X, Y)");
-        case ObjectAreaColumn:
+        case ObjectZoneColumn:
+            return QStringLiteral("구역");
+        case ObjectChannelColumn:
             return QStringLiteral("채널");
         default:
             return {};

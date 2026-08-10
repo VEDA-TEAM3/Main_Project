@@ -31,7 +31,8 @@ namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maxTrailSceneLength = 240.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
-constexpr int digitalTwinChannelCount = 4;
+constexpr int digitalTwinChannelCount = 8;
+constexpr int channelsPerZone = 4;
 
 QString centralEventKey(const CentralEventData& event) {
     const QString identity = event.eventId.isEmpty() ? event.eventType : event.eventId;
@@ -126,7 +127,8 @@ double trailLength(const QVector<QPointF>& positions) {
 }
 
 /**
- * @brief            이동 경로 점 개수와 전체 길이를 path 생성에 필요한 범위로 줄입니다.
+ * @brief            이동 경로 점 개수와 전체 길이를 path 생성에 필요한 범위로
+ * 줄입니다.
  * @param positions  정리할 최근 위치 목록
  */
 void trimTrailPositions(QVector<QPointF>* positions) {
@@ -161,7 +163,8 @@ void releaseSceneItem(QGraphicsScene* scene, QGraphicsItem* item) {
 }
 
 /**
- * @brief           스냅샷에 하나 이상의 위험 객체 또는 객체 쌍이 있는지 확인합니다.
+ * @brief           스냅샷에 하나 이상의 위험 객체 또는 객체 쌍이 있는지
+ * 확인합니다.
  * @param snapshot  현재 디지털 트윈 상태
  * @return          위험이 유지 중이면 true
  */
@@ -183,7 +186,8 @@ bool hasActiveDanger(const DigitalTwinSnapshot& snapshot) {
 }  // namespace
 
 /**
- * @brief       디지털 트윈 맵 scene, 오버레이 관리자, 시뮬레이션 worker를 초기화합니다.
+ * @brief       디지털 트윈 맵 scene, 오버레이 관리자, 시뮬레이션 worker를
+ * 초기화합니다.
  * @param parent  부모 위젯
  */
 DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
@@ -214,11 +218,14 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
-    // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에 파동이 하나씩만 있어도
-    // 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로 나눠 판단한다
+    // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에 파동이
+    // 하나씩만 있어도 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로
+    // 나눠 판단한다
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
 
-    overlayManager_.setScene(&scene_);
+    for (OverlayManager& overlayManager : overlayManagers_) {
+        overlayManager.setScene(&scene_);
+    }
     dangerAlertOverlay_ = new DangerAlertOverlay(viewport());
     dangerAlertOverlay_->updateGeometryForViewport(viewport()->size());
 
@@ -254,7 +261,9 @@ DigitalTwinMapWidget::~DigitalTwinMapWidget() {
         disconnect(simulationWorker_.get(), nullptr, this, nullptr);
     }
 
-    overlayManager_.clear();
+    for (OverlayManager& overlayManager : overlayManagers_) {
+        overlayManager.clear();
+    }
 
     if (simulationWorker_ && simulationWorker_->thread() == &simulationThread_ && simulationThread_.isRunning()) {
         QThread* ownerThread = thread();
@@ -296,7 +305,8 @@ void DigitalTwinMapWidget::stopDemo() {
 }
 
 /**
- * @brief          설정 팝업에서 확정한 맵 표시 옵션을 기존 객체와 장치 오버레이에 적용합니다.
+ * @brief          설정 팝업에서 확정한 맵 표시 옵션을 기존 객체와 장치
+ * 오버레이에 적용합니다.
  * @param settings 적용할 네 개 표시 옵션
  */
 void DigitalTwinMapWidget::applyDisplaySettings(const DigitalTwinMapDisplaySettings& settings) {
@@ -311,7 +321,8 @@ void DigitalTwinMapWidget::applyDisplaySettings(const DigitalTwinMapDisplaySetti
 }
 
 /**
- * @brief        MQTT 통합 RiskFrame을 실제 디지털 트윈 지도 입력으로 반영합니다.
+ * @brief        MQTT 통합 RiskFrame을 실제 디지털 트윈 지도 입력으로
+ * 반영합니다.
  * @param frame  계약 검증을 통과한 4채널 통합 위험 프레임
  */
 void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
@@ -341,7 +352,7 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
 }
 
 void DigitalTwinMapWidget::applyCentralEvent(CentralEventData event) {
-    if (event.channelIndex < 0 || event.channelIndex >= 4 || event.sourceTimestamp <= 0) {
+    if (event.channelIndex < 0 || event.channelIndex >= digitalTwinChannelCount || event.sourceTimestamp <= 0) {
         return;
     }
 
@@ -373,7 +384,8 @@ void DigitalTwinMapWidget::applyDeviceChannelStatuses(QVector<DeviceChannelStatu
 }
 
 /**
- * @brief            MQTT 연결 여부에 따라 맵 장치 아이콘의 신호 상태를 변경합니다.
+ * @brief            MQTT 연결 여부에 따라 맵 장치 아이콘의 신호 상태를
+ * 변경합니다.
  * @param available  MQTT 브로커에 연결되어 있으면 true
  */
 void DigitalTwinMapWidget::setDeviceSignalAvailable(bool available) {
@@ -453,13 +465,15 @@ void DigitalTwinMapWidget::resizeEvent(QResizeEvent* event) {
  * @brief   데모 주차장 맵의 고정 배경 요소를 구성합니다.
  */
 void DigitalTwinMapWidget::setupScene() {
-    overlayManager_.clear();
+    for (OverlayManager& overlayManager : overlayManagers_) {
+        overlayManager.clear();
+    }
     scene_.clear();
     demoItems_.clear();
     visualItemIndexes_.clear();
-    mapRect_ = sceneBuilder_->build(&scene_);
+    mapLayout_ = sceneBuilder_->build(&scene_);
     updateObjectAreaRect();
-    deviceStatusMapOverlay_.initialize(&scene_);
+    deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects);
     deviceStatusMapOverlay_.setDisplaySettings(displaySettings_);
 
     if (dangerAlertOverlay_) {
@@ -474,7 +488,8 @@ void DigitalTwinMapWidget::setupSimulationWorker() {
     simulationWorker_ = std::make_shared<DigitalTwinSimulationWorker>();
 
     if (!simulationWorker_->moveToThread(&simulationThread_)) {
-        qWarning() << "[DigitalTwinMapWidget] Failed to move simulation worker to its thread";
+        qWarning() << "[DigitalTwinMapWidget] Failed to move simulation worker to "
+                      "its thread";
         simulationWorker_.reset();
         return;
     }
@@ -489,7 +504,8 @@ void DigitalTwinMapWidget::setupSimulationWorker() {
 }
 
 /**
- * @brief           worker 스냅샷을 scene에 반영한 뒤 대시보드 소비자에게 전달합니다.
+ * @brief           worker 스냅샷을 scene에 반영한 뒤 대시보드 소비자에게
+ * 전달합니다.
  * @param snapshot  객체와 객체 쌍 위험 상태를 함께 담은 최신 스냅샷
  */
 void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& snapshot) {
@@ -503,9 +519,10 @@ void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& sn
 }
 
 /**
- * @brief           객체와 중앙 이벤트를 합쳐 채널별 최고 위험 단계를 계산합니다.
+ * @brief           객체와 중앙 이벤트를 합쳐 채널별 최고 위험 단계를
+ * 계산합니다.
  * @param snapshot  현재 디지털 트윈 객체 상태
- * @return          CH-01부터 CH-04까지의 위험 단계
+ * @return          CH-01부터 CH-08까지의 위험 단계
  */
 QVector<DigitalTwinRiskLevel> DigitalTwinMapWidget::channelRiskLevels(const DigitalTwinSnapshot& snapshot) const {
     QVector<DigitalTwinRiskLevel> riskLevels(digitalTwinChannelCount, DigitalTwinRiskLevel::Normal);
@@ -565,7 +582,16 @@ void DigitalTwinMapWidget::showRiskPulse(const DigitalTwinRiskEvent& event) {
         return;
     }
 
-    overlayManager_.showRiskPulse(scenePointFromNormalized(event.position), event.riskLevel);
+    if (event.channelIndex < 0) {
+        return;
+    }
+
+    const int zoneIndex = event.channelIndex / channelsPerZone;
+    if (zoneIndex < 0 || zoneIndex >= static_cast<int>(overlayManagers_.size())) {
+        return;
+    }
+
+    overlayManagers_[zoneIndex].showRiskPulse(scenePointForObject(event.position, event.channelIndex), event.riskLevel);
 }
 
 /**
@@ -611,7 +637,7 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
         updateMarkerPixmap(visualItem);
     }
 
-    const QPointF scenePosition = scenePointFromNormalized(visualItem->object.position);
+    const QPointF scenePosition = scenePointForObject(visualItem->object.position, visualItem->object.channelIndex);
     visualItem->marker->setPos(scenePosition);
 
     const bool isMoving =
@@ -724,42 +750,42 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
 }
 
 /**
- * @brief                    0.0~1.0 정규화 좌표를 scene 좌표로 변환합니다.
- * @param normalizedPosition  정규화된 객체 위치
- * @return                   scene 좌표계 위치
- */
-/**
- * @brief   객체 좌표가 놓일 scene 영역을 월드 종횡비에 맞춰 계산합니다.
- *
- * @details 정규화 좌표를 맵 사각형에 그대로 펴 바르면 월드의 가로세로 비율이 무시된다.
- *          담당 구역이 정사각형(10x10m)인데 맵이 1000x520이면 x축이 y축의 1.9배로 늘어나,
- *          대각선 이동 각도와 객체 간 거리가 방향에 따라 다르게 보인다. 고정 경계가 설정된
- *          경우에만 그 비율을 아는 것이므로, 자동 경계일 때는 기존처럼 맵 전체를 쓴다.
+ * @brief 각 정사각형 구역 안에서 객체가 그려질 영역을 계산합니다.
+
  */
 void DigitalTwinMapWidget::updateObjectAreaRect() {
-    objectAreaRect_ = mapRect_;
-
-    // 내장 데모 좌표는 맵 전체 폭을 쓰도록 만들어졌으므로 실데이터일 때만 보정한다
-    const QRectF worldBounds = liveConfig_.world.bounds;
-    if (!liveMode_ || !liveConfig_.world.fixedBoundsEnabled || worldBounds.width() <= 0.0 ||
-        worldBounds.height() <= 0.0 || mapRect_.width() <= 0.0 || mapRect_.height() <= 0.0) {
-        return;
+    for (qsizetype zoneIndex = 0; zoneIndex < objectAreaRects_.size(); ++zoneIndex) {
+        objectAreaRects_[zoneIndex] = mapLayout_.zoneRects[zoneIndex].adjusted(18.0, 18.0, -18.0, -18.0);
     }
-
-    const double worldAspect = worldBounds.width() / worldBounds.height();
-    const double mapAspect = mapRect_.width() / mapRect_.height();
-    if (qFuzzyCompare(worldAspect, mapAspect)) {
-        return;
-    }
-
-    const double width = worldAspect > mapAspect ? mapRect_.width() : mapRect_.height() * worldAspect;
-    const double height = worldAspect > mapAspect ? mapRect_.width() / worldAspect : mapRect_.height();
-    objectAreaRect_ = QRectF(mapRect_.center().x() - width * 0.5, mapRect_.center().y() - height * 0.5, width, height);
 }
 
-QPointF DigitalTwinMapWidget::scenePointFromNormalized(const QPointF& normalizedPosition) const {
-    return QPointF(objectAreaRect_.left() + normalizedPosition.x() * objectAreaRect_.width(),
-                   objectAreaRect_.top() + normalizedPosition.y() * objectAreaRect_.height());
+/**
+ * @brief 월드 좌표를 해당 물리 CCTV의 정사각형 scene 좌표로 변환합니다.
+
+ */
+QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, int channelIndex) const {
+    const QRectF worldBounds = liveConfig_.world.bounds;
+    const bool validBounds = worldBounds.width() > 0.0 && worldBounds.height() > 0.0;
+    if (!liveMode_ || !validBounds) {
+        const int demoZoneIndex = channelIndex >= channelsPerZone ? 1 : 0;
+        const QRectF& demoArea = objectAreaRects_[demoZoneIndex];
+        return QPointF(demoArea.left() + qBound(0.0, worldPosition.x(), 1.0) * demoArea.width(),
+                       demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
+    }
+
+    int zoneIndex = channelIndex >= 0 ? channelIndex / channelsPerZone : (worldPosition.x() < 0.0 ? 0 : 1);
+    zoneIndex = qBound(0, zoneIndex, static_cast<int>(objectAreaRects_.size()) - 1);
+
+    const double halfWidth = worldBounds.width() * 0.5;
+    const double zoneMinimumX = worldBounds.left() + zoneIndex * halfWidth;
+    const double normalizedX = qBound(0.0, (worldPosition.x() - zoneMinimumX) / halfWidth, 1.0);
+    double normalizedY = qBound(0.0, (worldPosition.y() - worldBounds.top()) / worldBounds.height(), 1.0);
+    if (liveConfig_.world.invertY) {
+        normalizedY = 1.0 - normalizedY;
+    }
+
+    const QRectF& area = objectAreaRects_[zoneIndex];
+    return QPointF(area.left() + normalizedX * area.width(), area.top() + normalizedY * area.height());
 }
 
 /**

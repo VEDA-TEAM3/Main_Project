@@ -6,7 +6,6 @@
 #include <QSet>
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <utility>
 
 namespace {
@@ -21,28 +20,30 @@ constexpr qint64 minimumPulseSpacingMsec = 150;
 constexpr qint64 pairPulseStateRetentionMsec = 5000;
 constexpr qint64 positionFilterResetGapMsec = 500;
 constexpr qint64 minimumPositionFilterStepMsec = 16;
-// 허용 이동량은 실제 프레임 간격에 비례해야 한다. 이 상한을 리셋 기준보다 낮게 잡으면
-// 배달이 늦은 구간에서 허용량만 고정되어(예: 300ms 만에 온 프레임에 100ms 분량만 허용)
-// 정상 이동까지 깎인다. 리셋 기준을 넘어가면 어차피 무제한으로 받아들이므로 같은 값으로 둔다
+// 허용 이동량은 실제 프레임 간격에 비례해야 한다. 이 상한을 리셋 기준보다 낮게
+// 잡으면 배달이 늦은 구간에서 허용량만 고정되어(예: 300ms 만에 온 프레임에
+// 100ms 분량만 허용) 정상 이동까지 깎인다. 리셋 기준을 넘어가면 어차피
+// 무제한으로 받아들이므로 같은 값으로 둔다
 constexpr qint64 maximumPositionFilterStepMsec = positionFilterResetGapMsec;
-// 월드 좌표(m) 기준 상한. 정규화 좌표에 걸면 같은 상수가 지도 크기에 따라 전혀 다른 속도가 된다
-// (60m 지도에서 0.9/s = 54m/s로 사실상 무방비, 15m 지도에서는 13.5m/s로 실제 차량을 깎아냄).
+// 월드 좌표(m) 기준 상한. 정규화 좌표에 걸면 같은 상수가 지도 크기에 따라 전혀
+// 다른 속도가 된다 (60m 지도에서 0.9/s = 54m/s로 사실상 무방비, 15m
+// 지도에서는 13.5m/s로 실제 차량을 깎아냄).
 //
-// 이상치가 화면에 남길 수 있는 최대 이탈 = 이 값 x 프레임 간격이다(100ms면 0.8m).
-// 클라이언트 한 대가 담당하는 영역이 10x10m이므로 상한이 높을수록 이탈이 영역 대비 커진다.
-// 반대로 실제 최고 속도보다 낮게 잡으면 정상 이동까지 깎여 객체가 계속 뒤처지므로,
-// 현장 최고 속도의 1.5배 정도로 둔다: 8m/s = 29km/h (보행 1.4m/s, 구내 주행 3~5m/s 기준)
+// 이상치가 화면에 남길 수 있는 최대 이탈 = 이 값 x 프레임 간격이다(100ms면
+// 0.8m). 클라이언트 한 대가 담당하는 영역이 10x10m이므로 상한이 높을수록 이탈이
+// 영역 대비 커진다. 반대로 실제 최고 속도보다 낮게 잡으면 정상 이동까지 깎여
+// 객체가 계속 뒤처지므로, 현장 최고 속도의 1.5배 정도로 둔다: 8m/s = 29km/h
+// (보행 1.4m/s, 구내 주행 3~5m/s 기준)
 constexpr double maximumWorldSpeedMetersPerSecond = 8.0;
-// 채널 경계를 이만큼 넘어서야 채널이 바뀐다. 담당 구역이 10x10m이고 채널이 그 4사분면이라
-// 객체가 경계를 자주 넘는데, 표시 지연 때문에 경계 위에서 채널이 왕복하면 위험 테두리와
-// 신고 대상 채널이 깜빡인다
-constexpr double channelBoundaryHysteresisMeters = 0.3;
+// 채널 경계를 이만큼 넘어서야 채널이 바뀐다. 담당 구역이 10x10m이고 채널이 그
+// 4사분면이라 객체가 경계를 자주 넘는데, 표시 지연 때문에 경계 위에서 채널이
+// 왕복하면 위험 테두리와 신고 대상 채널이 깜빡인다
 constexpr int automaticBoundsExpansionFrameCount = 3;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
-// 중앙값 필터는 움직이는 객체의 좌표를 항상 한 프레임 분량만큼 되돌린다. 그 정상 동작까지
-// '이상치 제거'로 세면 진단 로그가 매 프레임 남고 통계도 의미가 없어지므로, 이 크기를 넘는
-// 보정만 실제 이상치를 걸러낸 것으로 본다
+// 중앙값 필터는 움직이는 객체의 좌표를 항상 한 프레임 분량만큼 되돌린다. 그
+// 정상 동작까지 '이상치 제거'로 세면 진단 로그가 매 프레임 남고 통계도 의미가
+// 없어지므로, 이 크기를 넘는 보정만 실제 이상치를 걸러낸 것으로 본다
 constexpr double notableFilterCorrectionMeters = 0.5;
 
 qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
@@ -52,7 +53,7 @@ qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
 bool sameRiskObject(const RiskObjectData& first, const RiskObjectData& second) {
     return first.globalId == second.globalId && first.objectClass == second.objectClass &&
            first.worldPosition == second.worldPosition && first.riskLevel == second.riskLevel &&
-           first.nearestId == second.nearestId && first.distance == second.distance;
+           first.nearestId == second.nearestId && first.distance == second.distance && first.zoneId == second.zoneId;
 }
 
 bool sameRiskFrame(const RiskFrameData& first, const RiskFrameData& second) {
@@ -101,7 +102,8 @@ bool readInvertWorldY() {
  * @param configuredLevel 설정 파일에서 온 수준
  * @return                0=끔, 1=1초 요약, 2=객체별 프레임 상세까지
  *
- * @details 현장에서 설정 파일을 고치지 않고 켤 수 있도록 VEDA_TOPVIEW_DEBUG가 설정을 덮어쓴다.
+ * @details 현장에서 설정 파일을 고치지 않고 켤 수 있도록 VEDA_TOPVIEW_DEBUG가
+ * 설정을 덮어쓴다.
  */
 int resolveTopViewDebugLevel(int configuredLevel) {
     const QString value =
@@ -124,20 +126,11 @@ QString formatPoint(const QPointF& point) {
  * @param position  0.0~1.0 정규화 좌표 (y는 화면 기준 아래쪽이 큼)
  * @return          0부터 시작하는 채널 인덱스
  *
- * @details 카메라 4대가 중심에서 상/좌/하/우를 바라보므로 경계는 사분면이 아니라 45도
- *          대각선 두
- * 개다. 위 CH01, 왼쪽 CH02, 아래 CH03, 오른쪽 CH04 순서다.
+ * @details 카메라 4대가 중심에서 상/좌/하/우를 바라보므로 경계는 사분면이
+ * 아니라 45도
+ *          대각선 두 개다. 위 CH01, 왼쪽 CH02, 아래
+ * CH03, 오른쪽 CH04 순서다.
  */
-int channelIndexForPosition(const QPointF& position) {
-    const double offsetX = position.x() - 0.5;
-    const double offsetY = position.y() - 0.5;
-
-    if (qAbs(offsetY) >= qAbs(offsetX)) {
-        return offsetY < 0.0 ? 0 : 2;
-    }
-    return offsetX < 0.0 ? 1 : 3;
-}
-
 QPointF interpolatePosition(const QPointF& first, const QPointF& second, double ratio) {
     return first + (second - first) * ratio;
 }
@@ -154,7 +147,8 @@ double percentile(QVector<double> values, double fraction) {
 }
 }  // namespace
 
-/** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다. */
+/** @brief 통합 RiskFrame을 지도 객체 스냅샷으로 변환하는 추적기를 생성합니다.
+ */
 RiskObjectTracker::RiskObjectTracker(DigitalTwinRuntimeConfig config) : config_(std::move(config)) {
     if (config_.world.fixedBoundsEnabled && config_.world.bounds.width() > 0.0 && config_.world.bounds.height() > 0.0) {
         configuredWorldBounds_ = config_.world.bounds;
@@ -192,7 +186,6 @@ void RiskObjectTracker::reset() {
     pairPulseStates_.clear();
     pendingRiskEvents_.clear();
     worldPositionHistories_.clear();
-    channelIndexes_.clear();
     pendingExpansionBounds_ = {};
     pendingExpansionFrameCount_ = 0;
     lastArrivalTimeMsec_ = 0;
@@ -203,8 +196,9 @@ void RiskObjectTracker::reset() {
     diagnostics_.previousRawPositions.clear();
     diagnostics_.lastObjectLogMsec.clear();
 
-    // 지도 정규화 범위는 현장의 성질이지 수신 세션의 성질이 아니다. 스트림이 잠깐 끊겼다는
-    // 이유로 버리면 재연결마다 새 warmup 창으로 배율이 다시 잡혀 화면 전체가 튄다
+    // 지도 정규화 범위는 현장의 성질이지 수신 세션의 성질이 아니다. 스트림이 잠깐
+    // 끊겼다는 이유로 버리면 재연결마다 새 warmup 창으로 배율이 다시 잡혀 화면
+    // 전체가 튄다
     if (!hasAutomaticWorldBounds_) {
         automaticWorldSamples_.clear();
         automaticBoundsStartSourceTimestamp_ = 0;
@@ -234,9 +228,10 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     }
     lastArrivalTimeMsec_ = arrivalTimeMsec;
 
-    // RiskFrame.ts는 frame sequence가 아니므로 timestamp가 같아도 내용이 바뀌면 새 프레임입니다.
-    // 직전 스냅샷과 timestamp/상태/객체 내용이 모두 같은 실제 중복만 제거합니다.
-    // 이 검사는 동일 재전송 때문에 위치 transition이나 위험 pulse 상태가 불필요하게 재평가되는 것도 막습니다.
+    // RiskFrame.ts는 frame sequence가 아니므로 timestamp가 같아도 내용이 바뀌면
+    // 새 프레임입니다. 직전 스냅샷과 timestamp/상태/객체 내용이 모두 같은 실제
+    // 중복만 제거합니다. 이 검사는 동일 재전송 때문에 위치 transition이나 위험
+    // pulse 상태가 불필요하게 재평가되는 것도 막습니다.
     if (lastAcceptedInputFrame_.has_value() && sameRiskFrame(frame, *lastAcceptedInputFrame_)) {
         ++diagnostics_.duplicateCount;
         return false;
@@ -252,9 +247,10 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         medianPositions.reserve(frame.objects.size());
     }
 
-    // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는 것을 막는다.
-    // 속도 상한도 렌더 틱이 아니라 여기서 건다: 좌표는 프레임마다만 바뀌므로, 렌더 틱마다
-    // 걸면 한 프레임 분량의 이동이 한 틱에 몰려 정상 이동까지 상한에 걸린다
+    // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는
+    // 것을 막는다. 속도 상한도 렌더 틱이 아니라 여기서 건다: 좌표는 프레임마다만
+    // 바뀌므로, 렌더 틱마다 걸면 한 프레임 분량의 이동이 한 틱에 몰려 정상
+    // 이동까지 상한에 걸린다
     for (RiskObjectData& object : frame.objects) {
         const QPointF rawPosition = object.worldPosition;
         object.worldPosition = medianFilteredWorldPosition(object.globalId, object.worldPosition);
@@ -291,9 +287,10 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
             continue;
         }
 
-        // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는 시점이라
-        // 이상치가 가장 나오기 쉬운데, 이력을 버리면 돌아온 첫 좌표가 중앙값 필터를 못 받는다.
-        // 이력은 removeInactivePositionStates가 속도 상한 상태와 같은 기준으로 정리한다
+        // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는
+        // 시점이라 이상치가 가장 나오기 쉬운데, 이력을 버리면 돌아온 첫 좌표가
+        // 중앙값 필터를 못 받는다. 이력은 removeInactivePositionStates가 속도 상한
+        // 상태와 같은 기준으로 정리한다
         retainedObjects_.remove(iterator.key());
         iterator = lastSeenArrivalTimesMsec_.erase(iterator);
     }
@@ -306,7 +303,8 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
 }
 
 /**
- * @brief                  지정 시간 동안 갱신되지 않은 통합 위험 프레임을 제거합니다.
+ * @brief                  지정 시간 동안 갱신되지 않은 통합 위험 프레임을
+ * 제거합니다.
  * @param currentTimeMsec  현재 로컬 시각
  * @param expiryMsec       만료 기준
  * @return                 프레임이 제거되면 true
@@ -324,7 +322,8 @@ bool RiskObjectTracker::expireStaleFrame(qint64 currentTimeMsec, qint64 expiryMs
 bool RiskObjectTracker::hasFrame() const { return !history_.isEmpty(); }
 
 /**
- * @brief                최신 Risk 상태를 로컬 전환 시간으로 부드럽게 표시할 스냅샷을 만듭니다.
+ * @brief                최신 Risk 상태를 로컬 전환 시간으로 부드럽게 표시할
+ * 스냅샷을 만듭니다.
  * @param localTimeMsec  현재 로컬 시각
  * @return               UI 렌더링용 디지털 트윈 스냅샷
  */
@@ -348,11 +347,22 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
 
     DigitalTwinSnapshot snapshot;
     QHash<QString, QPointF> currentPositions;
+    QHash<QString, int> currentChannelIndexes;
+    QHash<qint64, int> sourceChannelIndexes;
     QSet<QString> pairKeys;
     QSet<qint64> includedObjectIds;
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
-    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &pairKeys, &includedObjectIds](
+    sourceChannelIndexes.reserve(frame.objects.size() + retainedObjects_.size());
+    for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
+        sourceChannelIndexes.insert(iterator.key(), iterator.value().zoneId);
+    }
+    for (const RiskObjectData& sourceObject : frame.objects) {
+        sourceChannelIndexes.insert(sourceObject.globalId, sourceObject.zoneId);
+    }
+
+    const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &currentChannelIndexes,
+                               &sourceChannelIndexes, &pairKeys, &includedObjectIds](
                                   const RiskObjectData& sourceObject, qreal opacity, qint64 objectFrameSequence) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
@@ -363,16 +373,21 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
                                                                           : DigitalTwinObjectType::Vehicle;
-        const QPointF targetPosition = normalizedWorldPosition(sourceObject.worldPosition);
+        const QPointF targetPosition = sourceObject.worldPosition;
         object.position = transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec);
-        object.channelIndex = channelIndexForObject(sourceObject.globalId, targetPosition);
+        object.channelIndex = sourceObject.zoneId;
         object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
-        object.riskLevel = sourceObject.riskLevel;
+        const int nearestChannelIndex = sourceChannelIndexes.value(sourceObject.nearestId, -1);
+        const bool crossCctvPair = sourceObject.nearestId > 0 && sourceObject.zoneId >= 0 && nearestChannelIndex >= 0 &&
+                                   sourceObject.zoneId / 4 != nearestChannelIndex / 4;
+        object.riskLevel = crossCctvPair ? DigitalTwinRiskLevel::Normal : sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);
         snapshot.objects.append(object);
         currentPositions.insert(object.objectId, object.position);
+        currentChannelIndexes.insert(object.objectId, object.channelIndex);
 
-        if (sourceObject.nearestId <= 0 || sourceObject.riskLevel == DigitalTwinRiskLevel::Normal) {
+        if (sourceObject.nearestId <= 0 || object.riskLevel == DigitalTwinRiskLevel::Normal ||
+            sourceObject.zoneId < 0 || nearestChannelIndex < 0) {
             return;
         }
 
@@ -425,8 +440,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
             continue;
         }
 
-        // 위험도가 올라갈 때도 최소 간격은 지킨다. 상류에서 쌍이 한 프레임씩 사라졌다 나타나면
-        // '레벨이 바뀌었다'가 매 프레임 참이 되어 같은 쌍의 파동이 수십 개씩 겹친다
+        // 위험도가 올라갈 때도 최소 간격은 지킨다. 상류에서 쌍이 한 프레임씩
+        // 사라졌다 나타나면 '레벨이 바뀌었다'가 매 프레임 참이 되어 같은 쌍의
+        // 파동이 수십 개씩 겹친다
         const bool repeatDue = sinceLastPulseMsec >= pulseRepeatMsec(pairState.riskLevel);
         const bool escalationDue = escalated && sinceLastPulseMsec >= minimumPairPulseIntervalMsec;
         if (!firstPulse && !repeatDue && !escalationDue) {
@@ -449,12 +465,16 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         riskEvent.secondObjectId = pairState.secondObjectId;
         riskEvent.position = (*firstPosition + *secondPosition) * 0.5;
         riskEvent.riskLevel = pairState.riskLevel;
+        const int firstChannelIndex = currentChannelIndexes.value(pairState.firstObjectId, -1);
+        const int secondChannelIndex = currentChannelIndexes.value(pairState.secondObjectId, -1);
+        riskEvent.channelIndex = firstChannelIndex >= 0 ? firstChannelIndex : secondChannelIndex;
         pendingRiskEvents_.append(std::move(riskEvent));
         state.lastPulseMsec = localTimeMsec;
         lastPulseEmitMsec_ = localTimeMsec;
     }
 
-    // 쌍이 잠깐 사라졌다고 상태를 지우면 재등장 즉시 다시 울린다. 시간으로만 정리한다
+    // 쌍이 잠깐 사라졌다고 상태를 지우면 재등장 즉시 다시 울린다. 시간으로만
+    // 정리한다
     for (auto iterator = pairPulseStates_.begin(); iterator != pairPulseStates_.end();) {
         if (localTimeMsec - iterator.value().lastSeenMsec > pairPulseStateRetentionMsec) {
             iterator = pairPulseStates_.erase(iterator);
@@ -520,8 +540,9 @@ void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
     const double maxX = percentile(xValues, upperFraction);
     const double minY = percentile(yValues, lowerFraction);
     const double maxY = percentile(yValues, upperFraction);
-    // 최소 폭/높이는 관측 중심을 기준으로 넓힌다. minX를 원점으로 쓰면 관측 범위가 최소치보다
-    // 좁을 때(정지 객체 등) 데이터가 지도 왼쪽 위 구석으로 몰린다
+    // 최소 폭/높이는 관측 중심을 기준으로 넓힌다. minX를 원점으로 쓰면 관측
+    // 범위가 최소치보다 좁을 때(정지 객체 등) 데이터가 지도 왼쪽 위 구석으로
+    // 몰린다
     const double width = qMax(1.0, maxX - minX);
     const double height = qMax(1.0, maxY - minY);
     const double centerX = (minX + maxX) * 0.5;
@@ -537,12 +558,14 @@ void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
 }
 
 /**
- * @brief        추정된 자동 경계 밖의 좌표가 오면 그 좌표를 포함하도록 경계를 넓힙니다.
+ * @brief        추정된 자동 경계 밖의 좌표가 오면 그 좌표를 포함하도록 경계를
+ * 넓힙니다.
  * @param frame  검증을 통과한 최신 RiskFrame
  *
- * @details warmup 구간에서 굳힌 경계는 관측 창이 짧을수록 실제 도면보다 좁다. 경계를 그대로
- *          두면 바깥 좌표가 0..1 정규화에서 잘려 객체가 지도 가장자리에 달라붙는다. 범위 밖
- *          좌표가 올 때만 단조 확장하므로, 도면을 한 번 덮은 뒤에는 배율이 더 변하지 않는다.
+ * @details warmup 구간에서 굳힌 경계는 관측 창이 짧을수록 실제 도면보다 좁다.
+ * 경계를 그대로 두면 바깥 좌표가 0..1 정규화에서 잘려 객체가 지도 가장자리에
+ * 달라붙는다. 범위 밖 좌표가 올 때만 단조 확장하므로, 도면을 한 번 덮은 뒤에는
+ * 배율이 더 변하지 않는다.
  */
 void RiskObjectTracker::expandAutomaticWorldBounds(const RiskFrameData& frame) {
     double left = automaticWorldBounds_.left();
@@ -562,15 +585,17 @@ void RiskObjectTracker::expandAutomaticWorldBounds(const RiskFrameData& frame) {
         return;
     }
 
-    // 융합 오류로 한 프레임만 튄 좌표에 지도 배율을 내주면 화면의 모든 객체가 한꺼번에 밀린다.
-    // 연속 프레임에서 계속 경계 밖일 때만 실제 이동으로 보고 넓힌다
+    // 융합 오류로 한 프레임만 튄 좌표에 지도 배율을 내주면 화면의 모든 객체가
+    // 한꺼번에 밀린다. 연속 프레임에서 계속 경계 밖일 때만 실제 이동으로 보고
+    // 넓힌다
     pendingExpansionBounds_ =
         pendingExpansionFrameCount_ > 0 ? pendingExpansionBounds_.united(candidateBounds) : candidateBounds;
     if (++pendingExpansionFrameCount_ < automaticBoundsExpansionFrameCount) {
         return;
     }
 
-    // 새 좌표가 경계선 위에 걸치면 다음 프레임에서 다시 확장이 돌므로 여백까지 함께 넓힌다
+    // 새 좌표가 경계선 위에 걸치면 다음 프레임에서 다시 확장이 돌므로 여백까지
+    // 함께 넓힌다
     const double horizontalMargin = pendingExpansionBounds_.width() * config_.world.automaticBoundsPaddingRatio;
     const double verticalMargin = pendingExpansionBounds_.height() * config_.world.automaticBoundsPaddingRatio;
     automaticWorldBounds_ =
@@ -595,42 +620,8 @@ void RiskObjectTracker::logAutomaticWorldBounds(const QString& reason) const {
 
 bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
 
-/**
- * @brief                     경계에서 채널이 왕복하지 않도록 이력을 반영해 채널을 정합니다.
- * @param globalId            융합 객체 ID
- * @param normalizedPosition  현재 표시 중인 0.0~1.0 좌표
- * @return                    0부터 시작하는 채널 인덱스
- *
- * @details 채널 경계는 중심을 지나는 45도 대각선 두 개다. 경계를 막 넘은 상태에서는 표시 지연과
- *          좌표 흔들림만으로 판정이 뒤집히므로, 이전 채널에서 벗어나려면 경계선에서
- *          channelBoundaryHysteresisMeters만큼 확실히 떨어져야 한다. 대각선까지의 수직 거리는
- *          두 축 이탈량 차이의 1/sqrt(2)이므로 여유값에 sqrt(2)를 곱해 비교한다.
- */
-int RiskObjectTracker::channelIndexForObject(qint64 globalId, const QPointF& normalizedPosition) {
-    const int measuredIndex = channelIndexForPosition(normalizedPosition);
-    const auto previousIterator = channelIndexes_.constFind(globalId);
-    if (previousIterator == channelIndexes_.cend()) {
-        channelIndexes_.insert(globalId, measuredIndex);
-        return measuredIndex;
-    }
-
-    const int previousIndex = *previousIterator;
-    if (measuredIndex != previousIndex) {
-        const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
-        const double extent = qMax(bounds.width(), bounds.height());
-        const double margin = extent > 0.0 ? channelBoundaryHysteresisMeters / extent * std::numbers::sqrt2 : 0.0;
-        const double offsetX = qAbs(normalizedPosition.x() - 0.5);
-        const double offsetY = qAbs(normalizedPosition.y() - 0.5);
-        if (qAbs(offsetX - offsetY) <= margin) {
-            return previousIndex;
-        }
-    }
-
-    channelIndexes_.insert(globalId, measuredIndex);
-    return measuredIndex;
-}
-
-/** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로 만듭니다. */
+/** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로
+ * 만듭니다. */
 QString RiskObjectTracker::worldBoundsDescription() const {
     if (!worldBoundsReady()) {
         return QStringLiteral("pending(warmup)");
@@ -675,15 +666,17 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             const QPointF rawDelta = rawPosition - previousRaw;
             diagnostics_.previousRawPositions.insert(object.globalId, rawPosition);
 
-            // 객체가 여럿이면 프레임마다 전부 남기는 것만으로 초당 수백 줄이 되어 정작 볼 줄이 묻힌다.
-            // gid마다 주기적으로만 남기되, 필터가 실제로 개입한 프레임은 주기와 무관하게 남긴다
+            // 객체가 여럿이면 프레임마다 전부 남기는 것만으로 초당 수백 줄이 되어
+            // 정작 볼 줄이 묻힌다. gid마다 주기적으로만 남기되, 필터가 실제로 개입한
+            // 프레임은 주기와 무관하게 남긴다
             const QPointF medianDelta = medianPositions.at(index) - rawPosition;
             const QPointF limitDelta = object.worldPosition - medianPositions.at(index);
             const bool filterIntervened =
                 std::hypot(medianDelta.x(), medianDelta.y()) > notableFilterCorrectionMeters ||
                 std::hypot(limitDelta.x(), limitDelta.y()) > 0.001;
-            // 이상치 하나를 따라잡는 동안 상한이 여러 프레임 연속으로 걸리므로, 개입 로그도
-            // 더 짧은 주기로만 남긴다. 그래야 이상치 발생 사실은 놓치지 않으면서 줄 수가 안 터진다
+            // 이상치 하나를 따라잡는 동안 상한이 여러 프레임 연속으로 걸리므로, 개입
+            // 로그도 더 짧은 주기로만 남긴다. 그래야 이상치 발생 사실은 놓치지
+            // 않으면서 줄 수가 안 터진다
             const qint64 lastLogMsec = diagnostics_.lastObjectLogMsec.value(object.globalId, 0);
             const qint64 requiredIntervalMsec =
                 filterIntervened ? qMin<qint64>(diagnostics_.detailIntervalMsec, 250) : diagnostics_.detailIntervalMsec;
@@ -693,14 +686,11 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             diagnostics_.lastObjectLogMsec.insert(object.globalId, arrivalTimeMsec);
 
             // 한 줄이 길면 붙여넣기·수집 과정에서 잘린다. 80자 안쪽으로 유지한다
-            const bool boundsReady = worldBoundsReady();
-            const QPointF normalized = boundsReady ? normalizedWorldPosition(object.worldPosition) : QPointF();
-            QString line =
-                QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
-                    .arg(object.globalId)
-                    .arg(formatPoint(rawPosition))
-                    .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
-                    .arg(boundsReady ? QString::number(channelIndexForPosition(normalized) + 1) : QStringLiteral("-"));
+            QString line = QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
+                               .arg(object.globalId)
+                               .arg(formatPoint(rawPosition))
+                               .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
+                               .arg(object.zoneId >= 0 ? QString::number(object.zoneId + 1) : QStringLiteral("-"));
             if (filterIntervened) {
                 line += QStringLiteral(" cut med=%1 lim=%2")
                             .arg(std::hypot(medianDelta.x(), medianDelta.y()), 0, 'f', 2)
@@ -720,7 +710,8 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
 }
 
 /**
- * @brief                  1초 구간의 수신 상태 요약을 남기고 카운터를 초기화합니다.
+ * @brief                  1초 구간의 수신 상태 요약을 남기고 카운터를
+ * 초기화합니다.
  * @param arrivalTimeMsec  현재 구간의 종료 시각
  * @param objectCount      이번 프레임의 객체 수
  */
@@ -763,30 +754,19 @@ void RiskObjectTracker::logDiagnosticsSummary(qint64 arrivalTimeMsec, qsizetype 
 }
 
 /** @brief 월드 좌표를 지도에서 사용하는 0.0~1.0 좌표로 변환합니다. */
-QPointF RiskObjectTracker::normalizedWorldPosition(const QPointF& worldPosition) const {
-    const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
-    if (bounds.width() <= 0.0 || bounds.height() <= 0.0) {
-        return QPointF(0.5, 0.5);
-    }
-
-    const double normalizedX = qBound(0.0, (worldPosition.x() - bounds.left()) / bounds.width(), 1.0);
-    const double sourceY = qBound(0.0, (worldPosition.y() - bounds.top()) / bounds.height(), 1.0);
-    const double normalizedY = invertWorldY_ ? 1.0 - sourceY : sourceY;
-    return QPointF(normalizedX, normalizedY);
-}
-
 /**
  * @brief                  gid별 최근 월드 좌표의 중앙값을 돌려줍니다.
  * @param globalId         융합 객체 ID
  * @param worldPosition    이번 프레임의 월드 좌표
  * @return                 중앙값 필터를 통과한 월드 좌표
  *
- * @details 속도 상한은 이상치의 '속도'만 자를 뿐 몇 프레임에 걸쳐 끌려가는 것은 막지 못한다.
- *          한 프레임만 튄 좌표는 중앙값에서 아예 탈락하므로 화면에도, 자동 경계 확장에도
- *          반영되지 않는다.
+ * @details 속도 상한은 이상치의 '속도'만 자를 뿐 몇 프레임에 걸쳐 끌려가는 것은
+ * 막지 못한다. 한 프레임만 튄 좌표는 중앙값에서 아예 탈락하므로 화면에도, 자동
+ * 경계 확장에도 반영되지 않는다.
  *
- * ponytail: 표본 3개짜리 축별 중앙값이라 2프레임 이상 지속되는 이상치는 통과한다(속도 상한이
- *           2차 방어선). 더 필요하면 표본 수를 늘리거나 속도까지 모델링하는 추정기로 올린다.
+ * ponytail: 표본 3개짜리 축별 중앙값이라 2프레임 이상 지속되는 이상치는
+ * 통과한다(속도 상한이 2차 방어선). 더 필요하면 표본 수를 늘리거나 속도까지
+ * 모델링하는 추정기로 올린다.
  */
 QPointF RiskObjectTracker::medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition) {
     QVector<QPointF>& history = worldPositionHistories_[globalId];
@@ -812,19 +792,22 @@ QPointF RiskObjectTracker::medianFilteredWorldPosition(qint64 globalId, const QP
 }
 
 /**
- * @brief                    한 프레임 만에 도달할 수 없는 이동량을 잘라 목표 좌표를 만듭니다.
+ * @brief                    한 프레임 만에 도달할 수 없는 이동량을 잘라 목표
+ * 좌표를 만듭니다.
  * @param objectId           추적 객체 식별자
  * @param worldPosition      RiskFrame이 실어 온 월드 좌표(m)
  * @param localTimeMsec      현재 로컬 monotonic 시각
  * @return                   속도 상한을 적용한 월드 좌표(m)
  *
- * @details 다채널 융합은 같은 객체를 다른 카메라 관측으로 대표시키면서 한 프레임짜리 순간
- *          이동을 만든다. 그대로 두면 객체가 지도 반대편까지 갔다가 다음 프레임에 돌아온다.
- *          이동량을 실제 이동 속도 한계로 자르면 그런 이상치는 화면에서 거의 사라지고,
- *          진짜 이동은 계속 같은 방향으로 들어오므로 몇 프레임 안에 따라잡는다.
+ * @details 다채널 융합은 같은 객체를 다른 카메라 관측으로 대표시키면서 한
+ * 프레임짜리 순간 이동을 만든다. 그대로 두면 객체가 지도 반대편까지 갔다가 다음
+ * 프레임에 돌아온다. 이동량을 실제 이동 속도 한계로 자르면 그런 이상치는
+ * 화면에서 거의 사라지고, 진짜 이동은 계속 같은 방향으로 들어오므로 몇 프레임
+ * 안에 따라잡는다.
  *
- *          정규화 이전의 월드 좌표에 적용한다. 정규화 좌표에 걸면 상한의 실제 의미가 지도
- *          범위에 묶여, 경계 설정을 바꾸는 것만으로 억제 강도가 조용히 달라진다.
+ *          정규화 이전의 월드 좌표에 적용한다. 정규화 좌표에 걸면 상한의 실제
+ * 의미가 지도 범위에 묶여, 경계 설정을 바꾸는 것만으로 억제 강도가 조용히
+ * 달라진다.
  */
 QPointF RiskObjectTracker::rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition,
                                                     qint64 arrivalTimeMsec) {
@@ -862,7 +845,8 @@ QPointF RiskObjectTracker::rateLimitedWorldPosition(qint64 globalId, const QPoin
  * @param maximumDistance   허용 이동량(m)
  * @param localTimeMsec     현재 로컬 monotonic 시각
  *
- * @details 이 로그가 계속 찍히면 화면이 아니라 상류 융합/캘리브레이션이 흔들리는 것이다.
+ * @details 이 로그가 계속 찍히면 화면이 아니라 상류 융합/캘리브레이션이
+ * 흔들리는 것이다.
  */
 void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, double maximumDistance,
                                            qint64 localTimeMsec) {
@@ -878,10 +862,12 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
 }
 
 /**
- * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬 시간으로 전환합니다.
+ * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬
+ * 시간으로 전환합니다.
  * @param objectId          추적 객체 식별자
  * @param targetPosition    최신 RiskFrame에서 계산한 목표 정규화 좌표
- * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번 (RiskFrame.ts는 단조 증가가 아니라 쓰지 않는다)
+ * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번 (RiskFrame.ts는
+ * 단조 증가가 아니라 쓰지 않는다)
  * @param localTimeMsec     현재 로컬 monotonic 시각
  * @return                  현재 렌더 시점의 정규화 좌표
  */
@@ -923,7 +909,8 @@ QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const Q
 }
 
 /**
- * @brief                  gid별 표시 투명도를 단조롭게 갱신해 재등장 시에도 같은 item을 부드럽게 복구합니다.
+ * @brief                  gid별 표시 투명도를 단조롭게 갱신해 재등장 시에도
+ * 같은 item을 부드럽게 복구합니다.
  * @param objectId         통합 객체 ID
  * @param present          현재 보간 프레임에 객체가 있으면 true
  * @param missingAgeMsec   마지막 로컬 수신 이후 누락 시간
@@ -951,7 +938,8 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
 }
 
 /**
- * @brief                   현재 스냅샷에서 사라진 객체의 위치 보정 상태를 정리합니다.
+ * @brief                   현재 스냅샷에서 사라진 객체의 위치 보정 상태를
+ * 정리합니다.
  * @param currentPositions  현재 화면에 표시 중인 객체 위치
  * @param localTimeMsec     현재 로컬 monotonic 시각
  */
@@ -972,8 +960,9 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
         iterator = positionTransitions_.erase(iterator);
     }
 
-    // 속도 상한 상태는 표시가 끊겨도 잠시 남긴다. 융합이 한두 프레임 객체를 놓쳤다가 되찾을 때
-    // 상태를 이미 지웠으면 재등장 좌표를 그대로 받아들여 그 순간 튄다
+    // 속도 상한 상태는 표시가 끊겨도 잠시 남긴다. 융합이 한두 프레임 객체를
+    // 놓쳤다가 되찾을 때 상태를 이미 지웠으면 재등장 좌표를 그대로 받아들여 그
+    // 순간 튄다
     for (auto iterator = filteredPositionTimesMsec_.begin(); iterator != filteredPositionTimesMsec_.end();) {
         if (localTimeMsec - iterator.value() <= positionFilterResetGapMsec) {
             ++iterator;
@@ -982,7 +971,6 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
 
         filteredPositions_.remove(iterator.key());
         worldPositionHistories_.remove(iterator.key());
-        channelIndexes_.remove(iterator.key());
         iterator = filteredPositionTimesMsec_.erase(iterator);
     }
 }

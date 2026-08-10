@@ -37,15 +37,6 @@ QString detectionEventText(DigitalTwinObjectType objectType) {
 }
 
 /**
- * @brief         구역 판정 구현 전까지 사용할 안정적인 더미 구역명을 반환합니다.
- * @param object  더미 구역을 배정할 객체
- * @return        CH-01~CH-04 중 하나
- */
-QString dummyAreaForEventObject(const DigitalTwinObject& object) {
-    return QStringLiteral("CH-%1").arg(object.channelIndex + 1, 2, 10, QLatin1Char('0'));
-}
-
-/**
  * @brief           디지털 트윈 위험 단계를 이벤트 로그 위험 단계로 변환합니다.
  * @param riskLevel  디지털 트윈 위험 단계
  * @return           이벤트 로그 위험 단계
@@ -113,7 +104,7 @@ QString proximityObjectText(const DigitalTwinObject& firstObject, const DigitalT
 EventLogEntry detectedObjectEntry(const DigitalTwinObject& object) {
     EventLogEntry entry;
     entry.time = QTime::currentTime();
-    entry.area = dummyAreaForEventObject(object);
+    entry.channelIndex = object.channelIndex;
     entry.objectText = detectionEventText(object.type);
     entry.riskLevel = EventLogRiskLevel::Normal;
     entry.action = EventLogAction::None;
@@ -132,7 +123,7 @@ EventLogEntry proximityRiskEntry(const DigitalTwinObject& firstObject, const Dig
                                  EventLogRiskLevel riskLevel) {
     EventLogEntry entry;
     entry.time = QTime::currentTime();
-    entry.area = dummyAreaForEventObject(firstObject);
+    entry.channelIndex = firstObject.channelIndex;
     entry.objectText = proximityObjectText(firstObject, secondObject);
     entry.riskLevel = riskLevel;
     entry.action = actionForRiskLevel(riskLevel);
@@ -142,7 +133,8 @@ EventLogEntry proximityRiskEntry(const DigitalTwinObject& firstObject, const Dig
 }  // namespace
 
 /**
- * @brief           최신 시뮬레이션 스냅샷에서 새 감지와 접근 위험 상승 이벤트를 생성합니다.
+ * @brief           최신 시뮬레이션 스냅샷에서 새 감지와 접근 위험 상승 이벤트를
+ * 생성합니다.
  * @param snapshot  worker가 계산한 객체와 객체 쌍 위험 상태
  * @return          이번 갱신에서 새로 기록할 이벤트 로그 목록
  */

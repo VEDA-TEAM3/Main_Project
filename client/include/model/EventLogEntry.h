@@ -23,7 +23,7 @@ enum class EventLogSource {
 
 struct EventLogEntry {
     QTime time;
-    QString area;
+    int channelIndex = -1;
     QString objectText;
     EventLogRiskLevel riskLevel = EventLogRiskLevel::Normal;
     EventLogAction action = EventLogAction::None;

@@ -1,6 +1,5 @@
 #include "ui/mainwindow.h"
 
-#include <QComboBox>
 #include <QDateTime>
 #include <QDebug>
 #include <QEvent>
@@ -15,7 +14,6 @@
 #include <QResizeEvent>
 #include <QShortcut>
 #include <QShowEvent>
-#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
@@ -36,6 +34,7 @@
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
 #include "ui/VideoRiskBorderFrame.h"
+#include "ui/dialogs/AreaSelectionDialog.h"
 #include "ui/dialogs/MapSettingsDialog.h"
 #include "ui/dialogs/ReportConfirmationDialog.h"
 #include "ui/dialogs/ReportSuccessDialog.h"
@@ -54,7 +53,8 @@ const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
 }  // namespace
 
 /**
- * @brief                       메인 UI를 구성하고 주입된 외부 연동 구현을 연결합니다.
+ * @brief                       메인 UI를 구성하고 주입된 외부 연동 구현을
+ * 연결합니다.
  * @param streamReceiverFactory 영상 수신기 생성 factory
  * @param deviceStatusGatewayFactory 장비 상태 gateway 생성 factory
  * @param dashboardPanelFactory 대시보드 패널 생성 factory
@@ -95,7 +95,8 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupStreamSessionManager(std::move(streamReceiverFactory));
 }
 
-/** @brief Alt+Enter로 메인 창의 전체 화면 상태를 전환하는 단축키를 등록합니다. */
+/** @brief Alt+Enter로 메인 창의 전체 화면 상태를 전환하는 단축키를 등록합니다.
+ */
 void MainWindow::setupWindowShortcuts() {
     auto* returnShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Return), this);
     auto* enterShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Enter), this);
@@ -145,7 +146,8 @@ void MainWindow::setupReportActions() {
 }
 
 /**
- * @brief               선택한 채널의 현재 상태를 포함한 Slack 신고를 비동기로 요청합니다.
+ * @brief               선택한 채널의 현재 상태를 포함한 Slack 신고를 비동기로
+ * 요청합니다.
  * @param channelNumber 사용자에게 표시되는 1부터 4까지의 채널 번호
  */
 void MainWindow::sendReport(int channelNumber) {
@@ -172,7 +174,8 @@ void MainWindow::sendReport(int channelNumber) {
 }
 
 /**
- * @brief               Slack 신고 실패를 안내하고 신고 버튼을 다시 활성화합니다.
+ * @brief               Slack 신고 실패를 안내하고 신고 버튼을 다시
+ * 활성화합니다.
  * @param channelNumber 실패한 신고의 채널 번호
  * @param error         Slack 또는 네트워크 오류 설명
  */
@@ -200,10 +203,13 @@ void MainWindow::setReportButtonsEnabled(bool enabled) {
 }
 
 /**
- * @brief           현재 표시 구역의 슬롯을 실제 전역 채널 번호로 변환합니다.
+ * @brief           현재 표시 구역의 슬롯을 실제 전역 채널
+ * 번호로 변환합니다.
  * @param slotIndex 0부터
  * 3까지의 화면 슬롯 인덱스
- * @return          사용자 표시용 1 기반 채널 번호
+ * @return          사용자 표시용 1 기반 채널
+ * 번호
+
  */
 int MainWindow::reportChannelNumberForSlot(int slotIndex) const { return slotIndex + 1; }
 
@@ -225,7 +231,8 @@ void MainWindow::updateReportButtons() {
 }
 
 /**
- * @brief               신고 시점의 채널 위험 단계를 사용자 표시 문자열로 변환합니다.
+ * @brief               신고 시점의 채널 위험 단계를 사용자 표시 문자열로
+ * 변환합니다.
  * @param channelNumber 사용자에게 표시되는 1부터 4까지의 채널 번호
  * @return              정상, 주의 또는 위험
  */
@@ -282,7 +289,8 @@ void MainWindow::setupDashboardLayout() {
     ui_->titleLabel->setTextFormat(Qt::RichText);
     ui_->titleLabel->setText(
         QStringLiteral("<span style=\"color:#a8d4ff;\">Wise AI</span>"
-                       "<span style=\"color:#ffffff;\"> 기반 주차장 디지털 트윈 관제 시스템</span>"));
+                       "<span style=\"color:#ffffff;\"> 기반 주차장 디지털 트윈 "
+                       "관제 시스템</span>"));
 
     const QPixmap settingsIcon(QStringLiteral(":/icons/config_icon.png"));
     ui_->settingsLabel->setText({});
@@ -364,7 +372,8 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 }
 
 /**
- * @brief 설정 팝업을 열고 적용된 경우에만 디지털 트윈 맵 표시 상태를 변경합니다.
+ * @brief 설정 팝업을 열고 적용된 경우에만 디지털 트윈 맵 표시 상태를
+ * 변경합니다.
  */
 void MainWindow::openMapSettingsDialog() {
     if (!mapSettingsDialog_) {
@@ -420,7 +429,8 @@ void MainWindow::updateSystemStatus(bool connected) {
 }
 
 /**
- * @brief   네 CCTV 채널이 모두 첫 프레임을 수신했는지 상단 연결 상태에 반영합니다.
+ * @brief   네 CCTV 채널이 모두 첫 프레임을 수신했는지 상단 연결 상태에
+ * 반영합니다.
  */
 void MainWindow::updateStreamConnectionStatus() {
     const bool allStreamsReady =
@@ -433,7 +443,8 @@ void MainWindow::updateStreamConnectionStatus() {
 }
 
 /**
- * @brief         상단 상태 QLabel에서 제목과 상태 문구를 서로 다른 색으로 표시합니다.
+ * @brief         상단 상태 QLabel에서 제목과 상태 문구를 서로 다른 색으로
+ * 표시합니다.
  * @param label   갱신할 상단 상태 QLabel
  * @param title   항상 기본 글자색으로 표시할 상태 제목
  * @param status  상태 점을 포함한 상태 문구
@@ -451,7 +462,8 @@ void MainWindow::setTopBarStatus(QLabel* label, const QString& title, const QStr
 }
 
 /**
- * @brief   주입된 factory를 통해 대시보드 패널을 생성하고 placeholder에 배치합니다.
+ * @brief   주입된 factory를 통해 대시보드 패널을 생성하고 placeholder에
+ * 배치합니다.
  */
 void MainWindow::setupDashboardPanels() {
     if (!dashboardPanelFactory_) {
@@ -496,7 +508,8 @@ void MainWindow::setupDashboardPanelCoordinator() {
 }
 
 /**
- * @brief   장비 상태 service를 생성해 coordinator에 연결하고 worker를 시작합니다.
+ * @brief   장비 상태 service를 생성해 coordinator에 연결하고 worker를
+ * 시작합니다.
  */
 void MainWindow::setupDeviceStatusService() {
     if (deviceStatusService_) {
@@ -557,6 +570,9 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     if (mapSettingsDialog_ && mapSettingsDialog_->isVisible()) {
         mapSettingsDialog_->setGeometry(rect());
     }
+    if (areaSelectionDialog_ && areaSelectionDialog_->isVisible()) {
+        areaSelectionDialog_->setGeometry(rect());
+    }
 }
 
 /**
@@ -583,7 +599,10 @@ void MainWindow::showEvent(QShowEvent* event) {
 /**
  * @brief   현재 창 크기에 맞춰 대시보드 하단 영역과 객체 목록 폭을 보정합니다.
  */
-void MainWindow::updateDashboardAdaptiveSizes() { DashboardLayout::adjustBottomSectionHeight(this, ui_.get()); }
+void MainWindow::updateDashboardAdaptiveSizes() {
+    DashboardLayout::adjustBottomSectionHeight(this, ui_.get());
+    DashboardLayout::alignDeviceStatusCardWidth(ui_.get());
+}
 
 /**
  * @brief 4분할 영상 위젯의 더블클릭 이벤트를 확대/복구 동작에 연결합니다.
@@ -654,27 +673,44 @@ void MainWindow::setupVideoViewEvents() {
     }
 }
 
-/** @brief 설정된 CCTV 구역 이름을 선택 상자와 페이지 스택에 연결합니다. */
+/** @brief 설정된 CCTV 구역을 상단 선택 버튼과 페이지 스택에 연결합니다. */
 void MainWindow::setupVideoAreaSelector() {
-    if (!ui_->cctvAreaComboBox || !ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
+    if (!ui_->videoAreaButton || !ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
         return;
     }
 
-    const QSignalBlocker blocker(ui_->cctvAreaComboBox);
-    ui_->cctvAreaComboBox->clear();
+    QStringList areaNames;
+    areaNames.reserve(videoConfig_.areas.size());
     for (const VideoAreaConfig& area : videoConfig_.areas) {
-        ui_->cctvAreaComboBox->addItem(area.name, area.areaId);
+        areaNames.append(area.name);
     }
-    ui_->cctvAreaComboBox->setCurrentIndex(currentVideoAreaIndex_);
+
+    ui_->videoAreaButton->setText(videoConfig_.areas[currentVideoAreaIndex_].name);
+    ui_->videoAreaButton->setToolTip(QStringLiteral("표시할 CCTV 구역 선택"));
     ui_->videoAreaStackedWidget->setCurrentIndex(currentVideoAreaIndex_);
 
-    connect(ui_->cctvAreaComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::switchVideoArea);
+    areaSelectionDialog_ = new AreaSelectionDialog(this);
+    areaSelectionDialog_->setAreas(areaNames, currentVideoAreaIndex_);
+    connect(ui_->videoAreaButton, &QPushButton::clicked, this, &MainWindow::openVideoAreaSelectionDialog);
+    connect(areaSelectionDialog_, &AreaSelectionDialog::areaSelected, this, &MainWindow::switchVideoArea);
+}
+
+/** @brief 현재 구역을 선택 상태로 표시한 뒤 구역 선택 다이얼로그를 엽니다. */
+void MainWindow::openVideoAreaSelectionDialog() {
+    if (!areaSelectionDialog_) {
+        return;
+    }
+
+    areaSelectionDialog_->setCurrentAreaIndex(currentVideoAreaIndex_);
+    areaSelectionDialog_->setGeometry(rect());
+    areaSelectionDialog_->show();
+    areaSelectionDialog_->raise();
 }
 
 /**
  * @brief           전역 채널이 속한 영상 구역 인덱스를 찾습니다.
- * @param channelIndex 0 기반 전역 채널
- * 인덱스
+ *
+ * @param channelIndex 0 기반 전역 채널 인덱스
 
  * *
  * @return          구역 인덱스 또는 -1
@@ -690,6 +726,7 @@ int MainWindow::videoAreaIndexForChannel(int channelIndex) const {
 
 /**
  * @brief           구역에 배정된 전역 채널 인덱스를 반환합니다.
+ *
  * @param areaIndex 조회할 구역 인덱스
 
  * *
@@ -710,8 +747,9 @@ bool MainWindow::isChannelVisible(int channelIndex) const {
 
 /**
  * @brief           워밍 스트림을 유지한 채 CCTV 표시 구역을 전환합니다.
- * @param areaIndex 새로
- * 표시할 구역 인덱스
+
+ * *
+ * @param areaIndex 새로 표시할 구역 인덱스
  */
 void MainWindow::switchVideoArea(int areaIndex) {
     if (areaIndex < 0 || areaIndex >= videoConfig_.areas.size() || areaIndex == currentVideoAreaIndex_) {
@@ -731,6 +769,10 @@ void MainWindow::switchVideoArea(int areaIndex) {
 
     currentVideoAreaIndex_ = areaIndex;
     ui_->videoAreaStackedWidget->setCurrentIndex(areaIndex);
+    ui_->videoAreaButton->setText(videoConfig_.areas[currentVideoAreaIndex_].name);
+    if (deviceStatusPanel_) {
+        deviceStatusPanel_->setAreaIndex(areaIndex);
+    }
     if (!isChannelVisible(selectedPreprocessingChannelIndex_)) {
         selectedPreprocessingChannelIndex_ = channelsForArea(areaIndex).value(0, 0);
     }
@@ -751,26 +793,18 @@ void MainWindow::switchVideoArea(int areaIndex) {
 }
 
 /**
- * @brief             디지털 트윈의 채널별 위험 상태를 CCTV 타일 테두리에 반영합니다.
- * @param riskLevels  CH-01부터 CH-04까지의 현재 위험 단계
+ * @brief             디지털 트윈의 채널별 위험 상태를 CCTV 타일 테두리에
+ * 반영합니다.
+ * @param riskLevels  zoneId 0부터 7까지의 현재 위험 단계
  */
 void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels) {
     if (latestVideoRiskLevels_.size() != streamConfigs_.size()) {
         latestVideoRiskLevels_.fill(DigitalTwinRiskLevel::Normal, streamConfigs_.size());
     }
 
-    if (riskLevels.size() == videoChannelsPerArea) {
-        for (const VideoAreaConfig& area : videoConfig_.areas) {
-            for (qsizetype slotIndex = 0; slotIndex < qMin(area.channelIndexes.size(), riskLevels.size());
-                 ++slotIndex) {
-                latestVideoRiskLevels_[area.channelIndexes[slotIndex]] = riskLevels[slotIndex];
-            }
-        }
-    } else {
-        const qsizetype count = qMin(latestVideoRiskLevels_.size(), riskLevels.size());
-        for (qsizetype channelIndex = 0; channelIndex < count; ++channelIndex) {
-            latestVideoRiskLevels_[channelIndex] = riskLevels[channelIndex];
-        }
+    const qsizetype count = qMin(latestVideoRiskLevels_.size(), riskLevels.size());
+    for (qsizetype channelIndex = 0; channelIndex < count; ++channelIndex) {
+        latestVideoRiskLevels_[channelIndex] = riskLevels[channelIndex];
     }
 
     for (qsizetype channelIndex = 0; channelIndex < videoTileFrames_.size(); ++channelIndex) {
@@ -805,7 +839,8 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
 }
 
 /**
- * @brief                  영상 출력 창과 스트림 설정을 세션 관리자에 연결합니다.
+ * @brief                  영상 출력 창과 스트림 설정을 세션 관리자에
+ * 연결합니다.
  * @param receiverFactory  채널별 영상 수신기 생성 factory
  */
 void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory> receiverFactory) {
@@ -909,7 +944,8 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
 }
 
 /**
- * @brief              현재 확대 상태에 따라 대상 영상을 확대하거나 4분할로 복구합니다.
+ * @brief              현재 확대 상태에 따라 대상 영상을 확대하거나 4분할로
+ * 복구합니다.
  * @param targetWidget  더블클릭된 영상 위젯
  */
 void MainWindow::toggleExpandVideo(QWidget* targetWidget) {

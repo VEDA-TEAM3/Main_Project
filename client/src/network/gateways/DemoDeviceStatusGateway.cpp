@@ -6,7 +6,7 @@
 
 namespace {
 constexpr int demoGatewayIntervalMsec = 5000;
-constexpr int deviceChannelCount = 4;
+constexpr int deviceChannelCount = 8;
 constexpr int feedbackFailurePercent = 10;
 constexpr int warningPercent = 25;
 constexpr int dangerPercent = 10;
@@ -34,7 +34,8 @@ DeviceOutputState createRandomOutputs() {
 }  // namespace
 
 /**
- * @brief         실제 MQTT 장비 상태 수신 흐름을 모사하는 demo gateway를 생성합니다.
+ * @brief         실제 MQTT 장비 상태 수신 흐름을 모사하는 demo gateway를
+ * 생성합니다.
  * @param parent  Qt 객체 소유권을 연결할 부모 객체
  */
 DemoDeviceStatusGateway::DemoDeviceStatusGateway(QObject* parent) : DeviceStatusGateway(parent) {

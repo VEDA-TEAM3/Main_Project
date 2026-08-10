@@ -13,7 +13,8 @@ constexpr int objectListFlushIntervalMsec = 200;
 }  // namespace
 
 /**
- * @brief                    패널 데이터 갱신 경로를 한곳에 모으는 coordinator를 생성합니다.
+ * @brief                    패널 데이터 갱신 경로를 한곳에 모으는 coordinator를
+ * 생성합니다.
  * @param deviceStatusPanel  장비 출력 상태 패널
  * @param eventLogPanel      이벤트 로그 패널
  * @param objectListPanel    실시간 객체 목록 패널
@@ -45,7 +46,8 @@ void DashboardPanelCoordinator::bindDeviceStatusService(DeviceStatusService* ser
 }
 
 /**
- * @brief          모든 스냅샷의 이벤트 전이를 처리하고 객체 목록은 최신 frame만 보관합니다.
+ * @brief          모든 스냅샷의 이벤트 전이를 처리하고 객체 목록은 최신 frame만
+ * 보관합니다.
  * @param snapshot 디지털 트윈 worker가 계산한 최신 스냅샷
  */
 void DashboardPanelCoordinator::consumeDigitalTwinSnapshot(DigitalTwinSnapshot snapshot) {
@@ -64,7 +66,7 @@ void DashboardPanelCoordinator::consumeDigitalTwinSnapshot(DigitalTwinSnapshot s
 }
 
 void DashboardPanelCoordinator::consumeCentralEvent(CentralEventData event) {
-    if (!eventLogPanel_ || event.channelIndex < 0 || event.channelIndex >= 4 || event.sourceTimestamp <= 0) {
+    if (!eventLogPanel_ || event.channelIndex < 0 || event.channelIndex >= 8 || event.sourceTimestamp <= 0) {
         return;
     }
 
@@ -81,7 +83,7 @@ void DashboardPanelCoordinator::consumeCentralEvent(CentralEventData event) {
 
     EventLogEntry entry;
     entry.time = QDateTime::fromMSecsSinceEpoch(event.sourceTimestamp).time();
-    entry.area = QStringLiteral("CH-%1").arg(event.channelIndex + 1, 2, 10, QLatin1Char('0'));
+    entry.channelIndex = event.channelIndex;
     entry.objectText = event.eventType;
 
     if (event.severity >= 3) {
@@ -98,7 +100,8 @@ void DashboardPanelCoordinator::consumeCentralEvent(CentralEventData event) {
     eventLogPanel_->prependEntry(entry);
 }
 
-/** @brief 데모에서 실시간 MQTT 입력으로 전환될 때 데모 이벤트 이력을 제거합니다. */
+/** @brief 데모에서 실시간 MQTT 입력으로 전환될 때 데모 이벤트 이력을
+ * 제거합니다. */
 void DashboardPanelCoordinator::resetEventLogForLiveInput() {
     eventLogGenerator_.reset();
     latestCentralEventTimestamps_.clear();

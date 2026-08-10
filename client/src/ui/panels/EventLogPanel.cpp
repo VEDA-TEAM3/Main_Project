@@ -14,15 +14,17 @@
 
 namespace {
 constexpr int eventTimeColumn = 0;
-constexpr int eventAreaColumn = 1;
-constexpr int eventObjectColumn = 2;
-constexpr int eventRiskColumn = 3;
-constexpr int eventActionColumn = 4;
-constexpr int eventTimeColumnWidth = 58;
-constexpr int eventAreaColumnWidth = 46;
+constexpr int eventZoneColumn = 1;
+constexpr int eventChannelColumn = 2;
+constexpr int eventObjectColumn = 3;
+constexpr int eventRiskColumn = 4;
+constexpr int eventActionColumn = 5;
+constexpr int eventTimeColumnWidth = 52;
+constexpr int eventZoneColumnWidth = 58;
+constexpr int eventChannelColumnWidth = 52;
 constexpr int eventObjectColumnWidth = 76;
-constexpr int eventRiskColumnWidth = 62;
-constexpr int eventActionColumnWidth = 98;
+constexpr int eventRiskColumnWidth = 58;
+constexpr int eventActionColumnWidth = 90;
 constexpr auto eventLogScrollBarStyle = R"(
 QScrollBar:vertical {
     background: transparent;
@@ -81,7 +83,8 @@ EventLogPanel::EventLogPanel(QWidget* parent) : QWidget(parent) { setupUi(); }
 void EventLogPanel::prependEntry(const EventLogEntry& entry) { prependEntries({entry}); }
 
 /**
- * @brief          여러 이벤트를 추가하면서 사용자가 보고 있던 스크롤 위치를 보존합니다.
+ * @brief          여러 이벤트를 추가하면서 사용자가 보고 있던 스크롤 위치를
+ * 보존합니다.
  * @param entries  추가할 이벤트 로그 목록
  */
 void EventLogPanel::prependEntries(QVector<EventLogEntry> entries) {
@@ -174,7 +177,8 @@ void EventLogPanel::setupUi() {
 }
 
 /**
- * @brief   세로 스크롤바가 차지하는 헤더 오른쪽 빈 영역을 헤더 색상으로 마감합니다.
+ * @brief   세로 스크롤바가 차지하는 헤더 오른쪽 빈 영역을 헤더 색상으로
+ * 마감합니다.
  */
 void EventLogPanel::updateScrollHeaderCover() {
     if (!table_ || !scrollHeaderCover_) {
@@ -202,8 +206,8 @@ void EventLogPanel::resizeColumns() {
         return;
     }
 
-    constexpr int totalBaseColumnWidth = eventTimeColumnWidth + eventAreaColumnWidth + eventObjectColumnWidth +
-                                         eventRiskColumnWidth + eventActionColumnWidth;
+    constexpr int totalBaseColumnWidth = eventTimeColumnWidth + eventZoneColumnWidth + eventChannelColumnWidth +
+                                         eventObjectColumnWidth + eventRiskColumnWidth + eventActionColumnWidth;
     const int viewportWidth = table_->viewport()->width();
 
     if (viewportWidth <= 0) {
@@ -212,13 +216,16 @@ void EventLogPanel::resizeColumns() {
 
     if (viewportWidth <= totalBaseColumnWidth) {
         const int timeWidth = std::max(48, viewportWidth * eventTimeColumnWidth / totalBaseColumnWidth);
-        const int areaWidth = std::max(40, viewportWidth * eventAreaColumnWidth / totalBaseColumnWidth);
+        const int zoneWidth = std::max(46, viewportWidth * eventZoneColumnWidth / totalBaseColumnWidth);
+        const int channelWidth = std::max(44, viewportWidth * eventChannelColumnWidth / totalBaseColumnWidth);
         const int objectWidth = std::max(64, viewportWidth * eventObjectColumnWidth / totalBaseColumnWidth);
         const int riskWidth = std::max(54, viewportWidth * eventRiskColumnWidth / totalBaseColumnWidth);
-        const int actionWidth = std::max(72, viewportWidth - timeWidth - areaWidth - objectWidth - riskWidth);
+        const int actionWidth =
+            std::max(72, viewportWidth - timeWidth - zoneWidth - channelWidth - objectWidth - riskWidth);
 
         table_->setColumnWidth(eventTimeColumn, timeWidth);
-        table_->setColumnWidth(eventAreaColumn, areaWidth);
+        table_->setColumnWidth(eventZoneColumn, zoneWidth);
+        table_->setColumnWidth(eventChannelColumn, channelWidth);
         table_->setColumnWidth(eventObjectColumn, objectWidth);
         table_->setColumnWidth(eventRiskColumn, riskWidth);
         table_->setColumnWidth(eventActionColumn, actionWidth);
@@ -227,14 +234,16 @@ void EventLogPanel::resizeColumns() {
 
     const int extraWidth = viewportWidth - totalBaseColumnWidth;
     const int timeWidth = eventTimeColumnWidth + (extraWidth * eventTimeColumnWidth / totalBaseColumnWidth);
-    const int areaWidth = eventAreaColumnWidth + (extraWidth * eventAreaColumnWidth / totalBaseColumnWidth);
+    const int zoneWidth = eventZoneColumnWidth + (extraWidth * eventZoneColumnWidth / totalBaseColumnWidth);
+    const int channelWidth = eventChannelColumnWidth + (extraWidth * eventChannelColumnWidth / totalBaseColumnWidth);
     const int objectWidth = eventObjectColumnWidth + (extraWidth * eventObjectColumnWidth / totalBaseColumnWidth);
     const int riskWidth = eventRiskColumnWidth + (extraWidth * eventRiskColumnWidth / totalBaseColumnWidth);
-    const int actionWidth =
-        std::max(eventActionColumnWidth, viewportWidth - timeWidth - areaWidth - objectWidth - riskWidth);
+    const int actionWidth = std::max(eventActionColumnWidth,
+                                     viewportWidth - timeWidth - zoneWidth - channelWidth - objectWidth - riskWidth);
 
     table_->setColumnWidth(eventTimeColumn, timeWidth);
-    table_->setColumnWidth(eventAreaColumn, areaWidth);
+    table_->setColumnWidth(eventZoneColumn, zoneWidth);
+    table_->setColumnWidth(eventChannelColumn, channelWidth);
     table_->setColumnWidth(eventObjectColumn, objectWidth);
     table_->setColumnWidth(eventRiskColumn, riskWidth);
     table_->setColumnWidth(eventActionColumn, actionWidth);

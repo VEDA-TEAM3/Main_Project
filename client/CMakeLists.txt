@@ -34,6 +34,8 @@ qt_add_executable(Qtcctvclient
     src/ui/ClickableVideoWidget.cpp
     include/ui/dialogs/MapSettingsDialog.h
     src/ui/dialogs/MapSettingsDialog.cpp
+    include/ui/dialogs/AreaSelectionDialog.h
+    src/ui/dialogs/AreaSelectionDialog.cpp
     include/ui/dialogs/InformationDialog.h
     src/ui/dialogs/InformationDialog.cpp
     include/ui/dialogs/ReportConfirmationDialog.h
@@ -307,6 +309,17 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+
+    add_executable(risk_message_parser_check
+        tests/RiskMessageParserCheck.cpp
+        src/network/parsing/RiskMessageParser.cpp
+    )
+
+    target_include_directories(risk_message_parser_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(risk_message_parser_check PRIVATE Qt6::Gui)
 
     add_executable(video_utc_clock_mapper_check
         tests/VideoUtcClockMapperCheck.cpp

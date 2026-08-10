@@ -8,6 +8,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QVector>
+#include <array>
 #include <memory>
 
 #include "model/DigitalTwinMapDisplaySettings.h"
@@ -16,9 +17,9 @@
 #include "model/MqttRealtimeData.h"
 #include "overlays/DeviceStatusMapOverlay.h"
 #include "overlays/OverlayManager.h"
+#include "ui/DigitalTwinMapSceneBuilder.h"
 
 class DigitalTwinSimulationWorker;
-class DigitalTwinMapSceneBuilder;
 class DigitalTwinObjectStyleProvider;
 class RiskObjectTracker;
 class DangerAlertOverlay;
@@ -81,13 +82,13 @@ private:
     void removeVisualItemAt(qsizetype visualIndex);
     void rebuildVisualItemIndexes();
     void updateObjectAreaRect();
-    QPointF scenePointFromNormalized(const QPointF& normalizedPosition) const;
+    QPointF scenePointForObject(const QPointF& position, int channelIndex) const;
     QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
     void fitMapInView();
 
     QGraphicsScene scene_;
     QThread simulationThread_;
-    OverlayManager overlayManager_;
+    std::array<OverlayManager, 2> overlayManagers_;
     DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
@@ -104,7 +105,7 @@ private:
     QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
-    QRectF mapRect_;
-    QRectF objectAreaRect_;
+    DigitalTwinMapSceneLayout mapLayout_;
+    std::array<QRectF, 2> objectAreaRects_;
     bool liveMode_ = false;
 };

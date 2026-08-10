@@ -16,6 +16,7 @@ struct RiskObjectData {
     DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
     qint64 nearestId = 0;
     double distance = -1.0;
+    int zoneId = -1;
 };
 
 struct RiskFrameData {

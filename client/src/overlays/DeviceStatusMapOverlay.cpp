@@ -7,47 +7,50 @@
 #include <QtGlobal>
 
 namespace {
-constexpr int channelCount = 4;
-constexpr int iconSize = 38;
-constexpr int centralCctvIconSize = 74;
-constexpr double iconGap = 6.0;
+constexpr int channelCount = 8;
+constexpr int channelsPerZone = 4;
+constexpr int iconSize = 34;
+constexpr int centralCctvIconSize = 66;
+constexpr double iconGap = 5.0;
 constexpr double centralCctvZValue = 3.0;
 constexpr double overlayZValue = 40.0;
-const QPointF centralCctvPosition(500.0, 260.0);
-
-// 인덱스가 곧 채널이다. 구역 이름과 겹치지 않도록 상·하 장치는 외곽 벽 쪽에 배치한다.
-const std::array<QPointF, channelCount> channelAnchors = {
-    QPointF(500.0, 88.0),
-    QPointF(120.0, 252.0),
-    QPointF(500.0, 416.0),
-    QPointF(880.0, 252.0),
-};
 }  // namespace
 
 /**
- * @brief        맵 장면에 채널별 LED와 통합 알림 장치 아이콘을 배치합니다.
- * @param scene  장치 아이콘을 표시할 디지털 트윈 장면
+ * @brief           두 지도에 CCTV와 8채널 장치 상태 아이콘을 배치합니다.
+ * @param scene     장치 아이콘을 표시할 scene
+ * @param zoneRects 물리 CCTV별 지도 영역
  */
-void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene) {
+void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const std::array<QRectF, 2>& zoneRects) {
     if (!scene) {
         return;
     }
 
     loadPixmaps();
-
-    cctvItem_ = scene->addPixmap(cctvPixmap_);
-    cctvItem_->setPos(centralCctvPosition.x() - cctvPixmap_.width() / 2.0,
-                      centralCctvPosition.y() - cctvPixmap_.height() / 2.0);
-    cctvItem_->setZValue(centralCctvZValue);
-    cctvItem_->setTransformationMode(Qt::SmoothTransformation);
+    for (int zoneIndex = 0; zoneIndex < static_cast<int>(zoneRects.size()); ++zoneIndex) {
+        cctvItems_[zoneIndex] = scene->addPixmap(cctvPixmap_);
+        cctvItems_[zoneIndex]->setPos(zoneRects[zoneIndex].center().x() - cctvPixmap_.width() / 2.0,
+                                      zoneRects[zoneIndex].center().y() - cctvPixmap_.height() / 2.0);
+        cctvItems_[zoneIndex]->setZValue(centralCctvZValue);
+        cctvItems_[zoneIndex]->setTransformationMode(Qt::SmoothTransformation);
+    }
 
     for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
-        ChannelVisualItems& items = channels_[channelIndex];
-        const QPointF anchor = channelAnchors[channelIndex];
+        const int zoneIndex = channelIndex / channelsPerZone;
+        const int localChannelIndex = channelIndex % channelsPerZone;
+        const QRectF& zoneRect = zoneRects[zoneIndex];
+        const std::array<QPointF, channelsPerZone> anchors = {
+            QPointF(zoneRect.center().x(), zoneRect.top() + 30.0),
+            QPointF(zoneRect.right() - 52.0, zoneRect.center().y()),
+            QPointF(zoneRect.center().x(), zoneRect.bottom() - 30.0),
+            QPointF(zoneRect.left() + 52.0, zoneRect.center().y()),
+        };
+        const QPointF anchor = anchors[localChannelIndex];
         const double pairWidth = iconSize * 2.0 + iconGap;
         const double left = anchor.x() - pairWidth / 2.0;
         const double top = anchor.y() - iconSize / 2.0;
 
+        ChannelVisualItems& items = channels_[channelIndex];
         items.led = scene->addPixmap(ledOffPixmap_);
         items.led->setPos(left, top);
         items.led->setZValue(overlayZValue);
@@ -62,31 +65,22 @@ void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene) {
     updateAllChannels();
 }
 
-/**
- * @brief            MQTT 연결 여부를 반영하고 연결이 끊기면 모든 장치를 무신호
- * 상태로 표시합니다.
- * @param available  장치 상태 신호를 수신할 수 있으면 true
- */
+/** @brief MQTT 연결 상태를 장치 아이콘 유효성에 반영합니다. */
 void DeviceStatusMapOverlay::setSignalAvailable(bool available) {
     if (signalAvailable_ == available) {
         return;
     }
 
     signalAvailable_ = available;
-
     if (!available) {
         for (ChannelVisualItems& items : channels_) {
             items.receivedInCurrentSession = false;
         }
     }
-
     updateAllChannels();
 }
 
-/**
- * @brief           수신된 채널 상태를 저장하고 해당 장치 아이콘만 갱신합니다.
- * @param statuses  이번 UI 주기에 변경된 채널 상태 목록
- */
+/** @brief 수신된 0 기반 채널 상태를 해당 지도 아이콘에 반영합니다. */
 void DeviceStatusMapOverlay::setChannelStatuses(const QVector<DeviceChannelStatus>& statuses) {
     for (const DeviceChannelStatus& status : statuses) {
         if (status.channelIndex < 0 || status.channelIndex >= channelCount) {
@@ -96,27 +90,20 @@ void DeviceStatusMapOverlay::setChannelStatuses(const QVector<DeviceChannelStatu
         ChannelVisualItems& items = channels_[status.channelIndex];
         items.status = status;
         items.hasStatus = true;
-
         if (signalAvailable_ && status.hasConfirmedState && status.feedbackHealth == DeviceFeedbackHealth::Confirmed) {
             items.receivedInCurrentSession = true;
         }
-
         updateChannel(status.channelIndex);
     }
 }
 
-/**
- * @brief          LED, 알림 장치와 중앙 CCTV 아이콘의 표시 옵션을 적용합니다.
- * @param settings 설정 팝업의 맵 표시 설정
- */
+/** @brief 지도 장치 아이콘 표시 설정을 적용합니다. */
 void DeviceStatusMapOverlay::setDisplaySettings(const DigitalTwinMapDisplaySettings& settings) {
     displaySettings_ = settings;
     updateAllChannels();
 }
 
-/**
- * @brief 장치 상태 아이콘 리소스를 맵 표시 크기로 한 번만 준비합니다.
- */
+/** @brief 장치 상태 아이콘 리소스를 한 번만 준비합니다. */
 void DeviceStatusMapOverlay::loadPixmaps() {
     if (!ledOffPixmap_.isNull()) {
         return;
@@ -132,12 +119,12 @@ void DeviceStatusMapOverlay::loadPixmaps() {
     cctvPixmap_ = loadScaledPixmap(QStringLiteral(":/icons/cctv_icon.png"), centralCctvIconSize);
 }
 
-/**
- * @brief 모든 채널의 장치 아이콘을 현재 상태로 다시 그립니다.
- */
+/** @brief 모든 장치 아이콘을 현재 상태로 다시 표시합니다. */
 void DeviceStatusMapOverlay::updateAllChannels() {
-    if (cctvItem_) {
-        cctvItem_->setVisible(displaySettings_.showCctv);
+    for (QGraphicsPixmapItem* cctvItem : cctvItems_) {
+        if (cctvItem) {
+            cctvItem->setVisible(displaySettings_.showCctv);
+        }
     }
 
     for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
@@ -145,10 +132,7 @@ void DeviceStatusMapOverlay::updateAllChannels() {
     }
 }
 
-/**
- * @brief               한 채널의 LED와 통합 알림 장치 아이콘을 갱신합니다.
- * @param channelIndex  갱신할 0 기준 채널 번호
- */
+/** @brief 한 채널의 LED와 통합 알림 장치 아이콘을 갱신합니다. */
 void DeviceStatusMapOverlay::updateChannel(int channelIndex) {
     if (channelIndex < 0 || channelIndex >= channelCount) {
         return;
@@ -172,21 +156,13 @@ void DeviceStatusMapOverlay::updateChannel(int channelIndex) {
     items.sensor->setPixmap(alarmActive ? sensorActivePixmap_ : sensorSafePixmap_);
 }
 
-/**
- * @brief        현재 MQTT 연결에서 확인된 유효 장치 상태인지 검사합니다.
- * @param items  검사할 채널 장치 표시 정보
- * @return       현재 세션의 확정 상태이면 true
- */
+/** @brief 현재 세션에서 확인된 유효한 하드웨어 피드백인지 검사합니다. */
 bool DeviceStatusMapOverlay::hasValidSignal(const ChannelVisualItems& items) const {
     return signalAvailable_ && items.hasStatus && items.receivedInCurrentSession && items.status.hasConfirmedState &&
            items.status.feedbackHealth == DeviceFeedbackHealth::Confirmed;
 }
 
-/**
- * @brief         LED 출력 비트의 우선순위에 맞는 상태 아이콘을 반환합니다.
- * @param outputs  확인된 실제 장치 출력 상태
- * @return         위험, 주의, 정상 또는 꺼짐 LED 아이콘
- */
+/** @brief LED 출력 비트에서 가장 높은 우선순위의 아이콘을 반환합니다. */
 const QPixmap& DeviceStatusMapOverlay::ledPixmap(const DeviceOutputState& outputs) const {
     if (outputs.ledRed) {
         return ledDangerPixmap_;
@@ -200,11 +176,7 @@ const QPixmap& DeviceStatusMapOverlay::ledPixmap(const DeviceOutputState& output
     return ledOffPixmap_;
 }
 
-/**
- * @brief               아이콘 리소스를 맵 오버레이 크기로 변환합니다.
- * @param resourcePath  Qt 리소스 경로
- * @return              부드럽게 축소된 아이콘 이미지
- */
+/** @brief Qt 리소스 이미지를 지도용 크기로 변환합니다. */
 QPixmap DeviceStatusMapOverlay::loadScaledPixmap(const QString& resourcePath, int size) const {
     return QPixmap(resourcePath).scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }

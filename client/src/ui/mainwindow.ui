@@ -90,8 +90,8 @@
            </property>
           </widget>
          </item>
-         <item>
-          <spacer name="topSpacer">
+          <item>
+           <spacer name="topSpacer">
            <property name="orientation">
             <enum>Qt::Orientation::Horizontal</enum>
            </property>
@@ -101,10 +101,48 @@
              <height>20</height>
             </size>
            </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QLabel" name="dateLabel">
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="videoAreaButton">
+            <property name="minimumSize">
+             <size>
+              <width>140</width>
+              <height>38</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>140</width>
+              <height>38</height>
+             </size>
+            </property>
+            <property name="cursor">
+             <cursorShape>PointingHandCursor</cursorShape>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::FocusPolicy::NoFocus</enum>
+            </property>
+            <property name="text">
+             <string>제 1구역</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="topSpacerRight">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QLabel" name="dateLabel">
            <property name="text">
             <string>2026-07-06 14:21:08</string>
            </property>
@@ -207,23 +245,7 @@
                 </property>
                </spacer>
               </item>
-              <item>
-               <widget class="DashboardAreaComboBox" name="cctvAreaComboBox">
-                <property name="minimumSize">
-                 <size>
-                  <width>90</width>
-                  <height>30</height>
-                 </size>
-                </property>
-                <property name="cursor">
-                 <cursorShape>PointingHandCursor</cursorShape>
-                </property>
-                <property name="focusPolicy">
-                 <enum>Qt::FocusPolicy::NoFocus</enum>
-                </property>
-               </widget>
-              </item>
-               <item>
+                <item>
                 <layout class="QHBoxLayout" name="reportButtonLayout">
                  <property name="spacing">
                   <number>6</number>
@@ -651,12 +673,7 @@
    </layout>
   </widget>
  </widget>
- <customwidgets>
-  <customwidget>
-   <class>DashboardAreaComboBox</class>
-   <extends>QComboBox</extends>
-   <header>ui/DashboardAreaComboBox.h</header>
-  </customwidget>
+  <customwidgets>
   <customwidget>
    <class>ClickableVideoWidget</class>
    <extends>QWidget</extends>

@@ -15,6 +15,7 @@ class DeviceStatusPanel final : public QWidget {
 public:
     explicit DeviceStatusPanel(QWidget* parent = nullptr);
 
+    void setAreaIndex(int areaIndex);
     void setChannelStatus(const DeviceChannelStatus& status);
     void setChannelStatuses(const QVector<DeviceChannelStatus>& statuses);
 
@@ -51,4 +52,5 @@ private:
 
     QVector<DeviceChannelStatus> channelStatuses_;
     QVector<ChannelWidgets> channelWidgets_;
+    int areaIndex_ = 0;
 };

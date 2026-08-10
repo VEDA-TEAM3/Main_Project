@@ -8,7 +8,7 @@
 #include "network/routing/MqttTopicFilter.h"
 
 namespace {
-constexpr int deviceChannelCount = 4;
+constexpr int deviceChannelCount = 8;
 constexpr int protocolVersion = 1;
 
 enum class StatusProtocol {
@@ -47,7 +47,9 @@ bool parseOutputState(const QJsonObject& object, DeviceOutputState& outputs, QSt
         !readBoolean(object, QStringLiteral("ledGreen"), outputs.ledGreen) ||
         !readBoolean(object, QStringLiteral("siren"), outputs.beacon) ||
         !readBoolean(object, QStringLiteral("buzzer"), outputs.buzzer)) {
-        error = QStringLiteral("state must contain boolean ledRed, ledYellow, ledGreen, siren and buzzer fields");
+        error = QStringLiteral(
+            "state must contain boolean ledRed, ledYellow, "
+            "ledGreen, siren and buzzer fields");
         return false;
     }
 
@@ -60,7 +62,9 @@ bool parseChannelOutputState(const QJsonObject& object, DeviceOutputState& outpu
         !readBoolean(object, QStringLiteral("ledGreen"), outputs.ledGreen) ||
         !readBoolean(object, QStringLiteral("sirenOn"), outputs.beacon) ||
         !readBoolean(object, QStringLiteral("buzzerOn"), outputs.buzzer)) {
-        error = QStringLiteral("status must contain boolean ledRed, ledYellow, ledGreen, sirenOn and buzzerOn fields");
+        error = QStringLiteral(
+            "status must contain boolean ledRed, ledYellow, "
+            "ledGreen, sirenOn and buzzerOn fields");
         return false;
     }
 
@@ -103,7 +107,10 @@ bool parseChannelStatusPayload(const QByteArray& payload, const QString& topic, 
 
     if (!readBoolean(object, QStringLiteral("cameraAlive"), report.cameraAlive) ||
         !readBoolean(object, QStringLiteral("hardwareAlive"), report.hardwareAlive)) {
-        error = QStringLiteral("status must contain boolean cameraAlive and hardwareAlive fields on %1").arg(topic);
+        error = QStringLiteral(
+                    "status must contain boolean cameraAlive and "
+                    "hardwareAlive fields on %1")
+                    .arg(topic);
         return false;
     }
 
@@ -325,7 +332,8 @@ bool DeviceStatusTopicHandler::matchesTopic(const QString& topic) const {
            MqttTopicFilter::matches(config_.centralEvent.topicFilter, topic);
 }
 
-/** @brief 상태 계열 payload를 UI 독립 도메인 보고와 중앙 이벤트로 변환합니다. */
+/** @brief 상태 계열 payload를 UI 독립 도메인 보고와 중앙 이벤트로 변환합니다.
+ */
 bool DeviceStatusTopicHandler::handle(const QByteArray& payload, const QString& topic, MqttMessageBatch& messages,
                                       QString& error) const {
     if (MqttTopicFilter::matches(config_.centralEvent.topicFilter, topic)) {
@@ -354,10 +362,10 @@ bool DeviceStatusTopicHandler::handle(const QByteArray& payload, const QString& 
         parsed = parseStatusPayload(payload, topic, -1, StatusProtocol::Central, report, error);
     } else if (MqttTopicFilter::matches(config_.controllerStatus.topicFilter, topic)) {
         const int channelIndex =
-            MqttTopicFilter::integerWildcardValue(config_.controllerStatus.topicFilter, topic, 0, 3);
+            MqttTopicFilter::integerWildcardValue(config_.controllerStatus.topicFilter, topic, 0, 7);
         parsed = parseChannelStatusPayload(payload, topic, channelIndex, report, error);
     } else if (MqttTopicFilter::matches(config_.sensorAlive.topicFilter, topic)) {
-        const int channelIndex = MqttTopicFilter::integerWildcardValue(config_.sensorAlive.topicFilter, topic, 0, 3);
+        const int channelIndex = MqttTopicFilter::integerWildcardValue(config_.sensorAlive.topicFilter, topic, 0, 7);
         parsed = parseAlivePayload(payload, topic, channelIndex, report, error);
     }
 

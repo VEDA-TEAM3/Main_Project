@@ -19,7 +19,7 @@ enum class DigitalTwinRiskLevel {
 
 struct DigitalTwinObject {
     QString objectId;
-    int channelIndex = 0;
+    int channelIndex = -1;
     DigitalTwinObjectType type = DigitalTwinObjectType::Vehicle;
     QPointF position;
     QPointF velocity;
@@ -33,6 +33,7 @@ struct DigitalTwinRiskEvent {
     QString secondObjectId;
     QPointF position;
     DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
+    int channelIndex = -1;
 };
 
 struct DigitalTwinPairRiskState {

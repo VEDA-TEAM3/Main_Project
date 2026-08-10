@@ -23,11 +23,13 @@ namespace {
 constexpr int objectIdColumn = 0;
 constexpr int objectTypeColumn = 1;
 constexpr int objectPositionColumn = 2;
-constexpr int objectAreaColumn = 3;
-constexpr int objectIdColumnWidth = 64;
-constexpr int objectTypeColumnWidth = 98;
-constexpr int objectPositionColumnWidth = 104;
-constexpr int objectAreaColumnWidth = 74;
+constexpr int objectZoneColumn = 3;
+constexpr int objectChannelColumn = 4;
+constexpr int objectIdColumnWidth = 54;
+constexpr int objectTypeColumnWidth = 82;
+constexpr int objectPositionColumnWidth = 92;
+constexpr int objectZoneColumnWidth = 70;
+constexpr int objectChannelColumnWidth = 64;
 constexpr int objectTypeIconTextSpacing = 6;
 
 class ObjectTypeItemDelegate final : public QStyledItemDelegate {
@@ -39,7 +41,8 @@ public:
     explicit ObjectTypeItemDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
 
     /**
-     * @brief         객체 아이콘과 유형 문자열을 한 묶음으로 중앙 정렬해 그립니다.
+     * @brief         객체 아이콘과 유형 문자열을 한 묶음으로 중앙 정렬해
+     * 그립니다.
      * @param painter  셀을 그릴 painter
      * @param option   셀 표시 옵션
      * @param index    표시할 model index
@@ -77,7 +80,8 @@ public:
 }  // namespace
 
 /**
- * @brief         실시간 객체 목록의 model, view, delegate를 소유하는 패널을 생성합니다.
+ * @brief         실시간 객체 목록의 model, view, delegate를 소유하는 패널을
+ * 생성합니다.
  * @param parent  Qt 객체 소유권을 연결할 부모 위젯
  */
 ObjectListPanel::ObjectListPanel(QWidget* parent) : QWidget(parent) { setupUi(); }
@@ -147,8 +151,8 @@ void ObjectListPanel::resizeColumns() {
         return;
     }
 
-    constexpr int totalBaseColumnWidth =
-        objectIdColumnWidth + objectTypeColumnWidth + objectPositionColumnWidth + objectAreaColumnWidth;
+    constexpr int totalBaseColumnWidth = objectIdColumnWidth + objectTypeColumnWidth + objectPositionColumnWidth +
+                                         objectZoneColumnWidth + objectChannelColumnWidth;
     const int viewportWidth = table_->viewport()->width();
 
     if (viewportWidth <= 0) {
@@ -159,7 +163,8 @@ void ObjectListPanel::resizeColumns() {
         table_->setColumnWidth(objectIdColumn, objectIdColumnWidth);
         table_->setColumnWidth(objectTypeColumn, objectTypeColumnWidth);
         table_->setColumnWidth(objectPositionColumn, objectPositionColumnWidth);
-        table_->setColumnWidth(objectAreaColumn, objectAreaColumnWidth);
+        table_->setColumnWidth(objectZoneColumn, objectZoneColumnWidth);
+        table_->setColumnWidth(objectChannelColumn, objectChannelColumnWidth);
         return;
     }
 
@@ -168,10 +173,13 @@ void ObjectListPanel::resizeColumns() {
     const int typeWidth = objectTypeColumnWidth + (extraWidth * objectTypeColumnWidth / totalBaseColumnWidth);
     const int positionWidth =
         objectPositionColumnWidth + (extraWidth * objectPositionColumnWidth / totalBaseColumnWidth);
-    const int areaWidth = std::max(objectAreaColumnWidth, viewportWidth - idWidth - typeWidth - positionWidth);
+    const int zoneWidth = objectZoneColumnWidth + (extraWidth * objectZoneColumnWidth / totalBaseColumnWidth);
+    const int channelWidth =
+        std::max(objectChannelColumnWidth, viewportWidth - idWidth - typeWidth - positionWidth - zoneWidth);
 
     table_->setColumnWidth(objectIdColumn, idWidth);
     table_->setColumnWidth(objectTypeColumn, typeWidth);
     table_->setColumnWidth(objectPositionColumn, positionWidth);
-    table_->setColumnWidth(objectAreaColumn, areaWidth);
+    table_->setColumnWidth(objectZoneColumn, zoneWidth);
+    table_->setColumnWidth(objectChannelColumn, channelWidth);
 }

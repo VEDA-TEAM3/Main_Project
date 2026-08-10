@@ -79,6 +79,22 @@ QBrush backgroundBrushForRiskLevel(EventLogRiskLevel riskLevel) {
 
     return {};
 }
+
+QString zoneTextForChannel(int channelIndex) {
+    if (channelIndex < 0) {
+        return QStringLiteral("미배정");
+    }
+
+    return QStringLiteral("%1구역").arg(channelIndex / 4 + 1);
+}
+
+QString channelText(int channelIndex) {
+    if (channelIndex < 0) {
+        return QStringLiteral("-");
+    }
+
+    return QStringLiteral("CH-%1").arg(channelIndex % 4 + 1, 2, 10, QLatin1Char('0'));
+}
 }  // namespace
 
 /**
@@ -149,8 +165,10 @@ QVariant EventLogTableModel::data(const QModelIndex& index, int role) const {
     switch (index.column()) {
         case EventTimeColumn:
             return entry.time.toString(QStringLiteral("HH:mm:ss"));
-        case EventAreaColumn:
-            return entry.area;
+        case EventZoneColumn:
+            return zoneTextForChannel(entry.channelIndex);
+        case EventChannelColumn:
+            return channelText(entry.channelIndex);
         case EventObjectColumn:
             return entry.objectText;
         case EventRiskColumn:
@@ -177,7 +195,9 @@ QVariant EventLogTableModel::headerData(int section, Qt::Orientation orientation
     switch (section) {
         case EventTimeColumn:
             return QStringLiteral("시간");
-        case EventAreaColumn:
+        case EventZoneColumn:
+            return QStringLiteral("구역");
+        case EventChannelColumn:
             return QStringLiteral("채널");
         case EventObjectColumn:
             return QStringLiteral("이벤트");
@@ -204,7 +224,8 @@ Qt::ItemFlags EventLogTableModel::flags(const QModelIndex& index) const {
 }
 
 /**
- * @brief        새 이벤트 로그를 최상단에 추가하고 오래된 로그를 제한 개수 이상 보관하지 않습니다.
+ * @brief        새 이벤트 로그를 최상단에 추가하고 오래된 로그를 제한 개수 이상
+ * 보관하지 않습니다.
  * @param entry  추가할 이벤트 로그
  */
 void EventLogTableModel::prependEntry(const EventLogEntry& entry) { prependEntries({entry}); }

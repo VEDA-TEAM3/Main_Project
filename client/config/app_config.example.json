@@ -38,10 +38,10 @@
             "automaticBoundsMaximumSamples": 512,
             "automaticBoundsPaddingRatio": 0.08,
             "automaticBoundsOutlierFraction": 0.05,
-            "minX": -5.0,
-            "minY": -5.0,
-            "maxX": 5.0,
-            "maxY": 5.0
+            "minX": -80.0,
+            "minY": -35.0,
+            "maxX": 80.0,
+            "maxY": 35.0
         }
     },
     "video": {

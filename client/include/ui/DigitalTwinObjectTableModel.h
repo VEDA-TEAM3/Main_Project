@@ -24,7 +24,8 @@ private:
         ObjectIdColumn = 0,
         ObjectTypeColumn,
         ObjectPositionColumn,
-        ObjectAreaColumn,
+        ObjectZoneColumn,
+        ObjectChannelColumn,
         ObjectListColumnCount,
     };
 

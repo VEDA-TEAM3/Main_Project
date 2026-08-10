@@ -24,7 +24,8 @@ public:
 private:
     enum EventLogColumn {
         EventTimeColumn = 0,
-        EventAreaColumn,
+        EventZoneColumn,
+        EventChannelColumn,
         EventObjectColumn,
         EventRiskColumn,
         EventActionColumn,

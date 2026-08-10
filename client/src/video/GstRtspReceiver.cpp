@@ -19,7 +19,8 @@
 
 namespace {
 /**
- * @brief             지정한 GStreamer element factory가 설치되어 있는지 확인합니다.
+ * @brief             지정한 GStreamer element factory가 설치되어 있는지
+ * 확인합니다.
  * @param factoryName  확인할 factory 이름
  * @return            factory를 찾았으면 true
  */
@@ -82,7 +83,8 @@ bool isH264VideoPad(GstPad* pad) {
 }
 
 /**
- * @brief               element가 지원하는 경우에만 boolean property를 설정합니다.
+ * @brief               element가 지원하는 경우에만 boolean property를
+ * 설정합니다.
  * @param element       대상 GstElement
  * @param propertyName  설정할 property 이름
  * @param value         설정할 값
@@ -111,7 +113,8 @@ bool hasCredentialPlaceholder(const QString& url) {
 }
 
 /**
- * @brief            GStreamer 오류와 debug 문자열을 사용자 로그용 문구로 정리합니다.
+ * @brief            GStreamer 오류와 debug 문자열을 사용자 로그용 문구로
+ * 정리합니다.
  * @param error      GStreamer 오류 객체
  * @param debugInfo  GStreamer debug 문자열
  * @return           정규화된 오류 메시지
@@ -121,7 +124,9 @@ QString normalizedGstErrorText(GError* error, const gchar* debugInfo) {
     const QString debugText = debugInfo ? QString::fromUtf8(debugInfo) : QString();
 
     if (debugText.contains(QStringLiteral("Account Blocked"), Qt::CaseInsensitive)) {
-        return QStringLiteral("RTSP account blocked (490): check password or wait for NVR account unlock");
+        return QStringLiteral(
+            "RTSP account blocked (490): check password or wait "
+            "for NVR account unlock");
     }
 
     if (debugText.contains(QStringLiteral("Unauthorized"), Qt::CaseInsensitive) ||
@@ -150,7 +155,8 @@ bool isAuthenticationFailure(const QString& errorText) {
 }  // namespace
 
 /**
- * @brief                    RTSP 수신기를 생성하고 재연결/버스 타이머를 준비합니다.
+ * @brief                    RTSP 수신기를 생성하고 재연결/버스 타이머를
+ * 준비합니다.
  * @param outputWindowHandle  영상을 출력할 네이티브 윈도우 핸들
  * @param parent              Qt 객체 소유권 부모
  */
@@ -187,7 +193,8 @@ void GstRtspReceiver::setBlurTargetsEnabled(bool faceEnabled, bool licensePlateE
 void GstRtspReceiver::setBlurFrame(BlurFrameData frame) { blurProcessor_.submitFrame(std::move(frame)); }
 
 /**
- * @brief          현재 채널의 영상 전처리 값을 저장하고 실행 중인 필터에 반영합니다.
+ * @brief          현재 채널의 영상 전처리 값을 저장하고 실행 중인 필터에
+ * 반영합니다.
  * @param settings 적용할 영상 전처리 설정
  */
 void GstRtspReceiver::setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) {
@@ -225,7 +232,8 @@ void GstRtspReceiver::moveInternalObjectsToThread(QThread* thread) {
     }
 
     if (QThread::currentThread() != this->thread()) {
-        qWarning() << "[GstRtspReceiver] moveToThread must be called from the receiver's current thread";
+        qWarning() << "[GstRtspReceiver] moveToThread must be called from the "
+                      "receiver's current thread";
         return;
     }
 
@@ -306,20 +314,27 @@ void GstRtspReceiver::startPipeline() {
 
     const QString videoChainDesc =
         QString(
-            "rtph264depay name=depay request-keyframe=true wait-for-keyframe=true ! "
+            "rtph264depay name=depay request-keyframe=true "
+            "wait-for-keyframe=true ! "
             "h264parse config-interval=-1 ! "
-            "queue name=decodequeue silent=true max-size-buffers=%2 max-size-bytes=0 max-size-time=%3 ! "
+            "queue name=decodequeue silent=true max-size-buffers=%2 "
+            "max-size-bytes=0 max-size-time=%3 ! "
+            "valve name=presentationvalve drop=false drop-mode=transform-to-gap "
+            "! "
             "%1 ! identity name=framewatch silent=true signal-handoffs=false ! "
-            "valve name=presentationvalve drop=false drop-mode=transform-to-gap ! "
             "videoconvert ! video/x-raw,format=BGRA ! "
-            "queue name=alignmentqueue silent=true leaky=downstream max-size-buffers=0 max-size-bytes=0 "
+            "queue name=alignmentqueue silent=true leaky=downstream "
+            "max-size-buffers=0 max-size-bytes=0 "
             "max-size-time=%6 min-threshold-time=%7 ! "
-            "queue name=renderqueue silent=true leaky=downstream max-size-buffers=%4 max-size-bytes=0 "
+            "queue name=renderqueue silent=true leaky=downstream "
+            "max-size-buffers=%4 max-size-bytes=0 "
             "max-size-time=%5 ! "
-            "videobalance name=balance brightness=0.0 contrast=1.0 saturation=1.0 ! "
+            "videobalance name=balance brightness=0.0 contrast=1.0 "
+            "saturation=1.0 ! "
             "gamma name=gammafilter gamma=1.0 ! "
             "qtblur name=blur ! "
-            "d3d11videosink name=videosink force-aspect-ratio=true enable-last-sample=false qos=false "
+            "d3d11videosink name=videosink force-aspect-ratio=true "
+            "enable-last-sample=false qos=false "
             "sync=false async=false")
             .arg(decoderChain())
             .arg(config_.decodeQueueMaximumBuffers)
@@ -517,7 +532,8 @@ void GstRtspReceiver::stop() {
 }
 
 /**
- * @brief   GStreamer pipeline을 NULL 상태로 내린 뒤 bus handler와 참조를 정리합니다.
+ * @brief   GStreamer pipeline을 NULL 상태로 내린 뒤 bus handler와 참조를
+ * 정리합니다.
  */
 void GstRtspReceiver::teardownPipeline() {
     busTimer_->stop();
@@ -540,7 +556,8 @@ void GstRtspReceiver::teardownPipeline() {
         if (ret == GST_STATE_CHANGE_FAILURE) {
             qWarning() << "[GstRtspReceiver] Failed to set pipeline to NULL";
         } else if (ret == GST_STATE_CHANGE_ASYNC) {
-            qWarning() << "[GstRtspReceiver] Timed out while waiting for pipeline NULL state";
+            qWarning() << "[GstRtspReceiver] Timed out while waiting for pipeline "
+                          "NULL state";
         }
 
         gst_object_unref(pipeline);
@@ -552,7 +569,8 @@ void GstRtspReceiver::teardownPipeline() {
 }
 
 /**
- * @brief                  지수 backoff 규칙에 따라 다음 RTSP 재연결을 예약합니다.
+ * @brief                  지수 backoff 규칙에 따라 다음 RTSP 재연결을
+ * 예약합니다.
  * @param reason            재연결 사유
  * @param overrideDelayMsec  0보다 크면 기본 backoff 대신 사용할 지연 시간
  */
@@ -644,7 +662,8 @@ void GstRtspReceiver::markFirstPacket() {
 }
 
 /**
- * @brief   첫 디코딩 프레임 수신을 기록하고 최소 로딩 연출 이후 오버레이를 숨깁니다.
+ * @brief   첫 디코딩 프레임 수신을 기록하고 최소 로딩 연출 이후 오버레이를
+ * 숨깁니다.
  */
 void GstRtspReceiver::markFirstFrame() {
     if (firstFrameReported_ || manualStop_.load(std::memory_order_acquire) || !pipeline_) {
@@ -711,7 +730,9 @@ void GstRtspReceiver::checkStall() {
 
         if (elapsedSinceFirstPacketMsec > config_.initialFrameTimeoutMsec) {
             const gint64 packetAgeMsec = (nowUsec - lastPacketTimeUsec_.load(std::memory_order_relaxed)) / 1000;
-            const QString reason = QStringLiteral("no decoded frame for %1 ms after first RTP packet; packetAge=%2 ms")
+            const QString reason = QStringLiteral(
+                                       "no decoded frame for %1 ms after "
+                                       "first RTP packet; packetAge=%2 ms")
                                        .arg(elapsedSinceFirstPacketMsec)
                                        .arg(packetAgeMsec);
 
@@ -797,7 +818,8 @@ GstPadProbeReturn GstRtspReceiver::onPacketProbe(GstPad*, GstPadProbeInfo* info,
 }
 
 /**
- * @brief                rtspsrc의 여러 stream 중 H.264 video stream만 선택합니다.
+ * @brief                rtspsrc의 여러 stream 중 H.264 video stream만
+ * 선택합니다.
  * @param streamNumber   RTSP stream 번호
  * @param caps           stream caps 정보
  * @return               선택할 stream이면 TRUE
@@ -815,7 +837,8 @@ gboolean GstRtspReceiver::onSelectStream(GstElement*, guint streamNumber, GstCap
 }
 
 /**
- * @brief           rtspsrc 동적 pad 중 H.264 video pad를 video chain에 연결합니다.
+ * @brief           rtspsrc 동적 pad 중 H.264 video pad를 video chain에
+ * 연결합니다.
  * @param pad       새로 추가된 rtspsrc pad
  * @param userData  GstRtspReceiver 포인터
  */
@@ -877,7 +900,8 @@ void GstRtspReceiver::onPadAdded(GstElement*, GstPad* pad, gpointer userData) {
 }
 
 /**
- * @brief           pipeline 종료 중 PAUSE 요청을 막아 rtspsrc가 TEARDOWN으로 닫히도록 유도합니다.
+ * @brief           pipeline 종료 중 PAUSE 요청을 막아 rtspsrc가 TEARDOWN으로
+ * 닫히도록 유도합니다.
  * @param message   전송 직전의 RTSP message
  * @param userData  GstRtspReceiver 포인터
  * @return          message 전송을 유지하려면 TRUE
@@ -911,7 +935,8 @@ gboolean GstRtspReceiver::onBeforeSend(GstElement*, GstRTSPMessage* message, gpo
 }
 
 /**
- * @brief           video sink가 window handle을 요청하는 sync message를 즉시 처리합니다.
+ * @brief           video sink가 window handle을 요청하는 sync message를 즉시
+ * 처리합니다.
  * @param message   GStreamer bus message
  * @param userData  GstRtspReceiver 포인터
  * @return          bus sync 처리 결과
@@ -939,7 +964,8 @@ QString GstRtspReceiver::decoderChain() const {
     const QByteArray decoderMode = config_.decoderMode.toLatin1();
 
     if (decoderMode == "d3d11" && hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download")) {
-        return "d3d11h264dec discard-corrupted-frames=true automatic-request-sync-points=true ! d3d11download";
+        return "d3d11h264dec discard-corrupted-frames=true "
+               "automatic-request-sync-points=true ! d3d11download";
     }
 
     if (decoderMode != "d3d11" && hasGstFactory("avdec_h264")) {
@@ -947,7 +973,8 @@ QString GstRtspReceiver::decoderChain() const {
     }
 
     if (hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download")) {
-        return "d3d11h264dec discard-corrupted-frames=true automatic-request-sync-points=true ! d3d11download";
+        return "d3d11h264dec discard-corrupted-frames=true "
+               "automatic-request-sync-points=true ! d3d11download";
     }
 
     return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
@@ -998,9 +1025,10 @@ void GstRtspReceiver::applyVideoPreprocessingSettings() {
 }
 
 /**
- * @brief 디코더 뒤 valve에 현재 구역 표시 상태를 반영합니다.
+ * @brief 디코더 앞 valve에 현재 구역 표시 상태를 반영합니다.
  *
- * 숨긴 구역도 RTSP 수신과 디코딩은 계속 수행하며, BGRA 변환부터 화면 출력까지만 건너뜁니다.
+ * 숨긴 구역은 RTSP/RTP 수신과 H.264 depay/parse만 유지하고 디코딩과 화면 출력을
+ * 건너뜁니다.
  */
 void GstRtspReceiver::applyPresentationState() {
     if (!pipeline_) {
@@ -1027,7 +1055,8 @@ void GstRtspReceiver::applyPresentationState() {
 }
 
 /**
- * @brief   GStreamer bus message를 주기적으로 처리하고 오류/상태/timeout에 대응합니다.
+ * @brief   GStreamer bus message를 주기적으로 처리하고 오류/상태/timeout에
+ * 대응합니다.
  */
 void GstRtspReceiver::pollBus() {
     if (!pipeline_) {
@@ -1120,7 +1149,8 @@ void GstRtspReceiver::pollBus() {
                     qDebug().noquote() << "[GStreamer State]" << stateText;
                     emit statusChanged(stateText);
 
-                    // PLAYING은 파이프라인 상태 전환만 의미하므로 실제 프레임 수신 뒤에 재연결 카운터를 초기화합니다.
+                    // PLAYING은 파이프라인 상태 전환만 의미하므로 실제 프레임 수신 뒤에
+                    // 재연결 카운터를 초기화합니다.
                 }
                 break;
 
@@ -1156,7 +1186,8 @@ void GstRtspReceiver::pollBus() {
                         g_free(detail);
                     }
 
-                    // rtspsrc가 UDP RTP timeout 후 TCP fallback을 완료할 수 있도록 세션을 유지합니다.
+                    // rtspsrc가 UDP RTP timeout 후 TCP fallback을 완료할 수 있도록 세션을
+                    // 유지합니다.
                 }
 
                 break;

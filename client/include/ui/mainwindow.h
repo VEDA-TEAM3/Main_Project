@@ -12,6 +12,7 @@
 #include "video/VideoRuntimeConfig.h"
 
 class ClickableVideoWidget;
+class AreaSelectionDialog;
 class DashboardPanelCoordinator;
 class DashboardPanelFactory;
 class DeviceStatusGatewayFactory;
@@ -70,6 +71,7 @@ private:
     void setupVideoAreaSelector();
     void setupReportActions();
     void openMapSettingsDialog();
+    void openVideoAreaSelectionDialog();
     void openReportConfirmationDialog(int channelNumber);
     void openReportSuccessDialog(int channelNumber);
     void sendReport(int channelNumber);
@@ -115,6 +117,7 @@ private:
     EventLogPanel* eventLogPanel_ = nullptr;
     ObjectListPanel* objectListPanel_ = nullptr;
     MapSettingsDialog* mapSettingsDialog_ = nullptr;
+    AreaSelectionDialog* areaSelectionDialog_ = nullptr;
     ReportConfirmationDialog* reportConfirmationDialog_ = nullptr;
     ReportSuccessDialog* reportSuccessDialog_ = nullptr;
     QWidget* expandedWidget_ = nullptr;

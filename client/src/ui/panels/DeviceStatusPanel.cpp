@@ -10,7 +10,8 @@
 #include <QVBoxLayout>
 
 namespace {
-constexpr int deviceChannelCount = 4;
+constexpr int deviceChannelCount = 8;
+constexpr int visibleChannelCount = 4;
 constexpr int deviceStatusIconSize = 22;
 
 bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
@@ -51,8 +52,24 @@ DeviceStatusPanel::DeviceStatusPanel(QWidget* parent) : QWidget(parent) {
 
     setupUi();
 
-    for (int channelIndex = 0; channelIndex < deviceChannelCount; ++channelIndex) {
-        updateChannelWidgets(channelIndex);
+    for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
+        updateChannelWidgets(localChannelIndex);
+    }
+}
+
+/**
+ * @brief            패널에 표시할 CCTV 구역을 변경합니다.
+ * @param
+ * areaIndex  0부터 시작하는 구역 인덱스
+ */
+void DeviceStatusPanel::setAreaIndex(int areaIndex) {
+    if (areaIndex < 0 || areaIndex >= deviceChannelCount / visibleChannelCount || areaIndex_ == areaIndex) {
+        return;
+    }
+
+    areaIndex_ = areaIndex;
+    for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
+        updateChannelWidgets(localChannelIndex);
     }
 }
 
@@ -70,7 +87,9 @@ void DeviceStatusPanel::setChannelStatus(const DeviceChannelStatus& status) {
     }
 
     channelStatuses_[status.channelIndex] = status;
-    updateChannelWidgets(status.channelIndex);
+    if (status.channelIndex / visibleChannelCount == areaIndex_) {
+        updateChannelWidgets(status.channelIndex % visibleChannelCount);
+    }
 }
 
 /**
@@ -111,8 +130,8 @@ void DeviceStatusPanel::setupUi() {
     gridLayout->setHorizontalSpacing(8);
     gridLayout->setVerticalSpacing(6);
 
-    for (int channelIndex = 0; channelIndex < deviceChannelCount; ++channelIndex) {
-        gridLayout->addWidget(createChannelCard(channelIndex), channelIndex / 2, channelIndex % 2);
+    for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
+        gridLayout->addWidget(createChannelCard(localChannelIndex), localChannelIndex / 2, localChannelIndex % 2);
     }
 
     gridLayout->setColumnStretch(0, 1);
@@ -223,11 +242,13 @@ QLabel* DeviceStatusPanel::createStatusSegment(const StatusSegmentSpec& spec) {
  * @param channelIndex  갱신할 채널 index
  */
 void DeviceStatusPanel::updateChannelWidgets(int channelIndex) {
-    if (channelIndex < 0 || channelIndex >= channelStatuses_.size() || channelIndex >= channelWidgets_.size()) {
+    const int globalChannelIndex = areaIndex_ * visibleChannelCount + channelIndex;
+    if (channelIndex < 0 || channelIndex >= channelWidgets_.size() || globalChannelIndex < 0 ||
+        globalChannelIndex >= channelStatuses_.size()) {
         return;
     }
 
-    const DeviceChannelStatus& status = channelStatuses_[channelIndex];
+    const DeviceChannelStatus& status = channelStatuses_[globalChannelIndex];
     const ChannelWidgets& widgets = channelWidgets_[channelIndex];
     const bool outputsKnown = status.hasConfirmedState;
 

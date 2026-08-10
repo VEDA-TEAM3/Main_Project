@@ -27,7 +27,8 @@ private:
      * @brief VEDA_TOPVIEW_DEBUG로 켜는 좌표 진단 상태
      *
      * @details level 1은 1초 요약, level 2는 객체별 프레임 상세까지 남긴다.
-     *          꺼져 있으면(기본값) 아무 비용도 들지 않도록 모든 경로가 level_로 먼저 걸러진다.
+     *          꺼져 있으면(기본값) 아무 비용도 들지 않도록 모든 경로가 level_로
+     * 먼저 걸러진다.
      */
     struct Diagnostics {
         int level = 0;
@@ -64,9 +65,7 @@ private:
     void expandAutomaticWorldBounds(const RiskFrameData& frame);
     void logAutomaticWorldBounds(const QString& reason) const;
     bool worldBoundsReady() const;
-    QPointF normalizedWorldPosition(const QPointF& worldPosition) const;
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
-    int channelIndexForObject(qint64 globalId, const QPointF& normalizedPosition);
     QPointF rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition, qint64 arrivalTimeMsec);
     void logRateLimitedJump(qint64 globalId, double distance, double maximumDistance, qint64 localTimeMsec);
     void logFrameDiagnostics(const RiskFrameData& frame, const QVector<QPointF>& rawPositions,
@@ -82,7 +81,6 @@ private:
     std::optional<RiskFrameData> lastAcceptedInputFrame_;
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, QVector<QPointF>> worldPositionHistories_;
-    QHash<qint64, int> channelIndexes_;
     QHash<qint64, qint64> lastSeenArrivalTimesMsec_;
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;

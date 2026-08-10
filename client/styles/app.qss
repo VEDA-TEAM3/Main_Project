@@ -547,44 +547,30 @@ QLabel#reportActionTitleLabel {
     font-weight: 800;
 }
 
-QComboBox#cctvAreaComboBox {
-    min-width: 90px;
-    max-width: 94px;
-    min-height: 30px;
-    max-height: 30px;
-    color: #d8f5ff;
+QPushButton#videoAreaButton {
+    color: #e6f8ff;
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #16415f, stop:0.55 #0e304a, stop:1 #092237);
-    border: 1px solid #3b91b7;
-    border-top-color: #58c9ef;
-    border-radius: 4px;
-    padding: 0 24px 0 10px;
-    font-family: "Segoe UI";
-    font-size: 12px;
-    font-weight: 800;
+                                       stop:0 #195174, stop:0.48 #103b58, stop:1 #0a2941);
+    border: 1px solid #55bde4;
+    border-top-color: #8de6ff;
+    border-radius: 5px;
+    padding: 0 14px;
+    font-family: "Segoe UI", "Malgun Gothic";
+    font-size: 17px;
+    font-weight: 900;
 }
 
-QComboBox#cctvAreaComboBox:hover,
-QComboBox#cctvAreaComboBox:on {
+QPushButton#videoAreaButton:hover {
     color: #ffffff;
-    background-color: #175577;
-    border-color: #72dcff;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                       stop:0 #267ca3, stop:0.52 #175b7d, stop:1 #103d5a);
+    border-color: #a7efff;
 }
 
-QComboBox#cctvAreaComboBox::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: top right;
-    width: 22px;
-    border: 0;
-}
-
-QComboBox#cctvAreaComboBox QAbstractItemView {
-    color: #e6f4fa;
-    background-color: #091e30;
-    border: 1px solid #4a91b5;
-    selection-color: #ffffff;
-    selection-background-color: #17698f;
-    outline: 0;
+QPushButton#videoAreaButton:pressed {
+    color: #bfeeff;
+    background-color: #0a2a40;
+    border-color: #3f93b6;
 }
 
 QPushButton#reportChannelButton1, QPushButton#reportChannelButton2,
@@ -952,4 +938,121 @@ QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
 QScrollBar::add-line, QScrollBar::sub-line {
     width: 0;
     height: 0;
+}
+
+QWidget#areaSelectionDialog {
+    background-color: rgba(1, 10, 18, 205);
+}
+
+QFrame#areaSelectionPanel {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                      stop:0 #123652, stop:0.52 #0c2941, stop:1 #071827);
+    border: 1px solid #58c9ef;
+    border-top-color: #91e7ff;
+    border-radius: 8px;
+}
+
+QLabel#areaSelectionTitle {
+    color: #f4fbff;
+    font-family: "Segoe UI", "Malgun Gothic";
+    font-size: 21px;
+    font-weight: 900;
+    padding-left: 9px;
+    border-left: 3px solid #55d7ff;
+}
+
+QLabel#areaSelectionDescription {
+    color: #a9c7d6;
+    font-family: "Segoe UI", "Malgun Gothic";
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QPushButton#areaSelectionCloseButton {
+    min-width: 40px;
+    max-width: 40px;
+    min-height: 38px;
+    max-height: 38px;
+    color: #d8f3ff;
+    background-color: #0b2940;
+    border: 1px solid #3f7697;
+    border-radius: 5px;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+QPushButton#areaSelectionCloseButton:hover {
+    color: #ffffff;
+    background-color: #174c6b;
+    border-color: #72dcff;
+}
+
+QListWidget#areaSelectionList {
+    color: #d9edf6;
+    background-color: #071b2c;
+    border: 1px solid #315f7e;
+    border-radius: 5px;
+    outline: 0;
+    padding: 5px;
+    font-family: "Segoe UI", "Malgun Gothic";
+    font-size: 15px;
+    font-weight: 800;
+}
+
+QListWidget#areaSelectionList::item {
+    color: #c6dce6;
+    background-color: #0a2438;
+    border: 1px solid #244c67;
+    border-radius: 4px;
+    padding-left: 18px;
+    margin: 3px;
+}
+
+QListWidget#areaSelectionList::item:hover {
+    color: #effbff;
+    background-color: #123c56;
+    border-color: #4fa5c9;
+}
+
+QListWidget#areaSelectionList::item:selected {
+    color: #ffffff;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                      stop:0 #17678d, stop:0.7 #124967, stop:1 #0d344d);
+    border: 1px solid #7ae1ff;
+    border-left: 4px solid #55dcff;
+}
+
+QPushButton#areaSelectionCancelButton,
+QPushButton#areaSelectionConfirmButton {
+    min-width: 108px;
+    min-height: 40px;
+    border-radius: 5px;
+    font-family: "Segoe UI", "Malgun Gothic";
+    font-size: 14px;
+    font-weight: 800;
+}
+
+QPushButton#areaSelectionCancelButton {
+    color: #cbdde6;
+    background-color: #0b2032;
+    border: 1px solid #365f79;
+}
+
+QPushButton#areaSelectionCancelButton:hover {
+    color: #ffffff;
+    background-color: #123c56;
+    border-color: #579fc0;
+}
+
+QPushButton#areaSelectionConfirmButton {
+    color: #ffffff;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #269ac4, stop:1 #176a91);
+    border: 1px solid #6ed9f7;
+}
+
+QPushButton#areaSelectionConfirmButton:hover {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #36b2dc, stop:1 #1c7da5);
+    border-color: #d5f7ff;
 }

@@ -33,6 +33,15 @@ inline void adjustBottomSectionHeight(QMainWindow* window, UiMainWindow* ui) {
 }
 
 template <typename UiMainWindow>
+inline void alignDeviceStatusCardWidth(UiMainWindow* ui) {
+    if (!ui || ui->cctvCard->width() <= 0) {
+        return;
+    }
+
+    ui->deviceStatusCard->setFixedWidth(ui->cctvCard->width());
+}
+
+template <typename UiMainWindow>
 inline void orderBottomSectionWidgets(UiMainWindow* ui) {
     if (!ui) {
         return;
@@ -42,9 +51,9 @@ inline void orderBottomSectionWidgets(UiMainWindow* ui) {
     ui->bottomSectionLayout->removeWidget(ui->eventLogCard);
     ui->bottomSectionLayout->removeWidget(ui->deviceStatusCard);
 
-    ui->bottomSectionLayout->insertWidget(0, ui->objectListCard);
-    ui->bottomSectionLayout->insertWidget(1, ui->eventLogCard);
-    ui->bottomSectionLayout->insertWidget(2, ui->deviceStatusCard);
+    ui->bottomSectionLayout->insertWidget(0, ui->deviceStatusCard);
+    ui->bottomSectionLayout->insertWidget(1, ui->objectListCard);
+    ui->bottomSectionLayout->insertWidget(2, ui->eventLogCard);
 }
 
 template <typename UiMainWindow>
@@ -94,9 +103,9 @@ inline void apply(QMainWindow* window, UiMainWindow* ui) {
     ui->topSectionLayout->setStretch(0, 9);
     ui->topSectionLayout->setStretch(1, 10);
 
-    ui->bottomSectionLayout->setStretch(0, 7);
-    ui->bottomSectionLayout->setStretch(1, 7);
-    ui->bottomSectionLayout->setStretch(2, 11);
+    ui->bottomSectionLayout->setStretch(0, 47);
+    ui->bottomSectionLayout->setStretch(1, 25);
+    ui->bottomSectionLayout->setStretch(2, 28);
 
     ui->cctvCardLayout->setStretch(0, 0);
     ui->cctvCardLayout->setStretch(1, 1);

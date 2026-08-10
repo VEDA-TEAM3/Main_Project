@@ -29,20 +29,8 @@ constexpr double horizontalVelocityJitter = horizontalVelocityJitterPerSecond * 
 constexpr double verticalVelocityJitter = verticalVelocityJitterPerSecond * secondsPerUpdate;
 constexpr double opacityIncrementPerTick = static_cast<double>(updateIntervalMsec) / fadeInDurationMsec;
 
-/**
- * @brief           정규화 좌표를 중심에서 X자로 나눠 CCTV 채널을 계산합니다.
- * @param position  0.0~1.0 기준 객체 위치
- * @return          위 CH01, 왼쪽 CH02, 아래 CH03, 오른쪽 CH04 순의 0~3 채널 인덱스
- */
-int channelIndexForPosition(const QPointF& position) {
-    const double offsetX = position.x() - 0.5;
-    const double offsetY = position.y() - 0.5;
-
-    if (qAbs(offsetY) >= qAbs(offsetX)) {
-        return offsetY < 0.0 ? 0 : 2;
-    }
-    return offsetX < 0.0 ? 1 : 3;
-}
+/** @brief 데모 객체를 8개 서버 채널에 안정적으로 분산합니다. */
+int demoChannelIndex(const QString& objectId) { return static_cast<int>(qHash(objectId) % 8U); }
 
 /**
  * @brief               지정 범위 안의 난수를 생성합니다.
@@ -157,7 +145,8 @@ QPointF midpointForObjects(const DigitalTwinObject& firstObject, const DigitalTw
 }  // namespace
 
 /**
- * @brief       디지털 트윈 객체 이동과 위험 판정을 수행하는 worker를 생성합니다.
+ * @brief       디지털 트윈 객체 이동과 위험 판정을 수행하는 worker를
+ * 생성합니다.
  * @param parent  Qt 객체 소유권 부모
  */
 DigitalTwinSimulationWorker::DigitalTwinSimulationWorker(QObject* parent)
@@ -173,7 +162,8 @@ DigitalTwinSimulationWorker::DigitalTwinSimulationWorker(std::shared_ptr<Digital
     : DigitalTwinSimulationWorker(std::move(riskPolicy), std::make_shared<RandomEdgeObjectSpawner>(), parent) {}
 
 /**
- * @brief               위험 판정 정책과 객체 생성 정책을 주입받아 worker를 생성합니다.
+ * @brief               위험 판정 정책과 객체 생성 정책을 주입받아 worker를
+ * 생성합니다.
  * @param riskPolicy     객체 간 위험 단계를 계산할 정책
  * @param objectSpawner  초기 객체와 경계 진입 객체를 생성할 정책
  * @param parent         Qt 객체 소유권 부모
@@ -234,7 +224,7 @@ void DigitalTwinSimulationWorker::updateObjects() {
 void DigitalTwinSimulationWorker::setupDemoObjects() {
     objects_ = objectSpawner_->createInitialObjects(initialObjectCount);
     for (DigitalTwinObject& object : objects_) {
-        object.channelIndex = channelIndexForPosition(object.position);
+        object.channelIndex = demoChannelIndex(object.objectId);
         object.opacity = 1.0;
     }
 
@@ -285,7 +275,6 @@ void DigitalTwinSimulationWorker::updateObjectMotion(DigitalTwinObject* object) 
     }
 
     object->position = nextPosition;
-    object->channelIndex = channelIndexForPosition(object->position);
 
     const double fadeInOpacity = std::min(1.0, object->opacity + opacityIncrementPerTick);
     double edgeOpacity = 1.0;
@@ -327,7 +316,7 @@ void DigitalTwinSimulationWorker::spawnObjectIfNeeded() {
     }
 
     DigitalTwinObject object = objectSpawner_->createEnteringObject();
-    object.channelIndex = channelIndexForPosition(object.position);
+    object.channelIndex = demoChannelIndex(object.objectId);
     object.opacity = 0.0;
     objects_.append(std::move(object));
     scheduleNextSpawn();
@@ -339,7 +328,8 @@ void DigitalTwinSimulationWorker::spawnObjectIfNeeded() {
 void DigitalTwinSimulationWorker::scheduleNextSpawn() { spawnCountdownMsec_ = objectSpawner_->nextSpawnDelayMsec(); }
 
 /**
- * @brief   현재 객체 간 거리만 기준으로 위험 단계를 재계산하고 오버레이 이벤트를 발생시킵니다.
+ * @brief   현재 객체 간 거리만 기준으로 위험 단계를 재계산하고 오버레이
+ * 이벤트를 발생시킵니다.
  */
 void DigitalTwinSimulationWorker::updateRiskLevels() {
     for (auto& object : objects_) {
@@ -365,6 +355,12 @@ void DigitalTwinSimulationWorker::updateRiskLevels() {
 
     for (int firstIndex = 0; firstIndex < objects_.size(); ++firstIndex) {
         for (int secondIndex = firstIndex + 1; secondIndex < objects_.size(); ++secondIndex) {
+            const int firstChannelIndex = objects_[firstIndex].channelIndex;
+            const int secondChannelIndex = objects_[secondIndex].channelIndex;
+            if (firstChannelIndex < 0 || secondChannelIndex < 0 || firstChannelIndex / 4 != secondChannelIndex / 4) {
+                continue;
+            }
+
             const DigitalTwinRiskLevel pairRiskLevel =
                 riskPolicy_->riskLevelForObjects(objects_[firstIndex], objects_[secondIndex]);
             if (pairRiskLevel == DigitalTwinRiskLevel::Normal) {
@@ -404,6 +400,7 @@ void DigitalTwinSimulationWorker::updateRiskLevels() {
                 riskEvent.secondObjectId = objects_[secondIndex].objectId;
                 riskEvent.position = midpointForObjects(objects_[firstIndex], objects_[secondIndex]);
                 riskEvent.riskLevel = pairRiskLevel;
+                riskEvent.channelIndex = firstChannelIndex;
 
                 emit riskEventDetected(riskEvent);
                 pairPulseCooldownTicks_.insert(pairKey, pulseRepeatTicksForRiskLevel(pairRiskLevel));
@@ -415,7 +412,8 @@ void DigitalTwinSimulationWorker::updateRiskLevels() {
 }
 
 /**
- * @brief   최신 객체와 객체 쌍 위험 상태를 하나의 스냅샷으로 UI 스레드에 전달합니다.
+ * @brief   최신 객체와 객체 쌍 위험 상태를 하나의 스냅샷으로 UI 스레드에
+ * 전달합니다.
  */
 void DigitalTwinSimulationWorker::emitCurrentSnapshot() {
     DigitalTwinSnapshot snapshot;
