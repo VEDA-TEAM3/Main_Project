@@ -5,8 +5,8 @@
  * @brief   BlurFrame 전용 MQTT 발행 Sink
  *
  * @details
- * 큐잉/워커/드랍 집계는 MqttFrameSink<T> 가, 연결은 IMqttTransport 가 담당하므로
- * 이 클래스에는 'BlurFrame 을 어떻게 검증하고 어느 토픽으로 보낼지'만 남음
+ * 큐잉/워커/드랍 집계는 MqttFrameSink<T>가, 연결은 IMqttTransport가 담당하므로
+ * 이 클래스에는 BlurFrame을 어떻게 검증하고 어느 토픽으로 보낼지만 남음
  */
 
 #include <cstddef>
@@ -30,15 +30,16 @@ protected:
 private:
     /**
      * @brief   프레임 단위 유효성 검사 (스키마 버전/타임스탬프/채널 범위)
-     * @details 여기서 실패하면 blurs 내용과 무관하게 프레임 자체가 구조적으로 잘못된 것이므로
-     *          프레임 전체를 버림. 개별 blur 대상 하나의 클래스/좌표 문제는 isValidBlurTarget()이
-     *          담당 -> 얼굴 하나가 인식 안 되는 클래스라고 같은 프레임의 나머지 blur까지
+     * @details 여기서 실패하면 Blurs 내용과 무관하게 프레임 자체가 구조적으로 잘못된 것이므로
+     *          프레임 전체를 버림
+     *          개별 Blur 대상 하나의 클래스/좌표 문제는 isValidBlurTarget()이 담당
+     *          → 얼굴 하나가 인식 안 되는 클래스라고 같은 프레임의 나머지 Blur까지
      *          통째로 버려지는 일이 없도록 분리함
      */
     bool isValidFrame(const veda::BlurFrame& frame) const noexcept;
 
-    /// @brief 개별 blur 대상 하나의 유효성 검사 (클래스가 Head/LicensePlate인지, box 좌표가 정상인지)
+    /// @brief 개별 Blur 대상 하나의 유효성 검사 (클래스가 Head/LicensePlate인지, box 좌표가 정상인지)
     bool isValidBlurTarget(const veda::BlurTarget& blur) const noexcept;
 
-    veda::ChannelId channelId_;  ///< 이 프로세스의 채널. frame.ch 는 반드시 이 값과 같아야 함(엣지 워커 불변식)
+    veda::ChannelId channelId_;  ///< 이 프로세스의 채널 (frame.ch는 반드시 이 값과 같아야 함)
 };

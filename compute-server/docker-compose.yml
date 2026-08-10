@@ -3,9 +3,18 @@ name: veda-cctv-01
 x-compute-common: &compute-common
   image: veda/compute-server:1.0.0
   restart: always
+  init: true
   working_dir: /opt/veda
   stop_grace_period: 15s
   network_mode: host
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 64
+  tmpfs:
+    - /tmp:size=16m,noexec,nosuid,nodev
   deploy:
     resources:
       limits:
@@ -21,7 +30,7 @@ services:
       - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
       - /var/log/veda/cctv_01:/opt/veda/logs
     healthcheck:
-      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -35,7 +44,7 @@ services:
       - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
       - /var/log/veda/cctv_01:/opt/veda/logs
     healthcheck:
-      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -49,7 +58,7 @@ services:
       - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
       - /var/log/veda/cctv_01:/opt/veda/logs
     healthcheck:
-      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -63,7 +72,7 @@ services:
       - /etc/veda/certs/ca.crt:/etc/veda/certs/ca.crt:ro
       - /var/log/veda/cctv_01:/opt/veda/logs
     healthcheck:
-      test: ["CMD-SHELL", "pgrep compute-server || exit 1"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 30s
       timeout: 5s
       retries: 3

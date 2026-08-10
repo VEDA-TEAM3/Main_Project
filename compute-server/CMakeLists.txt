@@ -42,7 +42,17 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
-target_compile_options(compute-server PRIVATE -O2)
+target_compile_options(compute-server PRIVATE
+    -O2
+    -fstack-protector-strong
+    -fPIE
+)
+target_compile_definitions(compute-server PRIVATE _FORTIFY_SOURCE=3)
+target_link_options(compute-server PRIVATE
+    -pie
+    -Wl,-z,relro
+    -Wl,-z,now
+)
 
 target_link_libraries(
     compute-server

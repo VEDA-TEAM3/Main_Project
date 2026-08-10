@@ -20,7 +20,7 @@ veda::BlurTarget toBlurTarget(const domain::DetectedObject& o) {
 }
 
 /**
- * @brief   잘림 정책상 이 risk 객체의 지면점을 신뢰할 수 없는지 판정
+ * @brief   잘림 정책상 이 Risk 객체의 지면점을 신뢰할 수 없는지 판정
  * @details 아래변이 잘리면 발 위치를 모르는 채 잘린 지점을 지면으로 오인하므로
  *          호모그래피가 실제보다 훨씬 먼 곳으로 사상함
  */
@@ -56,7 +56,7 @@ Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IIma
 void Pipeline::onPacket(const domain::RawPacket& raw) {
     domain::ChannelFrame frame = parser_->parse(raw);
     frame = sanitizer_->sanitize(std::move(frame));
-    // 멤버 버퍼를 재사용 -> 프레임마다 RouteResult 를 새로 만들지 않음 (힙 할당 0)
+    // 멤버 버퍼를 재사용 → 프레임마다 RouteResult를 새로 만들지 않음 (힙 할당 0)
     router_->route(frame, routeResult_);
     RouteResult& routed = routeResult_;
 

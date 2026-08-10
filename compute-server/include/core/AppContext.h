@@ -40,7 +40,7 @@ private:
 
     /**
      * @brief   두 Sink가 공유하는 단일 MQTT 커넥션
-     * @note    pipeline_ 보다 먼저 선언 -> 파괴는 역순이므로 Sink가 먼저 정리된 뒤에 transport가 사라짐
+     * @note    pipeline_보다 먼저 선언 → 파괴는 역순이므로 Sink가 먼저 정리된 뒤에 transport가 사라짐
      *          (Sink도 shared_ptr로 잡고 있어 이중으로 안전하지만 선언 순서로도 명시)
      */
     std::shared_ptr<IMqttTransport> transport_;
