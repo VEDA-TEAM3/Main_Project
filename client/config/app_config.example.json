@@ -22,13 +22,13 @@
         "frameExpiryPollMs": 1000,
         "positionTransitionMs": 66,
         "fadeInMs": 120,
-        "missingGraceMs": 100,
+        "missingGraceMs": 200,
         "fadeOutMs": 180,
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
         "icons": {
-            "vehiclePx": 92,
-            "pedestrianPx": 62
+            "vehiclePx": 70,
+            "pedestrianPx": 52
         },
         "world": {
             "fixedBoundsEnabled": true,
@@ -39,9 +39,9 @@
             "automaticBoundsPaddingRatio": 0.08,
             "automaticBoundsOutlierFraction": 0.05,
             "minX": -80.0,
-            "minY": -35.0,
+            "minY": -40.0,
             "maxX": 80.0,
-            "maxY": 35.0
+            "maxY": 40.0
         }
     },
     "video": {

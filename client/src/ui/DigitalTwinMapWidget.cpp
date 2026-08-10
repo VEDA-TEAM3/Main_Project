@@ -653,9 +653,7 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     const DigitalTwinObjectVisualStyle visualStyle = objectStyleProvider_->styleFor(visualItem->object);
     visualItem->label->setBrush(visualStyle.labelColor);
     visualItem->label->setPos(scenePosition + QPointF(18.0, -31.0));
-    const qreal objectOpacity = visualItem->object.riskLevel == DigitalTwinRiskLevel::Danger
-                                    ? qMax<qreal>(0.85, visualItem->object.opacity)
-                                    : visualItem->object.opacity;
+    const qreal objectOpacity = visualItem->object.opacity;
     visualItem->marker->setOpacity(objectOpacity);
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);

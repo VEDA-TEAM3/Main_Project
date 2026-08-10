@@ -48,9 +48,9 @@ RiskObjectData riskObjectAt(qint64 globalId, qint64 nearestId, int zoneId) {
  */
 void checkServerZoneIdPassThrough() {
     DigitalTwinRuntimeConfig config;
-    config.positionTransitionMsec = 0;
+    config.positionTransitionMsec = 66;
     config.world.fixedBoundsEnabled = true;
-    config.world.bounds = QRectF(-80.0, -35.0, 160.0, 70.0);
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
 
     RiskFrameData frame;
     frame.sourceTimestamp = 1000;
@@ -70,6 +70,15 @@ void checkServerZoneIdPassThrough() {
     check(first != nullptr && first->position == QPointF(-50.0, 0.0), "world position must remain unchanged");
     check(second != nullptr && second->position == QPointF(-50.0, 0.0),
           "identical coordinates must not force identical channels");
+
+    frame.sourceTimestamp = 1033;
+    frame.objects[0].worldPosition = QPointF(-45.0, 5.0);
+    tracker.submitFrame(frame, 1033);
+    tracker.buildSnapshot(1033);
+    const DigitalTwinSnapshot movedSnapshot = tracker.buildSnapshot(1099);
+    const DigitalTwinObject* moved = findObject(movedSnapshot, 1);
+    check(moved != nullptr && moved->position == QPointF(-45.0, 5.0),
+          "position transition must preserve world coordinates");
 }
 
 /**

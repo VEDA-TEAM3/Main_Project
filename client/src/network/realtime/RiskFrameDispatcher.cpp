@@ -8,7 +8,7 @@ namespace {
 bool sameRiskObject(const RiskObjectData& first, const RiskObjectData& second) {
     return first.globalId == second.globalId && first.objectClass == second.objectClass &&
            first.worldPosition == second.worldPosition && first.riskLevel == second.riskLevel &&
-           first.nearestId == second.nearestId && first.distance == second.distance;
+           first.nearestId == second.nearestId && first.distance == second.distance && first.zoneId == second.zoneId;
 }
 
 bool sameRiskFrame(const RiskFrameData& first, const RiskFrameData& second) {

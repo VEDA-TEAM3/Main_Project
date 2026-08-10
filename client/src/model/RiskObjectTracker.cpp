@@ -865,11 +865,11 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
  * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬
  * 시간으로 전환합니다.
  * @param objectId          추적 객체 식별자
- * @param targetPosition    최신 RiskFrame에서 계산한 목표 정규화 좌표
+ * @param targetPosition    최신 RiskFrame에서 받은 목표 월드 좌표
  * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번 (RiskFrame.ts는
  * 단조 증가가 아니라 쓰지 않는다)
  * @param localTimeMsec     현재 로컬 monotonic 시각
- * @return                  현재 렌더 시점의 정규화 좌표
+ * @return                  현재 렌더 시점의 월드 좌표
  */
 QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const QPointF& targetPosition,
                                                 qint64 frameSequence, qint64 localTimeMsec) {
@@ -904,8 +904,7 @@ QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const Q
         state.targetFrameSequence = frameSequence;
     }
 
-    const QPointF rendered = currentPosition(state);
-    return QPointF(qBound(0.0, rendered.x(), 1.0), qBound(0.0, rendered.y(), 1.0));
+    return currentPosition(state);
 }
 
 /**
