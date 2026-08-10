@@ -28,13 +28,41 @@ bool isInsideCircularRegion(int x, int y, double centerX, double centerY, double
 }
 
 /**
+ * @brief        실수 픽셀 좌표를 내림한 뒤 영상 범위로 제한합니다.
+ * @param value  실수 픽셀 좌표
+ * @param extent 영상 축 길이
+ * @return       영상 범위로 제한한 픽셀 좌표
+ */
+int boundedFloorPixel(double value, int extent) {
+    int pixel = static_cast<int>(value);
+    if (static_cast<double>(pixel) > value) {
+        --pixel;
+    }
+    return qBound(0, pixel, extent);
+}
+
+/**
+ * @brief        실수 픽셀 좌표를 올림한 뒤 영상 범위로 제한합니다.
+ * @param value  실수 픽셀 좌표
+ * @param extent 영상 축 길이
+ * @return       영상 범위로 제한한 픽셀 좌표
+ */
+int boundedCeilPixel(double value, int extent) {
+    int pixel = static_cast<int>(value);
+    if (static_cast<double>(pixel) < value) {
+        ++pixel;
+    }
+    return qBound(0, pixel, extent);
+}
+
+/**
  * @brief            정규화 좌표를 내림 방향 픽셀 좌표로 변환합니다.
  * @param normalized 정규화 좌표
  * @param extent     영상 축 길이
  * @return           영상 범위로 제한한 픽셀 좌표
  */
 int normalizedFloorPixel(double normalized, int extent) {
-    return qBound(0, static_cast<int>(normalized * static_cast<double>(extent)), extent);
+    return boundedFloorPixel(normalized * static_cast<double>(extent), extent);
 }
 
 /**
@@ -44,12 +72,7 @@ int normalizedFloorPixel(double normalized, int extent) {
  * @return           영상 범위로 제한한 픽셀 좌표
  */
 int normalizedCeilPixel(double normalized, int extent) {
-    const double scaled = normalized * static_cast<double>(extent);
-    int pixel = static_cast<int>(scaled);
-    if (static_cast<double>(pixel) < scaled) {
-        ++pixel;
-    }
-    return qBound(0, pixel, extent);
+    return boundedCeilPixel(normalized * static_cast<double>(extent), extent);
 }
 
 /**
@@ -96,10 +119,10 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
     const double centerY = static_cast<double>(boxTop + boxBottom) / 2.0;
     const double circleRadius =
         std::hypot(static_cast<double>(boxRight - boxLeft), static_cast<double>(boxBottom - boxTop)) / 2.0;
-    const int left = qBound(0, static_cast<int>(std::floor(centerX - circleRadius)), frameWidth);
-    const int top = qBound(0, static_cast<int>(std::floor(centerY - circleRadius)), frameHeight);
-    const int right = qBound(0, static_cast<int>(std::ceil(centerX + circleRadius)), frameWidth);
-    const int bottom = qBound(0, static_cast<int>(std::ceil(centerY + circleRadius)), frameHeight);
+    const int left = boundedFloorPixel(centerX - circleRadius, frameWidth);
+    const int top = boundedFloorPixel(centerY - circleRadius, frameHeight);
+    const int right = boundedCeilPixel(centerX + circleRadius, frameWidth);
+    const int bottom = boundedCeilPixel(centerY + circleRadius, frameHeight);
     const int regionWidth = right - left;
     const int regionHeight = bottom - top;
     if (regionWidth < 2 || regionHeight < 2) {
