@@ -243,7 +243,7 @@ flowchart TD
 | `paddingRatio` | 0.18 | 검출 box의 각 방향을 box 크기의 18%만큼 확대 |
 | `radiusDivisor` | 3 | blur radius 계산의 분모. 작을수록 blur가 강해짐 |
 | `minimumRadius` / `maximumRadius` | 4 / 28 px | 해상도·box 크기에 따른 radius 하한/상한 |
-| `maximumCornerRadius` | 28 px | 둥근 blur 영역 모서리 반경 상한 |
+블러 영역은 전달된 bounding box와 padding 전체를 감싸는 원형 마스크를 적용한다.
 
 `addReferenceTimestampMeta=true`로 RTCP sender clock을 얻은 frame에는 `syncOffsetMs`를 적용하지
 않는다. RTCP reference가 없을 때만 최초 PTS와 로컬 UTC로 anchor를 만들고, 이 fallback 경로에서
@@ -402,4 +402,3 @@ profile4 설정에서 다시 확인해야 한다.
    없애거나 같은 값으로 취급하면 안 된다.
 5. `dropOnLatency=true`와 leaky queue는 frame 완전 보존보다 실시간성을 선택한다. 녹화 용도의
    pipeline에는 같은 설정을 그대로 사용하면 안 된다.
-

@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QMutexLocker>
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <iterator>
 #include <utility>
@@ -20,17 +21,10 @@ namespace {
  * @param cornerRadius  모서리 반지름
  * @return              둥근 사각형 안쪽이면 true
  */
-bool isInsideRoundedRegion(int x, int y, int width, int height, int cornerRadius) {
-    if (cornerRadius <= 0 || (x >= cornerRadius && x < width - cornerRadius) ||
-        (y >= cornerRadius && y < height - cornerRadius)) {
-        return true;
-    }
-
-    const int centerX = x < cornerRadius ? cornerRadius : width - cornerRadius - 1;
-    const int centerY = y < cornerRadius ? cornerRadius : height - cornerRadius - 1;
-    const int deltaX = x - centerX;
-    const int deltaY = y - centerY;
-    return deltaX * deltaX + deltaY * deltaY <= cornerRadius * cornerRadius;
+bool isInsideCircularRegion(int x, int y, double centerX, double centerY, double radius) {
+    const double deltaX = static_cast<double>(x) + 0.5 - centerX;
+    const double deltaY = static_cast<double>(y) + 0.5 - centerY;
+    return deltaX * deltaX + deltaY * deltaY <= radius * radius;
 }
 
 /**
@@ -94,10 +88,18 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
     const QRectF paddedBox =
         sourceBox.adjusted(-paddingX, -paddingY, paddingX, paddingY).intersected(QRectF(0.0, 0.0, 1.0, 1.0));
 
-    const int left = normalizedFloorPixel(paddedBox.left(), frameWidth);
-    const int top = normalizedFloorPixel(paddedBox.top(), frameHeight);
-    const int right = normalizedCeilPixel(paddedBox.right(), frameWidth);
-    const int bottom = normalizedCeilPixel(paddedBox.bottom(), frameHeight);
+    const int boxLeft = normalizedFloorPixel(paddedBox.left(), frameWidth);
+    const int boxTop = normalizedFloorPixel(paddedBox.top(), frameHeight);
+    const int boxRight = normalizedCeilPixel(paddedBox.right(), frameWidth);
+    const int boxBottom = normalizedCeilPixel(paddedBox.bottom(), frameHeight);
+    const double centerX = static_cast<double>(boxLeft + boxRight) / 2.0;
+    const double centerY = static_cast<double>(boxTop + boxBottom) / 2.0;
+    const double circleRadius =
+        std::hypot(static_cast<double>(boxRight - boxLeft), static_cast<double>(boxBottom - boxTop)) / 2.0;
+    const int left = qBound(0, static_cast<int>(std::floor(centerX - circleRadius)), frameWidth);
+    const int top = qBound(0, static_cast<int>(std::floor(centerY - circleRadius)), frameHeight);
+    const int right = qBound(0, static_cast<int>(std::ceil(centerX + circleRadius)), frameWidth);
+    const int bottom = qBound(0, static_cast<int>(std::ceil(centerY + circleRadius)), frameHeight);
     const int regionWidth = right - left;
     const int regionHeight = bottom - top;
     if (regionWidth < 2 || regionHeight < 2) {
@@ -108,7 +110,6 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
     const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
     const int radius = std::clamp(std::min(regionWidth, regionHeight) / config.radiusDivisor, config.minimumRadius,
                                   config.maximumRadius);
-    const int cornerRadius = std::min(config.maximumCornerRadius, std::max(1, std::min(regionWidth, regionHeight) / 4));
     constexpr int colorChannels = 3;
     const size_t scratchSize = static_cast<size_t>(regionWidth) * regionHeight * colorChannels;
     if (scratch.size() < scratchSize) {
@@ -155,7 +156,7 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
                 const int windowStart = std::max(0, localY - radius);
                 windowEnd = std::min(regionHeight - 1, localY + radius);
                 const int count = windowEnd - windowStart + 1;
-                if (isInsideRoundedRegion(localX, localY, regionWidth, regionHeight, cornerRadius)) {
+                if (isInsideCircularRegion(left + localX, top + localY, centerX, centerY, circleRadius)) {
                     guint8* targetPixel = pixels + (top + localY) * stride + (left + localX) * 4;
                     targetPixel[channel] = static_cast<guint8>(sum / static_cast<quint64>(count));
                 }

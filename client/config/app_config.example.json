@@ -106,7 +106,6 @@
                 "sourceRestartGapMs": 5000,
                 "sourceTimestampRestartThresholdMs": 2000,
                 "paddingRatio": 0.18,
-                "maximumCornerRadius": 28,
                 "radiusDivisor": 3,
                 "minimumRadius": 4,
                 "maximumRadius": 28,

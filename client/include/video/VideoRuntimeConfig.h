@@ -13,9 +13,16 @@ constexpr int videoGlobalChannelIndex(int areaIndex, int localChannelIndex) noex
     return areaIndex * videoChannelsPerArea + localChannelIndex;
 }
 
-constexpr int videoLocalChannelNumber(int globalChannelIndex) noexcept {
-    return globalChannelIndex % videoChannelsPerArea + 1;
+constexpr int videoLocalChannelIndex(int globalChannelIndex) noexcept {
+    return globalChannelIndex % videoChannelsPerArea;
 }
+
+constexpr int videoLocalChannelNumber(int globalChannelIndex) noexcept {
+    return videoLocalChannelIndex(globalChannelIndex) + 1;
+}
+
+static_assert(videoGlobalChannelIndex(1, 3) == 7);
+static_assert(videoLocalChannelIndex(7) == 3);
 
 struct VideoAreaConfig {
     QString areaId;
@@ -31,7 +38,6 @@ struct BlurProcessorConfig {
     qsizetype maximumHistorySize = 0;
     qint64 sourceRestartGapMsec = 0;
     double paddingRatio = 0.0;
-    int maximumCornerRadius = 0;
     int radiusDivisor = 0;
     int minimumRadius = 0;
     int maximumRadius = 0;
