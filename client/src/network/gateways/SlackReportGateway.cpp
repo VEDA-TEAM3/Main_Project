@@ -232,11 +232,12 @@ QByteArray SlackReportGateway::createMessagePayload(const ReportRequest& request
     const QString reportedAt = request.reportedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
     const QString text = QStringLiteral(
                              "[Wise AI 안전 신고]\n\n"
-                             "채널: %1\n"
-                             "신고 시각: %2\n"
-                             "신고 ID: %3\n"
-                             "내용: %4")
-                             .arg(channelName, reportedAt, request.reportId, request.detail);
+                             "구역: %1\n"
+                             "채널: %2\n"
+                             "신고 시각: %3\n"
+                             "신고 ID: %4\n"
+                             "내용: %5")
+                             .arg(request.areaName, channelName, reportedAt, request.reportId, request.detail);
 
     QJsonObject payload;
     payload.insert(QStringLiteral("channel"), destinationChannelId_);

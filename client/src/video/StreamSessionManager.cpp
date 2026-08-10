@@ -173,6 +173,29 @@ void StreamSessionManager::setVideoPreprocessingSettings(int channelIndex, const
 }
 
 /**
+ * @brief              지정한 채널의 디코더 이후 영상 처리와 출력을 전환합니다.
+ * @param channelIndex 적용할 0 기반
+ * 채널 인덱스
+ * @param active       true면 화면 출력, false면 RTSP와 디코더만 워밍 상태로 유지
+
+ */
+void StreamSessionManager::setPresentationActive(int channelIndex, bool active) {
+    presentationActiveByChannel_.insert(channelIndex, active);
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex != channelIndex || !worker.receiver || !worker.thread ||
+            !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, active]() { receiver->setPresentationActive(active); }, Qt::QueuedConnection);
+        break;
+    }
+}
+
+/**
  * @brief 등록된 출력 정보에 맞춰 receiver와 전용 worker thread를 생성합니다.
  */
 void StreamSessionManager::createWorkers() {
@@ -222,6 +245,7 @@ void StreamSessionManager::createWorkers() {
         receiver->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
         receiver->setVideoPreprocessingSettings(
             preprocessingSettingsByChannel_.value(config.channelIndex, preprocessingSettings_));
+        receiver->setPresentationActive(presentationActiveByChannel_.value(config.channelIndex, true));
         receiver->moveInternalObjectsToThread(receiverThread.get());
 
         if (receiver->thread() != receiverThread.get()) {

@@ -207,6 +207,22 @@
                 </property>
                </spacer>
               </item>
+              <item>
+               <widget class="DashboardAreaComboBox" name="cctvAreaComboBox">
+                <property name="minimumSize">
+                 <size>
+                  <width>90</width>
+                  <height>30</height>
+                 </size>
+                </property>
+                <property name="cursor">
+                 <cursorShape>PointingHandCursor</cursorShape>
+                </property>
+                <property name="focusPolicy">
+                 <enum>Qt::FocusPolicy::NoFocus</enum>
+                </property>
+               </widget>
+              </item>
                <item>
                 <layout class="QHBoxLayout" name="reportButtonLayout">
                  <property name="spacing">
@@ -334,23 +350,73 @@
              </layout>
             </item>
             <item>
-             <layout class="QGridLayout" name="videoGridLayout">
-              <property name="spacing">
-               <number>8</number>
+             <widget class="QStackedWidget" name="videoAreaStackedWidget">
+              <property name="frameShape">
+               <enum>QFrame::Shape::NoFrame</enum>
               </property>
-              <item row="0" column="0">
-               <widget class="ClickableVideoWidget" name="camView1" native="true"/>
-              </item>
-              <item row="0" column="1">
-               <widget class="ClickableVideoWidget" name="camView2" native="true"/>
-              </item>
-              <item row="1" column="0">
-               <widget class="ClickableVideoWidget" name="camView3" native="true"/>
-              </item>
-              <item row="1" column="1">
-               <widget class="ClickableVideoWidget" name="camView4" native="true"/>
-              </item>
-             </layout>
+              <widget class="QWidget" name="videoAreaPage1">
+               <layout class="QGridLayout" name="videoGridLayoutArea1">
+                <property name="spacing">
+                 <number>8</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item row="0" column="0">
+                 <widget class="ClickableVideoWidget" name="camView1" native="true"/>
+                </item>
+                <item row="0" column="1">
+                 <widget class="ClickableVideoWidget" name="camView2" native="true"/>
+                </item>
+                <item row="1" column="0">
+                 <widget class="ClickableVideoWidget" name="camView3" native="true"/>
+                </item>
+                <item row="1" column="1">
+                 <widget class="ClickableVideoWidget" name="camView4" native="true"/>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="videoAreaPage2">
+               <layout class="QGridLayout" name="videoGridLayoutArea2">
+                <property name="spacing">
+                 <number>8</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item row="0" column="0">
+                 <widget class="ClickableVideoWidget" name="camView5" native="true"/>
+                </item>
+                <item row="0" column="1">
+                 <widget class="ClickableVideoWidget" name="camView6" native="true"/>
+                </item>
+                <item row="1" column="0">
+                 <widget class="ClickableVideoWidget" name="camView7" native="true"/>
+                </item>
+                <item row="1" column="1">
+                 <widget class="ClickableVideoWidget" name="camView8" native="true"/>
+                </item>
+               </layout>
+              </widget>
+             </widget>
             </item>
            </layout>
           </widget>
@@ -586,6 +652,11 @@
   </widget>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>DashboardAreaComboBox</class>
+   <extends>QComboBox</extends>
+   <header>ui/DashboardAreaComboBox.h</header>
+  </customwidget>
   <customwidget>
    <class>ClickableVideoWidget</class>
    <extends>QWidget</extends>

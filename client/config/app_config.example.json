@@ -47,16 +47,25 @@
     "video": {
         "initialStartDelayMs": 1000,
         "receiverStartSpacingMs": 3000,
+        "initialAreaId": "area-01",
+        "areas": [
+            { "areaId": "area-01", "name": "제 1구역", "streamIds": ["cam-01", "cam-02", "cam-03", "cam-04"] },
+            { "areaId": "area-02", "name": "제 2구역", "streamIds": ["cam-05", "cam-06", "cam-07", "cam-08"] }
+        ],
         "streams": [
             { "cameraId": "cam-01", "name": "CH - 01", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/0/profile4/media.smp", "channelIndex": 0, "enabled": true },
             { "cameraId": "cam-02", "name": "CH - 02", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/1/profile4/media.smp", "channelIndex": 1, "enabled": true },
             { "cameraId": "cam-03", "name": "CH - 03", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/2/profile4/media.smp", "channelIndex": 2, "enabled": true },
-            { "cameraId": "cam-04", "name": "CH - 04", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/3/profile4/media.smp", "channelIndex": 3, "enabled": true }
+            { "cameraId": "cam-04", "name": "CH - 04", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/3/profile4/media.smp", "channelIndex": 3, "enabled": true },
+            { "cameraId": "cam-05", "name": "CH - 05", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/0/profile4/media.smp", "channelIndex": 4, "enabled": true },
+            { "cameraId": "cam-06", "name": "CH - 06", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/1/profile4/media.smp", "channelIndex": 5, "enabled": true },
+            { "cameraId": "cam-07", "name": "CH - 07", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/2/profile4/media.smp", "channelIndex": 6, "enabled": true },
+            { "cameraId": "cam-08", "name": "CH - 08", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/3/profile4/media.smp", "channelIndex": 7, "enabled": true }
         ],
         "receiver": {
             "decoderMode": "auto",
             "busPollIntervalMs": 200,
-            "latencyMs": 200,
+            "latencyMs": 250,
             "dropOnLatency": true,
             "initialPacketTimeoutMs": 10000,
             "initialFrameTimeoutMs": 10000,
@@ -72,7 +81,7 @@
             "addReferenceTimestampMeta": true,
             "decodeQueueMaximumBuffers": 8,
             "decodeQueueMaximumTimeMs": 100,
-            "alignmentDelayMs": 150,
+            "alignmentDelayMs": 100,
             "alignmentQueueMaximumTimeMs": 450,
             "renderQueueMaximumBuffers": 1,
             "renderQueueMaximumTimeMs": 200,

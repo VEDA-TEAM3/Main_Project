@@ -196,6 +196,26 @@ void GstRtspReceiver::setVideoPreprocessingSettings(const VideoPreprocessingSett
 }
 
 /**
+ * @brief        디코더 이후의 영상 처리와 화면 출력을 전환합니다.
+ * @param active true면 화면 출력, false면 RTSP와 디코더만 워밍 상태로 유지
+ */
+void GstRtspReceiver::setPresentationActive(bool active) {
+    if (presentationActive_ == active) {
+        return;
+    }
+
+    presentationActive_ = active;
+    if (active) {
+        const gint64 nowUsec = g_get_monotonic_time();
+        lastFrameTimeUsec_.store(nowUsec, std::memory_order_relaxed);
+        if (!gotAnyFrame_.load(std::memory_order_relaxed)) {
+            firstPacketTimeUsec_.store(nowUsec, std::memory_order_release);
+        }
+    }
+    applyPresentationState();
+}
+
+/**
  * @brief        수신기 본체와 자식 타이머를 지정한 worker 스레드로 이동합니다.
  * @param thread  이동 대상 QThread
  */
@@ -289,7 +309,9 @@ void GstRtspReceiver::startPipeline() {
             "rtph264depay name=depay request-keyframe=true wait-for-keyframe=true ! "
             "h264parse config-interval=-1 ! "
             "queue name=decodequeue silent=true max-size-buffers=%2 max-size-bytes=0 max-size-time=%3 ! "
-            "%1 ! videoconvert ! video/x-raw,format=BGRA ! "
+            "%1 ! identity name=framewatch silent=true signal-handoffs=false ! "
+            "valve name=presentationvalve drop=false drop-mode=transform-to-gap ! "
+            "videoconvert ! video/x-raw,format=BGRA ! "
             "queue name=alignmentqueue silent=true leaky=downstream max-size-buffers=0 max-size-bytes=0 "
             "max-size-time=%6 min-threshold-time=%7 ! "
             "queue name=renderqueue silent=true leaky=downstream max-size-buffers=%4 max-size-bytes=0 "
@@ -297,7 +319,6 @@ void GstRtspReceiver::startPipeline() {
             "videobalance name=balance brightness=0.0 contrast=1.0 saturation=1.0 ! "
             "gamma name=gammafilter gamma=1.0 ! "
             "qtblur name=blur ! "
-            "identity name=framewatch silent=true signal-handoffs=false ! "
             "d3d11videosink name=videosink force-aspect-ratio=true enable-last-sample=false qos=false "
             "sync=false async=false")
             .arg(decoderChain())
@@ -404,6 +425,7 @@ void GstRtspReceiver::startPipeline() {
     }
 
     applyVideoPreprocessingSettings();
+    applyPresentationState();
 
     if (blur) {
         BlurVideoFilter::setProcessor(blur, &blurProcessor_);
@@ -667,6 +689,14 @@ void GstRtspReceiver::checkStall() {
             restartPipeline(reason);
         }
 
+        return;
+    }
+
+    if (!presentationActive_) {
+        const gint64 packetAgeMsec = (nowUsec - lastPacketTimeUsec_.load(std::memory_order_relaxed)) / 1000;
+        if (packetAgeMsec > config_.stallTimeoutMsec) {
+            restartPipeline(QStringLiteral("warm stream stalled; packetAge=%1 ms").arg(packetAgeMsec));
+        }
         return;
     }
 
@@ -965,6 +995,35 @@ void GstRtspReceiver::applyVideoPreprocessingSettings() {
                               .arg(config_.preprocessing.brightness)
                               .arg(config_.preprocessing.contrast, 0, 'f', 2)
                               .arg(config_.preprocessing.gamma, 0, 'f', 2);
+}
+
+/**
+ * @brief 디코더 뒤 valve에 현재 구역 표시 상태를 반영합니다.
+ *
+ * 숨긴 구역도 RTSP 수신과 디코딩은 계속 수행하며, BGRA 변환부터 화면 출력까지만 건너뜁니다.
+ */
+void GstRtspReceiver::applyPresentationState() {
+    if (!pipeline_) {
+        return;
+    }
+
+    GstElement* videoChain = gst_bin_get_by_name(GST_BIN(pipeline_), "videochain");
+    if (!videoChain || !GST_IS_BIN(videoChain)) {
+        if (videoChain) {
+            gst_object_unref(videoChain);
+        }
+        return;
+    }
+
+    GstElement* valve = gst_bin_get_by_name(GST_BIN(videoChain), "presentationvalve");
+    gst_object_unref(videoChain);
+    if (!valve) {
+        qWarning() << "[GstRtspReceiver] Failed to find presentation valve";
+        return;
+    }
+
+    g_object_set(valve, "drop", presentationActive_ ? FALSE : TRUE, nullptr);
+    gst_object_unref(valve);
 }
 
 /**

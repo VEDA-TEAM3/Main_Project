@@ -349,6 +349,7 @@ QSlider#videoPreprocessingSlider::handle:horizontal:hover {
 }
 
 QComboBox#videoPreprocessingComboBox,
+QComboBox#videoPreprocessingAreaComboBox,
 QComboBox#videoPreprocessingChannelComboBox {
     min-height: 36px;
     color: #e6f4fa;
@@ -361,6 +362,7 @@ QComboBox#videoPreprocessingChannelComboBox {
 }
 
 QComboBox#videoPreprocessingComboBox::drop-down,
+QComboBox#videoPreprocessingAreaComboBox::drop-down,
 QComboBox#videoPreprocessingChannelComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
@@ -370,6 +372,7 @@ QComboBox#videoPreprocessingChannelComboBox::drop-down {
 }
 
 QComboBox#videoPreprocessingComboBox::down-arrow,
+QComboBox#videoPreprocessingAreaComboBox::down-arrow,
 QComboBox#videoPreprocessingChannelComboBox::down-arrow {
     image: none;
     width: 0;
@@ -378,6 +381,8 @@ QComboBox#videoPreprocessingChannelComboBox::down-arrow {
 
 QComboBox#videoPreprocessingComboBox:hover,
 QComboBox#videoPreprocessingComboBox:focus,
+QComboBox#videoPreprocessingAreaComboBox:hover,
+QComboBox#videoPreprocessingAreaComboBox:focus,
 QComboBox#videoPreprocessingChannelComboBox:hover,
 QComboBox#videoPreprocessingChannelComboBox:focus {
     background-color: #0b263a;
@@ -385,6 +390,7 @@ QComboBox#videoPreprocessingChannelComboBox:focus {
 }
 
 QComboBox#videoPreprocessingComboBox QAbstractItemView,
+QComboBox#videoPreprocessingAreaComboBox QAbstractItemView,
 QComboBox#videoPreprocessingChannelComboBox QAbstractItemView {
     color: #e6f4fa;
     background-color: #091e30;
@@ -539,6 +545,46 @@ QLabel#reportActionTitleLabel {
     font-family: "Segoe UI";
     font-size: 13px;
     font-weight: 800;
+}
+
+QComboBox#cctvAreaComboBox {
+    min-width: 90px;
+    max-width: 94px;
+    min-height: 30px;
+    max-height: 30px;
+    color: #d8f5ff;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #16415f, stop:0.55 #0e304a, stop:1 #092237);
+    border: 1px solid #3b91b7;
+    border-top-color: #58c9ef;
+    border-radius: 4px;
+    padding: 0 24px 0 10px;
+    font-family: "Segoe UI";
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QComboBox#cctvAreaComboBox:hover,
+QComboBox#cctvAreaComboBox:on {
+    color: #ffffff;
+    background-color: #175577;
+    border-color: #72dcff;
+}
+
+QComboBox#cctvAreaComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 22px;
+    border: 0;
+}
+
+QComboBox#cctvAreaComboBox QAbstractItemView {
+    color: #e6f4fa;
+    background-color: #091e30;
+    border: 1px solid #4a91b5;
+    selection-color: #ffffff;
+    selection-background-color: #17698f;
+    outline: 0;
 }
 
 QPushButton#reportChannelButton1, QPushButton#reportChannelButton2,

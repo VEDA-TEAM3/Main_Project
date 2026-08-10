@@ -189,6 +189,10 @@ void ClickableVideoWidget::refreshChannelLabel() {
         return;
     }
 
+    channelLabel_->adjustSize();
+    const int margin = expandedView_ ? 16 : 10;
+    channelLabel_->clearMask();
+    channelLabel_->move(margin, margin);
     channelLabel_->show();
     channelLabel_->raise();
 
@@ -314,10 +318,6 @@ void ClickableVideoWidget::updateOverlayGeometry() {
     }
 
     if (channelLabel_ && channelLabel_->isVisible()) {
-        channelLabel_->adjustSize();
-        const int margin = expandedView_ ? 16 : 10;
-        channelLabel_->clearMask();
-        channelLabel_->move(margin, margin);
         refreshChannelLabel();
     }
 }

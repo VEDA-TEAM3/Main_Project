@@ -86,6 +86,9 @@ public:
     /** 지정한 채널에 영상 전처리 설정을 적용합니다. */
     void setVideoPreprocessingSettings(int channelIndex, const VideoPreprocessingSettings& settings);
 
+    /** 지정한 채널의 후처리 및 화면 출력을 활성화하거나 워밍 상태로 유지합니다. */
+    void setPresentationActive(int channelIndex, bool active);
+
 signals:
     /**
      * @brief              특정 채널의 로딩 상태가 변경됐음을 알립니다.
@@ -133,6 +136,7 @@ private:
     bool licensePlateBlurEnabled_ = true;
     VideoPreprocessingSettings preprocessingSettings_;
     QHash<int, VideoPreprocessingSettings> preprocessingSettingsByChannel_;
+    QHash<int, bool> presentationActiveByChannel_;
 
     QVector<StreamOutputBinding> bindings_;
     QVector<ReceiverWorker> receiverWorkers_;

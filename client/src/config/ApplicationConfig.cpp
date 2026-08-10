@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -12,11 +13,13 @@
 #include <QStringList>
 #include <QUrl>
 #include <QUuid>
+#include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace {
-constexpr int requiredChannelCount = 4;
+constexpr int requiredAreaCount = 2;
+constexpr int requiredChannelCount = videoChannelsPerArea * requiredAreaCount;
 
 bool isValidTopicFilter(const QString& filter) {
     const QStringList levels = filter.split(QLatin1Char('/'), Qt::KeepEmptyParts);
@@ -277,6 +280,125 @@ bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QStr
         channelIndexes.insert(stream.channelIndex);
         streams.append(std::move(stream));
     }
+
+    for (int channelIndex = 0; channelIndex < requiredChannelCount; ++channelIndex) {
+        if (!channelIndexes.contains(channelIndex)) {
+            error = QStringLiteral("video.streams channelIndex values must be contiguous from 0 to %1")
+                        .arg(requiredChannelCount - 1);
+            return false;
+        }
+    }
+
+    std::sort(streams.begin(), streams.end(), [](const StreamConfig& left, const StreamConfig& right) {
+        return left.channelIndex < right.channelIndex;
+    });
+    return true;
+}
+
+bool parseVideoAreas(const QJsonObject& video, const QVector<StreamConfig>& streams, VideoRuntimeConfig& config,
+                     QString& error) {
+    const QJsonValue areaValue = video.value(QStringLiteral("areas"));
+    if (!areaValue.isArray() || areaValue.toArray().size() != requiredAreaCount) {
+        error = QStringLiteral("video.areas must contain exactly %1 areas").arg(requiredAreaCount);
+        return false;
+    }
+
+    QHash<QString, int> channelIndexByCameraId;
+    for (const StreamConfig& stream : streams) {
+        channelIndexByCameraId.insert(stream.cameraId, stream.channelIndex);
+    }
+
+    QSet<QString> areaIds;
+    QSet<int> assignedChannelIndexes;
+    const QJsonArray areaArray = areaValue.toArray();
+    config.areas.reserve(areaArray.size());
+
+    for (qsizetype areaIndex = 0; areaIndex < areaArray.size(); ++areaIndex) {
+        if (!areaArray[areaIndex].isObject()) {
+            error = QStringLiteral("video.areas[%1] must be an object").arg(areaIndex);
+            return false;
+        }
+
+        const QJsonObject areaObject = areaArray[areaIndex].toObject();
+        VideoAreaConfig area;
+        if (!readString(areaObject, QStringLiteral("areaId"), area.areaId, error) ||
+            !readString(areaObject, QStringLiteral("name"), area.name, error)) {
+            error = QStringLiteral("video.areas[%1]: %2").arg(areaIndex).arg(error);
+            return false;
+        }
+        if (areaIds.contains(area.areaId)) {
+            error = QStringLiteral("video.areas contains duplicate areaId: %1").arg(area.areaId);
+            return false;
+        }
+
+        const QJsonValue streamIdsValue = areaObject.value(QStringLiteral("streamIds"));
+        if (!streamIdsValue.isArray() || streamIdsValue.toArray().size() != videoChannelsPerArea) {
+            error = QStringLiteral("video.areas[%1].streamIds must contain exactly %2 camera IDs")
+                        .arg(areaIndex)
+                        .arg(videoChannelsPerArea);
+            return false;
+        }
+
+        const QJsonArray streamIds = streamIdsValue.toArray();
+        area.channelIndexes.reserve(streamIds.size());
+        for (qsizetype slotIndex = 0; slotIndex < streamIds.size(); ++slotIndex) {
+            if (!streamIds[slotIndex].isString() || streamIds[slotIndex].toString().trimmed().isEmpty()) {
+                error = QStringLiteral("video.areas[%1].streamIds[%2] must be a non-empty string")
+                            .arg(areaIndex)
+                            .arg(slotIndex);
+                return false;
+            }
+
+            const QString cameraId = streamIds[slotIndex].toString().trimmed();
+            if (!channelIndexByCameraId.contains(cameraId)) {
+                error = QStringLiteral("video.areas[%1] references unknown cameraId: %2").arg(areaIndex).arg(cameraId);
+                return false;
+            }
+
+            const int channelIndex = channelIndexByCameraId.value(cameraId);
+            const int expectedChannelIndex =
+                videoGlobalChannelIndex(static_cast<int>(areaIndex), static_cast<int>(slotIndex));
+            if (channelIndex != expectedChannelIndex) {
+                error = QStringLiteral("video.areas[%1].streamIds[%2] must map to channelIndex %3")
+                            .arg(areaIndex)
+                            .arg(slotIndex)
+                            .arg(expectedChannelIndex);
+                return false;
+            }
+            if (assignedChannelIndexes.contains(channelIndex)) {
+                error = QStringLiteral("video.areas assigns cameraId more than once: %1").arg(cameraId);
+                return false;
+            }
+            assignedChannelIndexes.insert(channelIndex);
+            area.channelIndexes.append(channelIndex);
+        }
+
+        areaIds.insert(area.areaId);
+        config.areas.append(std::move(area));
+    }
+
+    QString initialAreaId;
+    if (!readString(video, QStringLiteral("initialAreaId"), initialAreaId, error)) {
+        error = QStringLiteral("video: %1").arg(error);
+        return false;
+    }
+
+    config.initialAreaIndex = -1;
+    for (qsizetype areaIndex = 0; areaIndex < config.areas.size(); ++areaIndex) {
+        if (config.areas[areaIndex].areaId == initialAreaId) {
+            config.initialAreaIndex = static_cast<int>(areaIndex);
+            break;
+        }
+    }
+    if (config.initialAreaIndex < 0) {
+        error = QStringLiteral("video.initialAreaId does not match a configured area: %1").arg(initialAreaId);
+        return false;
+    }
+
+    if (assignedChannelIndexes.size() != streams.size()) {
+        error = QStringLiteral("Every video stream must belong to exactly one video area");
+        return false;
+    }
     return true;
 }
 
@@ -405,7 +527,8 @@ bool parseVideo(const QJsonObject& root, VideoRuntimeConfig& config, QString& er
            readInt(video, QStringLiteral("initialStartDelayMs"), 0, 600000, config.initialStartDelayMsec, error) &&
            readInt(video, QStringLiteral("receiverStartSpacingMs"), 0, 600000, config.receiverStartSpacingMsec,
                    error) &&
-           parseStreams(video, config.streams, error) && parseReceiverConfig(video, config.receiver, error);
+           parseStreams(video, config.streams, error) && parseVideoAreas(video, config.streams, config, error) &&
+           parseReceiverConfig(video, config.receiver, error);
 }
 
 bool parseMqtt(const QJsonObject& root, MqttRuntimeConfig& config, QString& clientIdPrefix, QString& error) {

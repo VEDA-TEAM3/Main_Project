@@ -26,6 +26,7 @@ public:
     void setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) override;
     void setBlurFrame(BlurFrameData frame) override;
     void setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) override;
+    void setPresentationActive(bool active) override;
     void moveInternalObjectsToThread(QThread* thread) override;
     void start() override;
     void stop() override;
@@ -42,6 +43,7 @@ private:
     bool applySourceProperties(GstElement* source);
     QString decoderChain() const;
     void applyVideoPreprocessingSettings();
+    void applyPresentationState();
     void checkStall();
 
     void markFirstPacket();
@@ -84,6 +86,7 @@ private:
 
     bool firstAsyncDoneReported_ = false;
     bool firstFrameReported_ = false;
+    bool presentationActive_ = true;
 
     BlurProcessor blurProcessor_;
 };

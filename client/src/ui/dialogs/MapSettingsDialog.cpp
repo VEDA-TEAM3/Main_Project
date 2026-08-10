@@ -27,8 +27,8 @@
 
 namespace {
 constexpr int dialogPanelWidth = 800;
-constexpr int dialogPanelHeight = 600;
-constexpr int preprocessingChannelCount = 4;
+constexpr int dialogPanelHeight = 640;
+constexpr int defaultPreprocessingChannelCount = 4;
 constexpr int customPresetIndex = 0;
 constexpr int dayPresetIndex = 1;
 constexpr int nightPresetIndex = 2;
@@ -291,6 +291,18 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     preprocessingHeaderLayout->addWidget(preprocessingEnabledCheckBox_);
     preprocessingLayout->addLayout(preprocessingHeaderLayout);
 
+    auto* areaLayout = new QHBoxLayout();
+    auto* areaLabel = new QLabel(QStringLiteral("적용 구역"), preprocessingFrame);
+    areaLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
+    areaLayout->addWidget(areaLabel);
+    areaLayout->addStretch(1);
+    preprocessingAreaComboBox_ = new VideoOptionComboBox(preprocessingFrame);
+    preprocessingAreaComboBox_->setObjectName(QStringLiteral("videoPreprocessingAreaComboBox"));
+    preprocessingAreaComboBox_->setCursor(Qt::PointingHandCursor);
+    preprocessingAreaComboBox_->setMinimumWidth(190);
+    areaLayout->addWidget(preprocessingAreaComboBox_);
+    preprocessingLayout->addLayout(areaLayout);
+
     auto* channelLayout = new QHBoxLayout();
     auto* channelLabel = new QLabel(QStringLiteral("적용 대상"), preprocessingFrame);
     channelLabel->setObjectName(QStringLiteral("videoPreprocessingFieldLabel"));
@@ -298,8 +310,6 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     channelLayout->addStretch(1);
     preprocessingChannelComboBox_ = new VideoOptionComboBox(preprocessingFrame);
     preprocessingChannelComboBox_->setObjectName(QStringLiteral("videoPreprocessingChannelComboBox"));
-    preprocessingChannelComboBox_->addItems(
-        {QStringLiteral("CH 01"), QStringLiteral("CH 02"), QStringLiteral("CH 03"), QStringLiteral("CH 04")});
     preprocessingChannelComboBox_->setCursor(Qt::PointingHandCursor);
     preprocessingChannelComboBox_->setMinimumWidth(190);
     channelLayout->addWidget(preprocessingChannelComboBox_);
@@ -351,6 +361,10 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     applySelectedButton->setObjectName(QStringLiteral("videoPreprocessingSecondaryButton"));
     applySelectedButton->setCursor(Qt::PointingHandCursor);
     preprocessingButtonLayout->addWidget(applySelectedButton);
+    auto* applyAreaButton = new QPushButton(QStringLiteral("현재 구역 적용"), preprocessingFrame);
+    applyAreaButton->setObjectName(QStringLiteral("videoPreprocessingSecondaryButton"));
+    applyAreaButton->setCursor(Qt::PointingHandCursor);
+    preprocessingButtonLayout->addWidget(applyAreaButton);
     auto* applyAllButton = new QPushButton(QStringLiteral("전체 채널 적용"), preprocessingFrame);
     applyAllButton->setObjectName(QStringLiteral("videoPreprocessingApplyAllButton"));
     applyAllButton->setCursor(Qt::PointingHandCursor);
@@ -391,13 +405,21 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
         }
         setPreprocessingControlsEnabled(enabled);
     });
-    connect(preprocessingChannelComboBox_, &QComboBox::currentIndexChanged, this, [this](int channelIndex) {
+    connect(preprocessingAreaComboBox_, &QComboBox::currentIndexChanged, this, [this](int areaIndex) {
         if (updatingPreprocessingControls_) {
             return;
         }
         storeCurrentPreprocessingChannel();
-        currentPreprocessingChannelIndex_ = channelIndex;
-        loadPreprocessingChannel(channelIndex);
+        currentVideoAreaIndex_ = areaIndex;
+        rebuildPreprocessingChannelComboBox();
+    });
+    connect(preprocessingChannelComboBox_, &QComboBox::currentIndexChanged, this, [this](int comboIndex) {
+        if (updatingPreprocessingControls_) {
+            return;
+        }
+        storeCurrentPreprocessingChannel();
+        currentPreprocessingChannelIndex_ = preprocessingChannelComboBox_->itemData(comboIndex).toInt();
+        loadPreprocessingChannel(currentPreprocessingChannelIndex_);
     });
     connect(preprocessingPresetComboBox_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (updatingPreprocessingControls_) {
@@ -426,14 +448,35 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
         showPreprocessingAppliedMessage(
             QStringLiteral("%1 채널에 변경된 설정이 적용되었습니다!").arg(currentPreprocessingChannelIndex_ + 1));
     });
+    connect(applyAreaButton, &QPushButton::clicked, this, [this]() {
+        storeCurrentPreprocessingChannel();
+        const VideoPreprocessingSettings settings = videoPreprocessingSettings();
+        const QVector<int> channels = videoAreas_.value(currentVideoAreaIndex_).channelIndexes;
+        for (int channelIndex : channels) {
+            if (channelIndex < 0 || channelIndex >= preprocessingSettingsByChannel_.size()) {
+                continue;
+            }
+            preprocessingSettingsByChannel_[channelIndex] = settings;
+            emit videoPreprocessingApplyRequested(channelIndex, settings);
+        }
+        showPreprocessingAppliedMessage(QStringLiteral("%1 전체 채널에 변경된 설정이 적용되었습니다!")
+                                            .arg(videoAreas_.value(currentVideoAreaIndex_).name));
+    });
     connect(applyAllButton, &QPushButton::clicked, this, [this]() {
         const VideoPreprocessingSettings settings = videoPreprocessingSettings();
-        preprocessingSettingsByChannel_.fill(settings, preprocessingChannelCount);
+        preprocessingSettingsByChannel_.fill(settings, preprocessingSettingsByChannel_.size());
         emit videoPreprocessingApplyRequested(-1, settings);
         showPreprocessingAppliedMessage(QStringLiteral("전체 채널에 변경된 설정이 적용되었습니다!"));
     });
 
-    preprocessingSettingsByChannel_.fill(VideoPreprocessingSettings{}, preprocessingChannelCount);
+    VideoAreaConfig defaultArea;
+    defaultArea.areaId = QStringLiteral("default-area");
+    defaultArea.name = QStringLiteral("제 1구역");
+    for (int localChannelIndex = 0; localChannelIndex < videoChannelsPerArea; ++localChannelIndex) {
+        defaultArea.channelIndexes.append(videoGlobalChannelIndex(0, localChannelIndex));
+    }
+    preprocessingSettingsByChannel_.fill(VideoPreprocessingSettings{}, defaultPreprocessingChannelCount);
+    setVideoAreas({defaultArea});
     setVideoPreprocessingSettings(preprocessingSettingsByChannel_);
     hide();
 }
@@ -466,6 +509,29 @@ void MapSettingsDialog::setBlurTargetsEnabled(bool faceEnabled, bool licensePlat
 }
 
 /**
+ * @brief                   영상 설정에서 선택할 CCTV 구역과 채널 구성을 반영합니다.
+ * @param
+ * areas 구역별 전역 채널 인덱스
+ * @param selectedAreaIndex 처음 표시할 구역 인덱스
+ */
+void MapSettingsDialog::setVideoAreas(const QVector<VideoAreaConfig>& areas, int selectedAreaIndex) {
+    if (areas.isEmpty()) {
+        return;
+    }
+
+    videoAreas_ = areas;
+    currentVideoAreaIndex_ = qBound(0, selectedAreaIndex, static_cast<int>(videoAreas_.size()) - 1);
+
+    const QSignalBlocker areaBlocker(preprocessingAreaComboBox_);
+    preprocessingAreaComboBox_->clear();
+    for (const VideoAreaConfig& area : videoAreas_) {
+        preprocessingAreaComboBox_->addItem(area.name, area.areaId);
+    }
+    preprocessingAreaComboBox_->setCurrentIndex(currentVideoAreaIndex_);
+    rebuildPreprocessingChannelComboBox(currentPreprocessingChannelIndex_);
+}
+
+/**
  * @brief                      채널별 영상 전처리 설정을 영상 탭에 반영합니다.
  * @param settingsByChannel    채널 인덱스 순서의 영상 전처리 설정
  * @param selectedChannelIndex 처음 표시할 채널 인덱스
@@ -473,14 +539,14 @@ void MapSettingsDialog::setBlurTargetsEnabled(bool faceEnabled, bool licensePlat
 void MapSettingsDialog::setVideoPreprocessingSettings(const QVector<VideoPreprocessingSettings>& settingsByChannel,
                                                       int selectedChannelIndex) {
     preprocessingSettingsByChannel_ = settingsByChannel;
-    if (preprocessingSettingsByChannel_.size() < preprocessingChannelCount) {
-        preprocessingSettingsByChannel_.resize(preprocessingChannelCount);
+    if (preprocessingSettingsByChannel_.isEmpty()) {
+        preprocessingSettingsByChannel_.resize(defaultPreprocessingChannelCount);
     }
 
-    currentPreprocessingChannelIndex_ = qBound(0, selectedChannelIndex, preprocessingSettingsByChannel_.size() - 1);
-
-    const QSignalBlocker channelBlocker(preprocessingChannelComboBox_);
-    preprocessingChannelComboBox_->setCurrentIndex(currentPreprocessingChannelIndex_);
+    const QVector<int> channels = videoAreas_.value(currentVideoAreaIndex_).channelIndexes;
+    currentPreprocessingChannelIndex_ =
+        channels.contains(selectedChannelIndex) ? selectedChannelIndex : channels.value(0, 0);
+    rebuildPreprocessingChannelComboBox(currentPreprocessingChannelIndex_);
     loadPreprocessingChannel(currentPreprocessingChannelIndex_);
 }
 
@@ -605,6 +671,33 @@ void MapSettingsDialog::storeCurrentPreprocessingChannel() {
         return;
     }
     preprocessingSettingsByChannel_[currentPreprocessingChannelIndex_] = videoPreprocessingSettings();
+}
+
+/**
+ * @brief                       현재 구역에 속한 채널만 적용 대상 선택 상자에 표시합니다.
+ *
+ * @param preferredChannelIndex 유지할 전역 채널 인덱스, 없으면 구역 첫 채널
+ */
+void MapSettingsDialog::rebuildPreprocessingChannelComboBox(int preferredChannelIndex) {
+    const QVector<int> channels = videoAreas_.value(currentVideoAreaIndex_).channelIndexes;
+    if (channels.isEmpty()) {
+        return;
+    }
+
+    const QSignalBlocker channelBlocker(preprocessingChannelComboBox_);
+    preprocessingChannelComboBox_->clear();
+    for (int channelIndex : channels) {
+        preprocessingChannelComboBox_->addItem(
+            QStringLiteral("CH %1").arg(videoLocalChannelNumber(channelIndex), 2, 10, QLatin1Char('0')), channelIndex);
+    }
+
+    int comboIndex = channels.indexOf(preferredChannelIndex);
+    if (comboIndex < 0) {
+        comboIndex = 0;
+    }
+    preprocessingChannelComboBox_->setCurrentIndex(comboIndex);
+    currentPreprocessingChannelIndex_ = channels[comboIndex];
+    loadPreprocessingChannel(currentPreprocessingChannelIndex_);
 }
 
 /**

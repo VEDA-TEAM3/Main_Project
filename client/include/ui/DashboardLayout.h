@@ -110,9 +110,11 @@ inline void apply(QMainWindow* window, UiMainWindow* ui) {
     ui->objectListLayout->setStretch(0, 0);
     ui->objectListLayout->setStretch(1, 1);
 
-    ui->videoGridLayout->setRowStretch(0, 1);
-    ui->videoGridLayout->setRowStretch(1, 1);
-    ui->videoGridLayout->setColumnStretch(0, 1);
-    ui->videoGridLayout->setColumnStretch(1, 1);
+    for (auto* videoGridLayout : {ui->videoGridLayoutArea1, ui->videoGridLayoutArea2}) {
+        videoGridLayout->setRowStretch(0, 1);
+        videoGridLayout->setRowStretch(1, 1);
+        videoGridLayout->setColumnStretch(0, 1);
+        videoGridLayout->setColumnStretch(1, 1);
+    }
 }
 }  // namespace DashboardLayout

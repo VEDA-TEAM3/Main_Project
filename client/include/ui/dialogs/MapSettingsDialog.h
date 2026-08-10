@@ -5,6 +5,7 @@
 
 #include "model/DigitalTwinMapDisplaySettings.h"
 #include "model/VideoPreprocessingSettings.h"
+#include "video/VideoRuntimeConfig.h"
 
 class QCheckBox;
 class QComboBox;
@@ -22,6 +23,7 @@ public:
     void setSettings(const DigitalTwinMapDisplaySettings& settings);
     void setVideoRiskBordersEnabled(bool enabled);
     void setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled);
+    void setVideoAreas(const QVector<VideoAreaConfig>& areas, int selectedAreaIndex = 0);
     void setVideoPreprocessingSettings(const QVector<VideoPreprocessingSettings>& settingsByChannel,
                                        int selectedChannelIndex = 0);
     DigitalTwinMapDisplaySettings settings() const;
@@ -47,6 +49,7 @@ private:
     void markPreprocessingAsCustom();
     void loadPreprocessingChannel(int channelIndex);
     void storeCurrentPreprocessingChannel();
+    void rebuildPreprocessingChannelComboBox(int preferredChannelIndex = -1);
     void showPreprocessingAppliedMessage(const QString& message);
 
     QCheckBox* movementTrailsCheckBox_ = nullptr;
@@ -57,6 +60,7 @@ private:
     QCheckBox* faceBlurCheckBox_ = nullptr;
     QCheckBox* licensePlateBlurCheckBox_ = nullptr;
     QCheckBox* preprocessingEnabledCheckBox_ = nullptr;
+    QComboBox* preprocessingAreaComboBox_ = nullptr;
     QComboBox* preprocessingChannelComboBox_ = nullptr;
     QComboBox* preprocessingPresetComboBox_ = nullptr;
     QSlider* brightnessSlider_ = nullptr;
@@ -67,7 +71,9 @@ private:
     QLabel* gammaValueLabel_ = nullptr;
     QWidget* preprocessingControlsWidget_ = nullptr;
     InformationDialog* informationDialog_ = nullptr;
+    QVector<VideoAreaConfig> videoAreas_;
     QVector<VideoPreprocessingSettings> preprocessingSettingsByChannel_;
+    int currentVideoAreaIndex_ = 0;
     int currentPreprocessingChannelIndex_ = 0;
     bool updatingPreprocessingControls_ = false;
 };

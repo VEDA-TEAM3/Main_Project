@@ -21,6 +21,7 @@ class EventLogPanel;
 class ObjectListPanel;
 class QEvent;
 class QFrame;
+class QGridLayout;
 class QLabel;
 class MapSettingsDialog;
 class QResizeEvent;
@@ -66,6 +67,7 @@ private:
     void setupWindowShortcuts();
     void setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory> receiverFactory);
     void setupVideoViewEvents();
+    void setupVideoAreaSelector();
     void setupReportActions();
     void openMapSettingsDialog();
     void openReportConfirmationDialog(int channelNumber);
@@ -74,6 +76,12 @@ private:
     void handleReportFailure(int channelNumber, const QString& error);
     void setReportButtonsEnabled(bool enabled);
     QString reportRiskLevel(int channelNumber) const;
+    int reportChannelNumberForSlot(int slotIndex) const;
+    int videoAreaIndexForChannel(int channelIndex) const;
+    const QVector<int>& channelsForArea(int areaIndex) const;
+    bool isChannelVisible(int channelIndex) const;
+    void switchVideoArea(int areaIndex);
+    void updateReportButtons();
 
     void updateDashboardAdaptiveSizes();
     void updateSystemStatus(bool connected);
@@ -97,6 +105,7 @@ private:
 
     QVector<QWidget*> videoWidgets_;
     QVector<VideoRiskBorderFrame*> videoTileFrames_;
+    QVector<QGridLayout*> videoAreaLayouts_;
     QVector<StreamConfig> streamConfigs_;
     QVector<bool> streamChannelReady_;
 
@@ -114,6 +123,7 @@ private:
     QVector<VideoPreprocessingSettings> videoPreprocessingSettingsByChannel_;
     QVector<DigitalTwinRiskLevel> latestVideoRiskLevels_;
     int selectedPreprocessingChannelIndex_ = 0;
+    int currentVideoAreaIndex_ = 0;
 
     bool streamSessionStarted_ = false;
     bool videoRiskBordersEnabled_ = true;

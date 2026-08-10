@@ -5,6 +5,7 @@
 
 struct ReportRequest {
     QString reportId;
+    QString areaName;
     QString riskLevel;
     QString detail;
     QDateTime reportedAt;

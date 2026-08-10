@@ -1,5 +1,6 @@
 #include "ui/mainwindow.h"
 
+#include <QComboBox>
 #include <QDateTime>
 #include <QDebug>
 #include <QEvent>
@@ -14,6 +15,7 @@
 #include <QResizeEvent>
 #include <QShortcut>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
@@ -47,7 +49,6 @@
 #include "video/StreamSessionManager.h"
 
 namespace {
-constexpr int requiredCctvChannelCount = 4;
 const QString normalStatusColor = QStringLiteral("#38e86a");
 const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
 }  // namespace
@@ -76,7 +77,11 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     }
 
     streamConfigs_ = videoConfig_.streams;
-    videoPreprocessingSettingsByChannel_.fill(videoConfig_.receiver.preprocessing, requiredCctvChannelCount);
+    currentVideoAreaIndex_ = videoConfig_.areas.isEmpty() ? 0
+                                                          : qBound(0, videoConfig_.initialAreaIndex,
+                                                                   static_cast<int>(videoConfig_.areas.size()) - 1);
+    videoPreprocessingSettingsByChannel_.fill(videoConfig_.receiver.preprocessing, streamConfigs_.size());
+    latestVideoRiskLevels_.fill(DigitalTwinRiskLevel::Normal, streamConfigs_.size());
     setupDashboardLayout();
     setupTopBarStatuses();
     setupClock();
@@ -85,6 +90,7 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupDashboardPanelCoordinator();
     setupDeviceStatusService();
     setupVideoViewEvents();
+    setupVideoAreaSelector();
     setupReportActions();
     setupStreamSessionManager(std::move(streamReceiverFactory));
 }
@@ -127,14 +133,15 @@ void MainWindow::setupReportActions() {
         connect(reportGateway_.get(), &ReportGateway::reportFailed, this, &MainWindow::handleReportFailure);
     }
 
-    const std::array<QPushButton*, requiredCctvChannelCount> reportButtons = {
+    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
         ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
 
     for (int channelIndex = 0; channelIndex < static_cast<int>(reportButtons.size()); ++channelIndex) {
         reportButtons[static_cast<std::size_t>(channelIndex)]->setFocusPolicy(Qt::NoFocus);
         connect(reportButtons[static_cast<std::size_t>(channelIndex)], &QPushButton::clicked, this,
-                [this, channelIndex]() { openReportConfirmationDialog(channelIndex + 1); });
+                [this, channelIndex]() { openReportConfirmationDialog(reportChannelNumberForSlot(channelIndex)); });
     }
+    updateReportButtons();
 }
 
 /**
@@ -156,6 +163,7 @@ void MainWindow::sendReport(int channelNumber) {
 
     ReportRequest request;
     request.reportId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    request.areaName = videoConfig_.areas.value(currentVideoAreaIndex_).name;
     request.riskLevel = reportRiskLevel(channelNumber);
     request.detail = QStringLiteral("CCTV 관제 사용자가 안전 센터 신고를 요청했습니다.");
     request.reportedAt = QDateTime::currentDateTime();
@@ -182,7 +190,7 @@ void MainWindow::handleReportFailure(int channelNumber, const QString& error) {
  * @param enabled 버튼 활성 여부
  */
 void MainWindow::setReportButtonsEnabled(bool enabled) {
-    const std::array<QPushButton*, requiredCctvChannelCount> reportButtons = {
+    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
         ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
     for (QPushButton* button : reportButtons) {
         if (button) {
@@ -192,12 +200,37 @@ void MainWindow::setReportButtonsEnabled(bool enabled) {
 }
 
 /**
+ * @brief           현재 표시 구역의 슬롯을 실제 전역 채널 번호로 변환합니다.
+ * @param slotIndex 0부터
+ * 3까지의 화면 슬롯 인덱스
+ * @return          사용자 표시용 1 기반 채널 번호
+ */
+int MainWindow::reportChannelNumberForSlot(int slotIndex) const { return slotIndex + 1; }
+
+/** @brief 현재 표시 구역에 맞춰 신고 버튼의 채널 문구와 도움말을 갱신합니다. */
+void MainWindow::updateReportButtons() {
+    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
+        ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
+
+    for (int slotIndex = 0; slotIndex < static_cast<int>(reportButtons.size()); ++slotIndex) {
+        QPushButton* button = reportButtons[static_cast<std::size_t>(slotIndex)];
+        if (!button) {
+            continue;
+        }
+        const int channelNumber = reportChannelNumberForSlot(slotIndex);
+        const QString channelText = QStringLiteral("CH %1").arg(channelNumber, 2, 10, QLatin1Char('0'));
+        button->setText(channelText);
+        button->setToolTip(QStringLiteral("%1 신고").arg(channelText));
+    }
+}
+
+/**
  * @brief               신고 시점의 채널 위험 단계를 사용자 표시 문자열로 변환합니다.
  * @param channelNumber 사용자에게 표시되는 1부터 4까지의 채널 번호
  * @return              정상, 주의 또는 위험
  */
 QString MainWindow::reportRiskLevel(int channelNumber) const {
-    const qsizetype channelIndex = channelNumber - 1;
+    const qsizetype channelIndex = videoGlobalChannelIndex(currentVideoAreaIndex_, channelNumber - 1);
     if (channelIndex < 0 || channelIndex >= latestVideoRiskLevels_.size()) {
         return QStringLiteral("정상");
     }
@@ -295,7 +328,7 @@ void MainWindow::setupDashboardLayout() {
     connect(mapSettingsDialog_, &MapSettingsDialog::videoPreprocessingApplyRequested, this,
             [this](int channelIndex, const VideoPreprocessingSettings& settings) {
                 if (channelIndex < 0) {
-                    videoPreprocessingSettingsByChannel_.fill(settings, requiredCctvChannelCount);
+                    videoPreprocessingSettingsByChannel_.fill(settings, streamConfigs_.size());
                 } else if (channelIndex < videoPreprocessingSettingsByChannel_.size()) {
                     selectedPreprocessingChannelIndex_ = channelIndex;
                     videoPreprocessingSettingsByChannel_[channelIndex] = settings;
@@ -341,6 +374,7 @@ void MainWindow::openMapSettingsDialog() {
     mapSettingsDialog_->setSettings(mapDisplaySettings_);
     mapSettingsDialog_->setVideoRiskBordersEnabled(videoRiskBordersEnabled_);
     mapSettingsDialog_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+    mapSettingsDialog_->setVideoAreas(videoConfig_.areas, currentVideoAreaIndex_);
     mapSettingsDialog_->setVideoPreprocessingSettings(videoPreprocessingSettingsByChannel_,
                                                       selectedPreprocessingChannelIndex_);
     mapSettingsDialog_->setGeometry(rect());
@@ -353,7 +387,7 @@ void MainWindow::openMapSettingsDialog() {
  */
 void MainWindow::setupTopBarStatuses() {
     updateSystemStatus(false);
-    streamChannelReady_.fill(false, requiredCctvChannelCount);
+    streamChannelReady_.fill(false, streamConfigs_.size());
     updateStreamConnectionStatus();
 }
 
@@ -390,7 +424,7 @@ void MainWindow::updateSystemStatus(bool connected) {
  */
 void MainWindow::updateStreamConnectionStatus() {
     const bool allStreamsReady =
-        streamChannelReady_.size() == requiredCctvChannelCount &&
+        !streamChannelReady_.isEmpty() && streamChannelReady_.size() == streamConfigs_.size() &&
         std::all_of(streamChannelReady_.cbegin(), streamChannelReady_.cend(), [](bool ready) { return ready; });
 
     setTopBarStatus(ui_->connectionStatusLabel, QStringLiteral("CCTV 상태"),
@@ -556,63 +590,163 @@ void MainWindow::updateDashboardAdaptiveSizes() { DashboardLayout::adjustBottomS
  */
 void MainWindow::setupVideoViewEvents() {
     videoWidgets_ = {
-        ui_->camView1,
-        ui_->camView2,
-        ui_->camView3,
-        ui_->camView4,
+        ui_->camView1, ui_->camView2, ui_->camView3, ui_->camView4,
+        ui_->camView5, ui_->camView6, ui_->camView7, ui_->camView8,
     };
 
-    auto* grid = ui_->videoGridLayout;
-
-    if (!grid) {
-        qWarning() << "[MainWindow] videoGridLayout is null";
+    videoAreaLayouts_ = {ui_->videoGridLayoutArea1, ui_->videoGridLayoutArea2};
+    if (videoConfig_.areas.size() != videoAreaLayouts_.size()) {
+        qWarning() << "[MainWindow] Video area UI/config count mismatch" << videoAreaLayouts_.size()
+                   << videoConfig_.areas.size();
         return;
     }
 
-    videoTileFrames_.reserve(videoWidgets_.size());
+    videoTileFrames_.resize(videoWidgets_.size());
 
-    for (qsizetype index = 0; index < videoWidgets_.size(); ++index) {
-        auto* widget = videoWidgets_[index];
-
-        if (!widget) {
+    for (qsizetype areaIndex = 0; areaIndex < videoConfig_.areas.size(); ++areaIndex) {
+        QGridLayout* grid = videoAreaLayouts_[areaIndex];
+        const QVector<int>& channels = videoConfig_.areas[areaIndex].channelIndexes;
+        if (!grid || channels.size() != videoChannelsPerArea) {
+            qWarning() << "[MainWindow] Invalid video area layout" << areaIndex;
             continue;
         }
 
-        auto* clickable = qobject_cast<ClickableVideoWidget*>(widget);
+        for (qsizetype slotIndex = 0; slotIndex < channels.size(); ++slotIndex) {
+            const int channelIndex = channels[slotIndex];
+            QWidget* widget = videoWidgets_.value(channelIndex);
+            auto* clickable = qobject_cast<ClickableVideoWidget*>(widget);
+            if (!clickable) {
+                qWarning() << "[MainWindow] Invalid video widget for channel" << channelIndex;
+                continue;
+            }
 
-        if (!clickable) {
-            qDebug() << "[MainWindow] Not ClickableVideoWidget:" << widget->objectName();
-            continue;
+            clickable->setChannelName(
+                QStringLiteral("CH %1").arg(videoLocalChannelNumber(channelIndex), 2, 10, QLatin1Char('0')));
+            clickable->setExpandedView(false);
+            for (QGridLayout* areaLayout : videoAreaLayouts_) {
+                areaLayout->removeWidget(widget);
+            }
+
+            auto* tileFrame = new VideoRiskBorderFrame(grid->parentWidget());
+            tileFrame->setObjectName(QStringLiteral("videoTileFrame"));
+            tileFrame->setProperty("hovered", false);
+            tileFrame->setProperty("riskLevel", QStringLiteral("normal"));
+            tileFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+            auto* tileLayout = new QVBoxLayout(tileFrame);
+            tileLayout->setContentsMargins(2, 2, 2, 2);
+            tileLayout->setSpacing(0);
+            tileLayout->addWidget(widget);
+
+            grid->addWidget(tileFrame, static_cast<int>(slotIndex / 2), static_cast<int>(slotIndex % 2));
+            videoTileFrames_[channelIndex] = tileFrame;
+
+            connect(clickable, &ClickableVideoWidget::doubleClicked, this,
+                    [this](ClickableVideoWidget* target) { toggleExpandVideo(target); });
+            connect(clickable, &ClickableVideoWidget::hoverChanged, tileFrame, [tileFrame](bool hovered) {
+                const bool riskActive = tileFrame->property("riskLevel").toString() != QStringLiteral("normal");
+                tileFrame->setProperty("hovered", hovered && !riskActive);
+                tileFrame->style()->unpolish(tileFrame);
+                tileFrame->style()->polish(tileFrame);
+                tileFrame->update();
+            });
         }
+    }
+}
 
-        clickable->setChannelName(QStringLiteral("CH %1").arg(index + 1, 2, 10, QLatin1Char('0')));
-        clickable->setExpandedView(false);
+/** @brief 설정된 CCTV 구역 이름을 선택 상자와 페이지 스택에 연결합니다. */
+void MainWindow::setupVideoAreaSelector() {
+    if (!ui_->cctvAreaComboBox || !ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
+        return;
+    }
 
-        grid->removeWidget(widget);
+    const QSignalBlocker blocker(ui_->cctvAreaComboBox);
+    ui_->cctvAreaComboBox->clear();
+    for (const VideoAreaConfig& area : videoConfig_.areas) {
+        ui_->cctvAreaComboBox->addItem(area.name, area.areaId);
+    }
+    ui_->cctvAreaComboBox->setCurrentIndex(currentVideoAreaIndex_);
+    ui_->videoAreaStackedWidget->setCurrentIndex(currentVideoAreaIndex_);
 
-        auto* tileFrame = new VideoRiskBorderFrame(ui_->cctvCard);
-        tileFrame->setObjectName(QStringLiteral("videoTileFrame"));
-        tileFrame->setProperty("hovered", false);
-        tileFrame->setProperty("riskLevel", QStringLiteral("normal"));
-        tileFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    connect(ui_->cctvAreaComboBox, &QComboBox::currentIndexChanged, this, &MainWindow::switchVideoArea);
+}
 
-        auto* tileLayout = new QVBoxLayout(tileFrame);
-        tileLayout->setContentsMargins(2, 2, 2, 2);
-        tileLayout->setSpacing(0);
-        tileLayout->addWidget(widget);
+/**
+ * @brief           전역 채널이 속한 영상 구역 인덱스를 찾습니다.
+ * @param channelIndex 0 기반 전역 채널
+ * 인덱스
 
-        grid->addWidget(tileFrame, static_cast<int>(index / 2), static_cast<int>(index % 2));
-        videoTileFrames_.append(tileFrame);
+ * *
+ * @return          구역 인덱스 또는 -1
+ */
+int MainWindow::videoAreaIndexForChannel(int channelIndex) const {
+    for (qsizetype areaIndex = 0; areaIndex < videoConfig_.areas.size(); ++areaIndex) {
+        if (videoConfig_.areas[areaIndex].channelIndexes.contains(channelIndex)) {
+            return static_cast<int>(areaIndex);
+        }
+    }
+    return -1;
+}
 
-        connect(clickable, &ClickableVideoWidget::doubleClicked, this,
-                [this](ClickableVideoWidget* target) { toggleExpandVideo(target); });
-        connect(clickable, &ClickableVideoWidget::hoverChanged, tileFrame, [tileFrame](bool hovered) {
-            const bool riskActive = tileFrame->property("riskLevel").toString() != QStringLiteral("normal");
-            tileFrame->setProperty("hovered", hovered && !riskActive);
-            tileFrame->style()->unpolish(tileFrame);
-            tileFrame->style()->polish(tileFrame);
-            tileFrame->update();
-        });
+/**
+ * @brief           구역에 배정된 전역 채널 인덱스를 반환합니다.
+ * @param areaIndex 조회할 구역 인덱스
+
+ * *
+ * @return 화면 슬롯 순서의 채널 인덱스
+ */
+const QVector<int>& MainWindow::channelsForArea(int areaIndex) const {
+    static const QVector<int> emptyChannels;
+    if (areaIndex < 0 || areaIndex >= videoConfig_.areas.size()) {
+        return emptyChannels;
+    }
+    return videoConfig_.areas[areaIndex].channelIndexes;
+}
+
+/** @brief 지정한 전역 채널이 현재 표시 구역에 속하는지 확인합니다. */
+bool MainWindow::isChannelVisible(int channelIndex) const {
+    return channelsForArea(currentVideoAreaIndex_).contains(channelIndex);
+}
+
+/**
+ * @brief           워밍 스트림을 유지한 채 CCTV 표시 구역을 전환합니다.
+ * @param areaIndex 새로
+ * 표시할 구역 인덱스
+ */
+void MainWindow::switchVideoArea(int areaIndex) {
+    if (areaIndex < 0 || areaIndex >= videoConfig_.areas.size() || areaIndex == currentVideoAreaIndex_) {
+        return;
+    }
+
+    if (expandedWidget_) {
+        restoreVideoGrid();
+    }
+
+    const int previousAreaIndex = currentVideoAreaIndex_;
+    if (streamSessionManager_) {
+        for (int channelIndex : channelsForArea(areaIndex)) {
+            streamSessionManager_->setPresentationActive(channelIndex, true);
+        }
+    }
+
+    currentVideoAreaIndex_ = areaIndex;
+    ui_->videoAreaStackedWidget->setCurrentIndex(areaIndex);
+    if (!isChannelVisible(selectedPreprocessingChannelIndex_)) {
+        selectedPreprocessingChannelIndex_ = channelsForArea(areaIndex).value(0, 0);
+    }
+    updateReportButtons();
+    updateVideoRiskBorders(latestVideoRiskLevels_);
+
+    for (int channelIndex : channelsForArea(areaIndex)) {
+        if (auto* videoWidget = qobject_cast<ClickableVideoWidget*>(videoWidgets_.value(channelIndex))) {
+            videoWidget->refreshChannelLabel();
+        }
+    }
+
+    if (streamSessionManager_) {
+        for (int channelIndex : channelsForArea(previousAreaIndex)) {
+            streamSessionManager_->setPresentationActive(channelIndex, false);
+        }
     }
 }
 
@@ -621,17 +755,32 @@ void MainWindow::setupVideoViewEvents() {
  * @param riskLevels  CH-01부터 CH-04까지의 현재 위험 단계
  */
 void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels) {
-    latestVideoRiskLevels_ = riskLevels;
-    const qsizetype count = qMin(videoTileFrames_.size(), riskLevels.size());
+    if (latestVideoRiskLevels_.size() != streamConfigs_.size()) {
+        latestVideoRiskLevels_.fill(DigitalTwinRiskLevel::Normal, streamConfigs_.size());
+    }
 
-    for (qsizetype index = 0; index < count; ++index) {
-        VideoRiskBorderFrame* tileFrame = videoTileFrames_[index];
+    if (riskLevels.size() == videoChannelsPerArea) {
+        for (const VideoAreaConfig& area : videoConfig_.areas) {
+            for (qsizetype slotIndex = 0; slotIndex < qMin(area.channelIndexes.size(), riskLevels.size());
+                 ++slotIndex) {
+                latestVideoRiskLevels_[area.channelIndexes[slotIndex]] = riskLevels[slotIndex];
+            }
+        }
+    } else {
+        const qsizetype count = qMin(latestVideoRiskLevels_.size(), riskLevels.size());
+        for (qsizetype channelIndex = 0; channelIndex < count; ++channelIndex) {
+            latestVideoRiskLevels_[channelIndex] = riskLevels[channelIndex];
+        }
+    }
+
+    for (qsizetype channelIndex = 0; channelIndex < videoTileFrames_.size(); ++channelIndex) {
+        VideoRiskBorderFrame* tileFrame = videoTileFrames_[channelIndex];
         if (!tileFrame) {
             continue;
         }
 
         const DigitalTwinRiskLevel visibleRiskLevel =
-            videoRiskBordersEnabled_ ? riskLevels[index] : DigitalTwinRiskLevel::Normal;
+            videoRiskBordersEnabled_ ? latestVideoRiskLevels_.value(channelIndex) : DigitalTwinRiskLevel::Normal;
 
         QString riskName = QStringLiteral("normal");
         if (visibleRiskLevel == DigitalTwinRiskLevel::Danger) {
@@ -646,8 +795,8 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
 
         tileFrame->setProperty("riskLevel", riskName);
         tileFrame->setRiskLevel(visibleRiskLevel);
-        const bool hovered =
-            riskName == QStringLiteral("normal") && videoWidgets_[index] && videoWidgets_[index]->underMouse();
+        const bool hovered = riskName == QStringLiteral("normal") && videoWidgets_[channelIndex] &&
+                             videoWidgets_[channelIndex]->underMouse();
         tileFrame->setProperty("hovered", hovered);
         tileFrame->style()->unpolish(tileFrame);
         tileFrame->style()->polish(tileFrame);
@@ -673,6 +822,9 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
         new StreamSessionManager(std::move(receiverFactory), videoConfig_.receiverStartSpacingMsec, this);
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
     streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
+    for (const StreamConfig& stream : streamConfigs_) {
+        streamSessionManager_->setPresentationActive(stream.channelIndex, isChannelVisible(stream.channelIndex));
+    }
 
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,
@@ -777,17 +929,16 @@ void MainWindow::toggleExpandVideo(QWidget* targetWidget) {
  * @param targetWidget  확대할 영상 위젯
  */
 void MainWindow::expandVideo(QWidget* targetWidget) {
-    auto* grid = ui_->videoGridLayout;
-
-    if (!grid) {
-        qDebug() << "[MainWindow] videoGridLayout is null";
+    const qsizetype targetIndex = videoWidgets_.indexOf(targetWidget);
+    if (targetIndex < 0 || targetIndex >= videoTileFrames_.size()) {
+        qWarning() << "[MainWindow] Video tile frame is not configured";
         return;
     }
 
-    const qsizetype targetIndex = videoWidgets_.indexOf(targetWidget);
-
-    if (targetIndex < 0 || targetIndex >= videoTileFrames_.size()) {
-        qWarning() << "[MainWindow] Video tile frame is not configured";
+    const int areaIndex = videoAreaIndexForChannel(static_cast<int>(targetIndex));
+    QGridLayout* grid = videoAreaLayouts_.value(areaIndex);
+    if (!grid || areaIndex != currentVideoAreaIndex_) {
+        qWarning() << "[MainWindow] Video area layout is not available" << areaIndex;
         return;
     }
 
@@ -799,7 +950,8 @@ void MainWindow::expandVideo(QWidget* targetWidget) {
         }
     }
 
-    for (auto* frame : videoTileFrames_) {
+    for (int channelIndex : channelsForArea(areaIndex)) {
+        QFrame* frame = videoTileFrames_.value(channelIndex);
         if (frame && frame != targetFrame) {
             frame->hide();
         }
@@ -818,27 +970,35 @@ void MainWindow::expandVideo(QWidget* targetWidget) {
  * @brief   확대된 영상을 원래 2x2 영상 그리드로 복구합니다.
  */
 void MainWindow::restoreVideoGrid() {
-    auto* grid = ui_->videoGridLayout;
-
-    if (!grid) {
-        qDebug() << "[MainWindow] videoGridLayout is null";
+    if (!expandedWidget_) {
         return;
     }
 
-    for (auto* frame : videoTileFrames_) {
+    const int expandedChannelIndex = static_cast<int>(videoWidgets_.indexOf(expandedWidget_));
+    const int areaIndex = videoAreaIndexForChannel(expandedChannelIndex);
+    QGridLayout* grid = videoAreaLayouts_.value(areaIndex);
+    if (!grid) {
+        qWarning() << "[MainWindow] Video area layout is not available" << areaIndex;
+        return;
+    }
+
+    const QVector<int>& channels = channelsForArea(areaIndex);
+    for (int channelIndex : channels) {
+        QFrame* frame = videoTileFrames_.value(channelIndex);
         if (frame) {
             grid->removeWidget(frame);
         }
     }
 
-    if (videoTileFrames_.size() == 4) {
-        grid->addWidget(videoTileFrames_[0], 0, 0);
-        grid->addWidget(videoTileFrames_[1], 0, 1);
-        grid->addWidget(videoTileFrames_[2], 1, 0);
-        grid->addWidget(videoTileFrames_[3], 1, 1);
+    for (qsizetype slotIndex = 0; slotIndex < channels.size(); ++slotIndex) {
+        QFrame* frame = videoTileFrames_.value(channels[slotIndex]);
+        if (frame) {
+            grid->addWidget(frame, static_cast<int>(slotIndex / 2), static_cast<int>(slotIndex % 2));
+        }
     }
 
-    for (auto* frame : videoTileFrames_) {
+    for (int channelIndex : channels) {
+        QFrame* frame = videoTileFrames_.value(channelIndex);
         if (frame) {
             frame->show();
         }

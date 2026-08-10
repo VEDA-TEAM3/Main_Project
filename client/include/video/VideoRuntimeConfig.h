@@ -1,10 +1,27 @@
 #pragma once
 
+#include <QString>
 #include <QVector>
 #include <QtGlobal>
 
 #include "model/StreamConfig.h"
 #include "model/VideoPreprocessingSettings.h"
+
+inline constexpr int videoChannelsPerArea = 4;
+
+constexpr int videoGlobalChannelIndex(int areaIndex, int localChannelIndex) noexcept {
+    return areaIndex * videoChannelsPerArea + localChannelIndex;
+}
+
+constexpr int videoLocalChannelNumber(int globalChannelIndex) noexcept {
+    return globalChannelIndex % videoChannelsPerArea + 1;
+}
+
+struct VideoAreaConfig {
+    QString areaId;
+    QString name;
+    QVector<int> channelIndexes;
+};
 
 struct BlurProcessorConfig {
     qint64 syncOffsetMsec = 0;
@@ -56,6 +73,8 @@ struct GstRtspReceiverConfig {
 
 struct VideoRuntimeConfig {
     QVector<StreamConfig> streams;
+    QVector<VideoAreaConfig> areas;
+    int initialAreaIndex = 0;
     int initialStartDelayMsec = 0;
     int receiverStartSpacingMsec = 0;
     GstRtspReceiverConfig receiver;
