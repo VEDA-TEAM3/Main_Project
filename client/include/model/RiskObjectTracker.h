@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QRectF>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <optional>
@@ -82,6 +83,7 @@ private:
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, QVector<QPointF>> worldPositionHistories_;
     QHash<qint64, qint64> lastSeenArrivalTimesMsec_;
+    QSet<qint64> missingObjectIds_;
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;
     QHash<QString, QPointF> previousPositions_;

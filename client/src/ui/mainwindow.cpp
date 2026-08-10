@@ -532,7 +532,7 @@ void MainWindow::setupDeviceStatusService() {
         connect(deviceStatusService_.get(), &DeviceStatusService::channelStatusesReceived, ui_->digitalTwinMapWidget,
                 &DigitalTwinMapWidget::applyDeviceChannelStatuses, Qt::QueuedConnection);
         connect(deviceStatusService_.get(), &DeviceStatusService::riskFrameReceived, ui_->digitalTwinMapWidget,
-                &DigitalTwinMapWidget::applyRiskFrame);
+                &DigitalTwinMapWidget::applyRiskFrame, Qt::QueuedConnection);
         connect(deviceStatusService_.get(), &DeviceStatusService::centralEventReceived, ui_->digitalTwinMapWidget,
                 &DigitalTwinMapWidget::applyCentralEvent, Qt::QueuedConnection);
     }

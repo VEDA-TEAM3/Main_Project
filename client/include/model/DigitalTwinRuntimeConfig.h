@@ -28,7 +28,7 @@ struct DigitalTwinRuntimeConfig {
     // Local UI interpolation only; this is not a video/source timestamp delay.
     qint64 positionTransitionMsec = 100;
     qint64 fadeInMsec = 120;
-    qint64 missingGraceMsec = 200;
+    qint64 missingGraceMsec = 100;
     qint64 fadeOutMsec = 180;
     qsizetype maximumHistorySize = 2;
     int diagnosticsIntervalMsec = 1000;

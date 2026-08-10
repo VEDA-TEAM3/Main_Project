@@ -176,7 +176,7 @@ bool hasActiveDanger(const DigitalTwinSnapshot& snapshot) {
     }
 
     for (const auto& object : snapshot.objects) {
-        if (object.riskLevel == DigitalTwinRiskLevel::Danger) {
+        if (object.observed && object.riskLevel == DigitalTwinRiskLevel::Danger) {
             return true;
         }
     }
@@ -528,7 +528,7 @@ QVector<DigitalTwinRiskLevel> DigitalTwinMapWidget::channelRiskLevels(const Digi
     QVector<DigitalTwinRiskLevel> riskLevels(digitalTwinChannelCount, DigitalTwinRiskLevel::Normal);
 
     for (const DigitalTwinObject& object : snapshot.objects) {
-        if (object.channelIndex < 0 || object.channelIndex >= riskLevels.size()) {
+        if (!object.observed || object.channelIndex < 0 || object.channelIndex >= riskLevels.size()) {
             continue;
         }
 
@@ -658,8 +658,10 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);
 
-    visualItem->recentPositions.append(scenePosition);
-    trimTrailPositions(&visualItem->recentPositions);
+    if (visualItem->object.observed) {
+        visualItem->recentPositions.append(scenePosition);
+        trimTrailPositions(&visualItem->recentPositions);
+    }
 
     visualItem->trail->setPath(createTrailPath(visualItem->recentPositions));
 }

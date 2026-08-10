@@ -22,7 +22,7 @@
         "frameExpiryPollMs": 1000,
         "positionTransitionMs": 66,
         "fadeInMs": 120,
-        "missingGraceMs": 200,
+        "missingGraceMs": 100,
         "fadeOutMs": 180,
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,

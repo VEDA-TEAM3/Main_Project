@@ -26,6 +26,7 @@ struct DigitalTwinObject {
     QColor color;
     DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
     qreal opacity = 1.0;
+    bool observed = true;
 };
 
 struct DigitalTwinRiskEvent {

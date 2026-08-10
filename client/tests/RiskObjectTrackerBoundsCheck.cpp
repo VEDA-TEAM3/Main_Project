@@ -72,12 +72,12 @@ void checkServerZoneIdPassThrough() {
           "identical coordinates must not force identical channels");
 
     frame.sourceTimestamp = 1033;
-    frame.objects[0].worldPosition = QPointF(-45.0, 5.0);
+    frame.objects[0].worldPosition = QPointF(-49.9, 0.1);
     tracker.submitFrame(frame, 1033);
     tracker.buildSnapshot(1033);
     const DigitalTwinSnapshot movedSnapshot = tracker.buildSnapshot(1099);
     const DigitalTwinObject* moved = findObject(movedSnapshot, 1);
-    check(moved != nullptr && moved->position == QPointF(-45.0, 5.0),
+    check(moved != nullptr && moved->position == QPointF(-49.9, 0.1),
           "position transition must preserve world coordinates");
 }
 
@@ -87,6 +87,8 @@ void checkServerZoneIdPassThrough() {
 void checkPhysicalCctvRiskIsolation() {
     DigitalTwinRuntimeConfig config;
     config.positionTransitionMsec = 0;
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
 
     RiskFrameData frame;
     frame.sourceTimestamp = 2000;
@@ -105,11 +107,63 @@ void checkPhysicalCctvRiskIsolation() {
     check(second != nullptr && second->riskLevel == DigitalTwinRiskLevel::Normal,
           "cross-map risk must not activate the second map");
 }
+
+/**
+ * @brief 누락 객체가 100ms 동안만 유지되고 위험 판단에서는 제외되는지 검사합니다.
+ */
+void checkMissingObjectGracePeriod() {
+    DigitalTwinRuntimeConfig config;
+    config.positionTransitionMsec = 0;
+    config.fadeInMsec = 0;
+    config.missingGraceMsec = 100;
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+
+    RiskFrameData frame;
+    frame.sourceTimestamp = 3000;
+    frame.objects = {riskObjectAt(100, 200, 0), riskObjectAt(200, 100, 0)};
+    frame.objects[0].worldPosition = QPointF(-40.0, 4.0);
+    frame.objects[1].worldPosition = QPointF(-38.0, 4.0);
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frame, 3000);
+    const DigitalTwinSnapshot observedSnapshot = tracker.buildSnapshot(3000);
+    check(observedSnapshot.objects.size() == 2, "observed objects must be displayed");
+    check(!observedSnapshot.pairRiskStates.isEmpty(), "observed risk pair must remain active");
+
+    RiskFrameData emptyFrame;
+    emptyFrame.sourceTimestamp = 3033;
+    tracker.submitFrame(emptyFrame, 3033);
+    const DigitalTwinSnapshot graceSnapshot = tracker.buildSnapshot(3050);
+    const DigitalTwinObject* graceObject = findObject(graceSnapshot, 100);
+    check(graceObject != nullptr, "missing object must remain during the 100ms grace period");
+    check(graceObject != nullptr && !graceObject->observed, "grace object must be marked unobserved");
+    check(graceObject != nullptr && graceObject->position == QPointF(-40.0, 4.0),
+          "grace object must hold its last world position");
+    check(graceObject != nullptr && graceObject->opacity < 1.0, "grace object must be visually dimmed");
+    check(graceSnapshot.pairRiskStates.isEmpty(), "grace objects must not extend risk decisions");
+
+    frame.sourceTimestamp = 3066;
+    tracker.submitFrame(frame, 3066);
+    const DigitalTwinSnapshot restoredSnapshot = tracker.buildSnapshot(3066);
+    const DigitalTwinObject* restoredObject = findObject(restoredSnapshot, 100);
+    check(restoredObject != nullptr && restoredObject->observed, "same GID must be restored as an observed object");
+
+    RiskObjectTracker expiryTracker(config);
+    frame.sourceTimestamp = 4000;
+    expiryTracker.submitFrame(frame, 4000);
+    expiryTracker.buildSnapshot(4000);
+    emptyFrame.sourceTimestamp = 4033;
+    expiryTracker.submitFrame(emptyFrame, 4033);
+    const DigitalTwinSnapshot expiredSnapshot = expiryTracker.buildSnapshot(4101);
+    check(findObject(expiredSnapshot, 100) == nullptr, "object missing for more than 100ms must be removed");
+}
 }  // namespace
 
 int main() {
     checkServerZoneIdPassThrough();
     checkPhysicalCctvRiskIsolation();
+    checkMissingObjectGracePeriod();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

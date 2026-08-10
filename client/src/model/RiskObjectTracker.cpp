@@ -177,6 +177,7 @@ void RiskObjectTracker::reset() {
     lastAcceptedInputFrame_.reset();
     retainedObjects_.clear();
     lastSeenArrivalTimesMsec_.clear();
+    missingObjectIds_.clear();
     renderedOpacities_.clear();
     opacityUpdateTimesMsec_.clear();
     previousPositions_.clear();
@@ -275,24 +276,45 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         logFrameDiagnostics(frame, rawPositions, medianPositions, arrivalTimeMsec);
     }
 
-    for (const RiskObjectData& object : frame.objects) {
-        retainedObjects_.insert(object.globalId, object);
-        lastSeenArrivalTimesMsec_.insert(object.globalId, arrivalTimeMsec);
-    }
-
-    const qint64 objectRetentionMsec = config_.missingGraceMsec + config_.fadeOutMsec;
+    const qint64 objectRetentionMsec = config_.missingGraceMsec;
     for (auto iterator = lastSeenArrivalTimesMsec_.begin(); iterator != lastSeenArrivalTimesMsec_.end();) {
         if (arrivalTimeMsec - iterator.value() <= objectRetentionMsec) {
             ++iterator;
             continue;
         }
 
+        const qint64 globalId = iterator.key();
+        if (diagnostics_.level >= 2) {
+            qDebug().noquote()
+                << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
+                       .arg(globalId)
+                       .arg(arrivalTimeMsec - iterator.value());
+        }
+
         // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는
         // 시점이라 이상치가 가장 나오기 쉬운데, 이력을 버리면 돌아온 첫 좌표가
         // 중앙값 필터를 못 받는다. 이력은 removeInactivePositionStates가 속도 상한
         // 상태와 같은 기준으로 정리한다
-        retainedObjects_.remove(iterator.key());
+        retainedObjects_.remove(globalId);
+        missingObjectIds_.remove(globalId);
         iterator = lastSeenArrivalTimesMsec_.erase(iterator);
+    }
+
+    for (const RiskObjectData& object : frame.objects) {
+        const bool knownObject = retainedObjects_.contains(object.globalId);
+        const qint64 previousArrivalMsec = lastSeenArrivalTimesMsec_.value(object.globalId, arrivalTimeMsec);
+        const bool restoredObject = missingObjectIds_.remove(object.globalId);
+        if (diagnostics_.level >= 2 && !knownObject) {
+            qDebug().noquote() << QStringLiteral("[TV LIFE] CREATE gid=%1").arg(object.globalId);
+        } else if (diagnostics_.level >= 2 && restoredObject) {
+            qDebug().noquote()
+                << QStringLiteral("[TV LIFE] RESTORE gid=%1 elapsed=%2ms")
+                       .arg(object.globalId)
+                       .arg(arrivalTimeMsec - previousArrivalMsec);
+        }
+
+        retainedObjects_.insert(object.globalId, object);
+        lastSeenArrivalTimesMsec_.insert(object.globalId, arrivalTimeMsec);
     }
 
     history_.append(std::move(frame));
@@ -351,6 +373,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     QHash<qint64, int> sourceChannelIndexes;
     QSet<QString> pairKeys;
     QSet<qint64> includedObjectIds;
+    QSet<qint64> observedObjectIds;
     snapshot.objects.reserve(qMax(frame.objects.size(), retainedObjects_.size()));
 
     sourceChannelIndexes.reserve(frame.objects.size() + retainedObjects_.size());
@@ -359,11 +382,17 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     }
     for (const RiskObjectData& sourceObject : frame.objects) {
         sourceChannelIndexes.insert(sourceObject.globalId, sourceObject.zoneId);
+        const qint64 lastSeenArrivalMsec = lastSeenArrivalTimesMsec_.value(sourceObject.globalId, 0);
+        const qint64 ageMsec = lastSeenArrivalMsec > 0 ? localTimeMsec - lastSeenArrivalMsec : -1;
+        if (ageMsec >= 0 && ageMsec <= config_.missingGraceMsec) {
+            observedObjectIds.insert(sourceObject.globalId);
+        }
     }
 
     const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &currentChannelIndexes,
-                               &sourceChannelIndexes, &pairKeys, &includedObjectIds](
-                                  const RiskObjectData& sourceObject, qreal opacity, qint64 objectFrameSequence) {
+                               &sourceChannelIndexes, &pairKeys, &includedObjectIds, &observedObjectIds](
+                                  const RiskObjectData& sourceObject, qreal opacity, qint64 objectFrameSequence,
+                                  bool observed) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
         }
@@ -372,22 +401,26 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         DigitalTwinObject object;
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
-                                                                          : DigitalTwinObjectType::Vehicle;
+                                                                           : DigitalTwinObjectType::Vehicle;
         const QPointF targetPosition = sourceObject.worldPosition;
-        object.position = transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec);
+        object.position = observed
+                              ? transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec)
+                              : targetPosition;
         object.channelIndex = sourceObject.zoneId;
-        object.velocity = object.position - previousPositions_.value(object.objectId, object.position);
+        object.velocity = observed ? object.position - previousPositions_.value(object.objectId, object.position)
+                                   : QPointF();
         const int nearestChannelIndex = sourceChannelIndexes.value(sourceObject.nearestId, -1);
         const bool crossCctvPair = sourceObject.nearestId > 0 && sourceObject.zoneId >= 0 && nearestChannelIndex >= 0 &&
                                    sourceObject.zoneId / 4 != nearestChannelIndex / 4;
         object.riskLevel = crossCctvPair ? DigitalTwinRiskLevel::Normal : sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);
+        object.observed = observed;
         snapshot.objects.append(object);
         currentPositions.insert(object.objectId, object.position);
         currentChannelIndexes.insert(object.objectId, object.channelIndex);
 
-        if (sourceObject.nearestId <= 0 || object.riskLevel == DigitalTwinRiskLevel::Normal ||
-            sourceObject.zoneId < 0 || nearestChannelIndex < 0) {
+        if (!observed || sourceObject.nearestId <= 0 || !observedObjectIds.contains(sourceObject.nearestId) ||
+            object.riskLevel == DigitalTwinRiskLevel::Normal || sourceObject.zoneId < 0 || nearestChannelIndex < 0) {
             return;
         }
 
@@ -407,20 +440,54 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     };
 
     for (const RiskObjectData& sourceObject : frame.objects) {
-        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_);
+        if (!observedObjectIds.contains(sourceObject.globalId)) {
+            continue;
+        }
+        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_, true);
     }
 
+    QVector<qint64> expiredObjectIds;
     for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
+        if (includedObjectIds.contains(iterator.key())) {
+            continue;
+        }
+
         const qint64 lastSeenArrivalMsec = lastSeenArrivalTimesMsec_.value(iterator.key(), 0);
         const qint64 missingAgeMsec = lastSeenArrivalMsec > 0 ? localTimeMsec - lastSeenArrivalMsec : 0;
-        if (missingAgeMsec < 0 || missingAgeMsec > config_.missingGraceMsec + config_.fadeOutMsec) {
+        if (missingAgeMsec < 0) {
             continue;
+        }
+        if (missingAgeMsec > config_.missingGraceMsec) {
+            expiredObjectIds.append(iterator.key());
+            if (diagnostics_.level >= 2) {
+                qDebug().noquote()
+                    << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
+                           .arg(iterator.key())
+                           .arg(missingAgeMsec);
+            }
+            continue;
+        }
+
+        if (!missingObjectIds_.contains(iterator.key())) {
+            missingObjectIds_.insert(iterator.key());
+            if (diagnostics_.level >= 2) {
+                qDebug().noquote()
+                    << QStringLiteral("[TV LIFE] GRACE gid=%1 elapsed=%2ms")
+                           .arg(iterator.key())
+                           .arg(missingAgeMsec);
+            }
         }
 
         const QString objectId = QStringLiteral("G-%1").arg(iterator.key());
         const qint64 retainedFrameSequence = positionTransitions_.value(objectId).targetFrameSequence;
         appendObject(iterator.value(), lifecycleOpacity(iterator.key(), false, missingAgeMsec, localTimeMsec),
-                     retainedFrameSequence > 0 ? retainedFrameSequence : frameSequence_);
+                     retainedFrameSequence > 0 ? retainedFrameSequence : frameSequence_, false);
+    }
+
+    for (qint64 globalId : std::as_const(expiredObjectIds)) {
+        retainedObjects_.remove(globalId);
+        lastSeenArrivalTimesMsec_.remove(globalId);
+        missingObjectIds_.remove(globalId);
     }
 
     for (const DigitalTwinPairRiskState& pairState : snapshot.pairRiskStates) {
@@ -686,9 +753,9 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
             diagnostics_.lastObjectLogMsec.insert(object.globalId, arrivalTimeMsec);
 
             // 한 줄이 길면 붙여넣기·수집 과정에서 잘린다. 80자 안쪽으로 유지한다
-            QString line = QStringLiteral("[TV] g%1 raw=%2 d=%3 ch=%4")
+            QString line = QStringLiteral("[TV LIFE] UPDATE gid=%1 pos=(%2) d=%3 ch=%4")
                                .arg(object.globalId)
-                               .arg(formatPoint(rawPosition))
+                               .arg(formatPoint(object.worldPosition))
                                .arg(std::hypot(rawDelta.x(), rawDelta.y()), 0, 'f', 2)
                                .arg(object.zoneId >= 0 ? QString::number(object.zoneId + 1) : QStringLiteral("-"));
             if (filterIntervened) {
@@ -696,7 +763,7 @@ void RiskObjectTracker::logFrameDiagnostics(const RiskFrameData& frame, const QV
                             .arg(std::hypot(medianDelta.x(), medianDelta.y()), 0, 'f', 2)
                             .arg(std::hypot(limitDelta.x(), limitDelta.y()), 0, 'f', 2);
             }
-            qInfo().noquote() << line;
+            qDebug().noquote() << line;
         }
     }
 
@@ -926,9 +993,10 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
         opacity = config_.fadeInMsec <= 0
                       ? 1.0
                       : qMin(1.0, opacity + static_cast<qreal>(knownObject ? elapsedMsec : 0) / config_.fadeInMsec);
-    } else if (missingAgeMsec > config_.missingGraceMsec) {
-        opacity =
-            config_.fadeOutMsec <= 0 ? 0.0 : qMax(0.0, opacity - static_cast<qreal>(elapsedMsec) / config_.fadeOutMsec);
+    } else if (missingAgeMsec >= 0) {
+        const qint64 fadeDurationMsec = qMax<qint64>(1, qMin(config_.fadeOutMsec, config_.missingGraceMsec));
+        const qreal fadeProgress = qBound(0.0, static_cast<qreal>(missingAgeMsec) / fadeDurationMsec, 1.0);
+        opacity = qMin(opacity, 1.0 - 0.45 * fadeProgress);
     }
 
     renderedOpacities_.insert(objectId, opacity);
