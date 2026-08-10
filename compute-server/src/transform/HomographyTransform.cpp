@@ -96,9 +96,9 @@ HomographyTransform::HomographyTransform(std::array<double, 9> matrix, const Opt
         throw std::invalid_argument("homography matrix is singular (determinant ~= 0)");
     }
 
-    // 3) 부호 정규화: 호모그래피는 스칼라배 불변이므로 전체에 -1 을 곱해도 사상 결과는 동일함
+    // 3) 부호 정규화: 호모그래피는 스칼라배 불변이므로 전체에 -1을 곱해도 사상 결과는 동일함
     //    기준점(화면 하단 중앙)의 분모가 양수가 되도록 맞춰두면, 이후 toLocal()에서는
-    //    'denominator > 0' 하나로 지평선 너머를 판별할 수 있음
+    //    denominator > 0 하나로 지평선 너머를 판별할 수 있음
     const double anchorDenominator = matrix_[6] * kAnchorU + matrix_[7] * kAnchorV + matrix_[8];
     if (!std::isfinite(anchorDenominator) || std::abs(anchorDenominator) <= kMinDenominator) {
         throw std::invalid_argument(
@@ -134,10 +134,10 @@ std::optional<veda::LocalPoint> HomographyTransform::toLocal(const domain::Image
 
     const double denominator = matrix_[6] * p.u + matrix_[7] * p.v + matrix_[8];
 
-    // 지평선 판정: 생성자에서 부호와 크기가 정규화되므로 denominator <= 0 은 '지평선 위/너머'를 뜻함
+    // 지평선 판정: 생성자에서 부호와 크기가 정규화되므로 denominator <= 0 은 지평선 위/너머를 뜻함
     // (부호가 뒤집힌 채로 통과시키면 반대편으로 반사된 그럴듯한 좌표가 나와 팬텀 객체가 됨)
     if (!std::isfinite(denominator) || denominator <= kMinDenominator) {
-        // 문자열 조립은 rate-limit 을 통과했을 때만 (억제될 로그의 힙 할당 제거)
+        // 문자열 조립은 rate-limit을 통과했을 때만 (억제될 로그의 힙 할당 제거)
         if (shouldLogFailure()) {
             logFailure("u=" + std::to_string(p.u) + ", v=" + std::to_string(p.v) +
                        " 지면점이 지평선 위/근처 (분모=" + std::to_string(denominator) + ") - 변환 불가");
@@ -169,7 +169,7 @@ std::optional<veda::LocalPoint> HomographyTransform::toLocal(const domain::Image
 
 bool HomographyTransform::shouldLogFailure() noexcept {
     // 지평선 근처 객체는 프레임마다 연속으로 실패하므로 매번 찍으면 로그가 도배됨
-    // -> 누적 카운트는 항상 올리되(진단용), 실제 기록은 첫 건과 100건마다만
+    // → 누적 카운트는 항상 올리되(진단용), 실제 기록은 첫 건과 100건마다만
     ++failureCount_;
 
     // Error 레벨 자체가 꺼져 있으면 조립도 기록도 불필요

@@ -44,7 +44,6 @@ bool MqttTopViewSink::isValidFrame(const veda::TopViewFrame& frame) const noexce
         }
     }
 
-    // 객체가 없는 프레임도 해당 시각에 위험 객체가 없다는 유효한 상태다.
     return true;
 }
 
@@ -56,8 +55,8 @@ bool MqttTopViewSink::prepare(const veda::TopViewFrame& in, veda::TopViewFrame& 
     out.v = in.v;
     out.ts = in.ts;
     out.ch = in.ch;
-    // out 은 직전 send() 에서 큐로 move 된 상태라 capacity 가 0 이다 -- assign 은 매번 새로 할당한다.
-    // 의도된 트레이드오프이며 근거는 MqttFrameSink::prepare 의 @warning 참고
+    // out은 직전 send()에서 큐로 move된 상태라 capacity가 0 이다.
+    // -- assign은 매번 새로 할당한다.
     out.objects.assign(in.objects.begin(), in.objects.end());
     return true;
 }

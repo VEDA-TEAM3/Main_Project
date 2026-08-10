@@ -15,19 +15,19 @@
  * @brief   평면 호모그래피로 지면점을 카메라 로컬 지면 좌표(m)로 사상
  *
  * @details
- * toLocal() 가 받는 점은 언제나 [0,1] 정규화 좌표(좌상단 원점)임
+ * toLocal()가 받는 점은 언제나 [0,1] 정규화 좌표(좌상단 원점)임
  * 반면 캘리브레이션 도구(OpenCV findHomography 등)가 뱉는 행렬은 보통 픽셀 좌표계 기준이라
  * 그대로 넣으면 h6/h7 분모 항의 스케일이 어긋나 예외 없이 완전히 틀린 좌표가 나옴
- * -> Options::pixelSpace 로 입력 좌표계를 명시하면 생성자가 한 번만 환산해둠
- *    (H_norm = H_pixel * diag(W, H, 1) -> 열 0에 W, 열 1에 H 를 곱하는 것과 동일)
+ * → Options::pixelSpace로 입력 좌표계를 명시하면 생성자가 한 번만 환산해둠
+ *    (H_norm = H_pixel * diag(W, H, 1) → 열 0에 W, 열 1에 H 를 곱하는 것과 동일)
  *    런타임 경로에는 분기도 곱셈도 추가되지 않음
  *
  * @note [ 지평선 처리 ]
  * 분모 = h6*u + h7*v + h8 이 0 이 되는 직선이 곧 지평선임
- * 지평선 '너머'의 점은 분모 부호가 뒤집혀, 크기는 멀쩡하지만 반대편으로 반사된
- * 그럴듯한 좌표를 내놓음 -> 팬텀 객체가 엉뚱한 위치에 발행됨
- * 호모그래피는 스칼라배 불변이므로, 생성자에서 '화면 하단 중앙(0.5, 1.0)의 분모가
- * 양수'가 되도록 전체 부호를 정규화해두면 이후엔 분모 > 0 검사만으로 지평선 너머를 걸러낼 수 있음
+ * 지평선 너머의 점은 분모 부호가 뒤집혀, 크기는 멀쩡하지만 반대편으로 반사된
+ * 그럴듯한 좌표를 내놓음 → 팬텀 객체가 엉뚱한 위치에 발행됨
+ * 호모그래피는 스칼라배 불변이므로, 생성자에서 화면 하단 중앙(0.5, 1.0)의 분모가
+ * 양수가 되도록 전체 부호를 정규화해두면 이후엔 분모 > 0 검사만으로 지평선 너머를 걸러낼 수 있음
  * (하단 중앙을 기준점으로 삼는 이유: 아래로 기울어진 CCTV 라면 화면 맨 아래 지면은
  *  반드시 카메라 앞쪽이므로. 좌상단(0,0)은 지평선 위일 수 있어 기준으로 부적합)
  */
@@ -37,10 +37,10 @@ public:
      * @brief 행렬 해석 방식과 사후 검증 범위를 담는 설정
      */
     struct Options {
-        /// @brief true 면 matrix 를 픽셀 좌표계 기준으로 보고 생성자에서 정규화 좌표계로 환산
+        /// @brief true면 matrix를 픽셀 좌표계 기준으로 보고 생성자에서 정규화 좌표계로 환산
         bool pixelSpace = false;
 
-        /// @brief pixelSpace 일 때 캘리브레이션에 사용한 이미지 해상도
+        /// @brief pixelSpace일 때 캘리브레이션에 사용한 이미지 해상도
         double imageWidth = 0.0;
         double imageHeight = 0.0;
 
@@ -71,18 +71,17 @@ private:
      * @brief   이번 변환 실패를 실제로 기록할 차례인지 판정 (rate-limit)
      * @details 실패 카운터를 올리고, 로그를 남길 차례(첫 건 또는 100건마다)일 때만 true
      *
-     * @warning [ 문자열 조립은 반드시 이 함수가 true 일 때만 할 것 ]
+     * @warning [ 문자열 조립은 반드시 이 함수가 true일 때만 할 것 ]
      * 예전에는 호출부가 logFailure("u=" + std::to_string(...) + ...) 형태였는데,
-     * 인자는 함수 진입 '이전'에 평가되므로 rate-limit 으로 억제될 99% 의 로그까지
+     * 인자는 함수 진입 이전에 평가되므로 rate-limit으로 억제될 99% 의 로그까지
      * 매번 문자열을 조립(= 힙 할당)했음
      * 지평선 근처 객체는 프레임마다 연속으로 실패하므로 이 비용이 객체당/프레임당 반복됨
-     * -- compute-server 의 per-frame zero-allocation 원칙에 어긋남
-     * -> 판정(이 함수)과 기록(logFailure)을 분리해, 억제될 로그는 조립조차 하지 않음
+     * → 판정(이 함수)과 기록(logFailure)을 분리해, 억제될 로그는 조립조차 하지 않음
      *    (ContainmentSanitizer / ParentBasedRouter 의 isLogEnabled() 가드와 같은 패턴)
      */
     bool shouldLogFailure() noexcept;
 
-    /// @brief rate-limit 을 통과한 실패 사유를 누적 건수와 함께 기록
+    /// @brief rate-limit을 통과한 실패 사유를 누적 건수와 함께 기록
     void logFailure(const std::string& message) const;
 
     /**

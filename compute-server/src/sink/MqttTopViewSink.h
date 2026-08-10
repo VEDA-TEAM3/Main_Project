@@ -30,5 +30,5 @@ protected:
 private:
     bool isValidFrame(const veda::TopViewFrame& frame) const noexcept;
 
-    veda::ChannelId channelId_;  ///< 이 프로세스의 채널. frame.ch 는 반드시 이 값과 같아야 함(엣지 워커 불변식)
+    veda::ChannelId channelId_;  ///< 이 프로세스의 채널 (frame.ch는 반드시 이 값과 같아야 함)
 };

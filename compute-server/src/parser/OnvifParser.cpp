@@ -20,21 +20,23 @@ constexpr const char* kIface = "Parser";
 /// @brief 인식 안 되는 <tt:Type> 문자열 진단 로그 rate-limit용 (파서는 채널당 단일 스레드에서만 호출됨)
 std::uint64_t g_unknownTypeCount = 0;
 
-/// @brief [W3] 프레임당 파싱할 객체 수 하드 상한. 악의적/손상된 페이로드가 아주 작은 <tt:Object>를
-///        대량으로 실어보내 result.objects 벡터를 부풀리는 메모리 증폭 DoS를 막는다. 상한에 닿으면
-///        루프를 조기 종료한다. 상류(RtspClientV2)의 1MiB 프레임 상한과 별개인 파서 자체의 방어선
+/// @brief 프레임당 파싱할 객체 수 하드 상한
+///        악의적/손상된 페이로드가 아주 작은 <tt:Object>를
+///        대량으로 실어보내 result.objects 벡터를 부풀리는 메모리 증폭 DoS를 막는다.
+///        상한에 닿으면 루프를 조기 종료한다.
+///        (RtspClientV2의 1MiB 프레임 상한과 별개인 파서 자체의 방어선)
 constexpr std::size_t kMaxObjectsPerFrame = 256;
 
-/// @brief [W1] 로그에 남길 신뢰할 수 없는 문자열의 최대 길이 (초과분은 "..."로 표시)
+/// @brief 로그에 남길 신뢰할 수 없는 문자열의 최대 길이 (초과분은 "..."로 표시)
 constexpr std::size_t kMaxLoggedTextLen = 50;
 
 /**
- * @brief   [W1] 카메라가 보낸 신뢰할 수 없는 문자열을 CSV 로그에 안전하게 넣도록 정화
+ * @brief   카메라가 보낸 신뢰할 수 없는 문자열을 CSV 로그에 안전하게 넣도록 정화
  *
  * @details
  * Logger는 고정 이름 CSV(veda.csv)에 append하므로, <tt:Type> 같은 카메라 제어 문자열이 그대로
- * 로그에 들어가면 개행(\r\n)으로 가짜 로그 행을, 콤마/큰따옴표로 가짜 CSV 열을 주입할 수 있다
- * (log/CSV injection). 로깅 '직전에' 무력화한다:
+ * 로그에 들어가면 개행(\r\n)으로 가짜 로그 행을, 콤마/큰따옴표로 가짜 CSV 열을 주입할 수 있다.
+ * 로깅 직전에 무력화한다:
  *  - 제어문자(0x00-0x1F, 0x7F), 콤마(,), 큰따옴표(")를 '_'로 치환
  *  - kMaxLoggedTextLen 자로 잘라 로그 폭주 방지 (잘리면 말미에 "..." 부착)
  *
@@ -74,13 +76,13 @@ std::optional<T> parseNumber(std::string_view sv) {
 }
 
 /**
- * @brief   key="value" 패턴에서 value 를 추출
+ * @brief   key="value" 패턴에서 value를 추출
  * @param   s 검색을 수행할 대상 문자열 (내부에서 시작 위치를 결정)
  * @param   key 찾고자 하는 속성의 키 문자열
  * @return  std::optional<std::string_view> 추출된 따옴표 안의 문자열, 실패 시 nullopt
  *
  * @note    "key" + "=\"" 를 이어붙인 임시 std::string을 만들어 검색하던 방식 대신,
- *          key만 먼저 찾고 바로 뒤가 ="인지 직접 확인함 -> 프레임당 수십 회 호출되는
+ *          key만 먼저 찾고 바로 뒤가 ="인지 직접 확인함 → 프레임당 수십 회 호출되는
  *          지점에서 임시 문자열 생성(및 SSO 범위를 벗어날 경우의 힙 할당)을 없앰
  */
 std::optional<std::string_view> extractQuoted(std::string_view s, std::string_view key) {
@@ -110,7 +112,7 @@ std::optional<std::string_view> extractQuoted(std::string_view s, std::string_vi
 }
 
 /**
- * @brief       UtcTime="YYYY-MM-DDTHH:MM:SS.sssZ" 형식의 문자열을 epoch ms 로 변환
+ * @brief       UtcTime="YYYY-MM-DDTHH:MM:SS.sssZ" 형식의 문자열을 epoch ms로 변환
  * @details     고정 포맷이라 위치 기반으로 자름
  * @param       utc 변환할 UTC 기준 시각 문자열
  * @return      std::optional<veda::TimestampMs> epoch 기준 밀리초 단위 시간, 실패 시 nullopt
@@ -245,10 +247,10 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
     const size_t framePos = payload.find("<tt:Frame");
     if (framePos == std::string_view::npos) {
-        // 이 실패는 보통 한 프레임의 문제가 아니라 '입력 스트림 자체가 메타데이터가 아니다'라는
-        // 신호다. 그래서 (1) 패킷마다 찍히지 않도록 rate-limit 하고,
-        // (2) 무엇이 들어왔는지 알 수 있게 페이로드 선두를 함께 남긴다
-        // -- "태그 없음"만으로는 H.264 NAL 인지, RTCP 인지, 잘린 XML 인지 구분할 수 없다
+        // 이 실패는 보통 한 프레임의 문제가 아니라 입력 스트림 자체가 메타데이터가 아니다라는 신호다.
+        // 그래서 패킷마다 찍히지 않도록 rate-limit 하고,
+        // 무엇이 들어왔는지 알 수 있게 페이로드 선두를 함께 남긴다.
+        // -- "태그 없음"만으로는 H.264 NAL인지, RTCP인지, 잘린 XML인지 구분할 수 없다.
         ++noFrameTagCount_;
         if ((noFrameTagCount_ == 1 || noFrameTagCount_ % 100 == 0) && isLogEnabled(LogLevel::Error)) {
             logError(kIface, "ch=" + std::to_string(raw.channelId) + " <tt:Frame> 태그 없음 - 프레임 스킵 (누적 " +
@@ -287,7 +289,7 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
     size_t pos = 0;
     while ((pos = frame.find("<tt:Object", pos)) != std::string_view::npos) {
-        // [W3] 파싱된 객체 수가 상한에 닿으면 조기 종료 -> 증폭된 페이로드로 인한 메모리 고갈 방지
+        // 파싱된 객체 수가 상한에 닿으면 조기 종료 → 증폭된 페이로드로 인한 메모리 고갈 방지
         if (result.objects.size() >= kMaxObjectsPerFrame) {
             logError(kIface, "ch=" + std::to_string(raw.channelId) + " 파싱 객체 수가 상한(" +
                                  std::to_string(kMaxObjectsPerFrame) + ")에 도달 - 나머지 객체 무시");
@@ -354,15 +356,15 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         det.box.t = normY(*t, *transform);
         det.box.b = normY(*b, *transform);
 
-        // [W2] NaN/Inf 방어: std::from_chars 는 "inf"/"nan" 문자열을 그대로 파싱하고, 거대한
-        // scale/translate 는 곱셈 오버플로로 ±Inf 를 낳는다. 하류(HomographyTransform/매퍼)에
+        // NaN/Inf 방어: std::from_chars는 inf/nan 문자열을 그대로 파싱하고, 거대한
+        // scale/translate는 곱셈 오버플로로 ±Inf를 낳는다. 하류(HomographyTransform/매퍼)에
         // isfinite 검사가 있긴 하나, 파서에서 먼저 좌표가 유한하지 않은 객체를 폐기해 방어 심층화
         if (!std::isfinite(det.box.l) || !std::isfinite(det.box.r) || !std::isfinite(det.box.t) ||
             !std::isfinite(det.box.b)) {
             continue;
         }
 
-        // 아래변 잘림은 지면점을 직접 망가뜨리므로 따로 표시 (DetectedObject::bottomTruncated 참고)
+        // 아래변 잘림은 지면점을 직접 망가뜨리므로 따로 표시
         det.bottomTruncated = det.box.b >= 1.0 - edgeEpsilon_;
         det.touchesBorder = det.bottomTruncated || det.box.l <= edgeEpsilon_ || det.box.r >= 1.0 - edgeEpsilon_ ||
                             det.box.t <= edgeEpsilon_;
@@ -391,9 +393,9 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         det.cls = veda::objectClassFromString(typeText);
 
         if (det.cls == veda::ObjectClass::Unknown) {
-            // objectClassFromString이 "Human"/"Vehicle"/"Head"/"LicensePlate" 외의 문자열은
-            // 전부 Unknown으로 처리하는데, 이게 파싱 실패가 아니라 "정상적으로 인식된 미지원 값"이라
-            // 별도로 로그를 안 남기면 blur가 조용히 걸러지는 원인을 추적할 수 없음
+            // objectClassFromString이 Human/Vehicle/Head/LicensePlate 외의 문자열은
+            // 전부 Unknown으로 처리하는데, 이게 파싱 실패가 아니라 정상적으로 인식된 미지원 값이라
+            // 별도로 로그를 안 남기면 Blur가 조용히 걸러지는 원인을 추적할 수 없음
             ++g_unknownTypeCount;
             if (g_unknownTypeCount == 1 || g_unknownTypeCount % 100 == 0) {
                 logError(kIface, "ch=" + std::to_string(raw.channelId) + " id=" + std::to_string(det.id) +

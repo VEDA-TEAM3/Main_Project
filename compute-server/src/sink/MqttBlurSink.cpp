@@ -66,12 +66,9 @@ bool MqttBlurSink::prepare(const veda::BlurFrame& in, veda::BlurFrame& out) {
     out.ts = in.ts;
     out.ch = in.ch;
 
-    // 개별 blur 대상 중 클래스/좌표가 이상한 것만 걸러내고 나머지는 그대로 발행한다.
-    // (얼굴 하나가 인식 안 되는 클래스라고 같은 프레임의 다른 blur까지 통째로 버리지 않기 위함
-    // -- blurs가 비어 있는 프레임도 정상: 이전 프레임의 blur 영역을 지우려면 빈 프레임도 필요)
-    // out 은 직전 send() 에서 큐로 move 된 상태라 capacity 가 0 이다 -- clear() 가 유지할 capacity 자체가
-    // 없으므로 이어지는 reserve 가 매번 새로 할당한다.
-    // 의도된 트레이드오프이며 근거는 MqttFrameSink::prepare 의 @warning 참고
+    // 개별 Blur 대상 중 클래스/좌표가 이상한 것만 걸러내고 나머지는 그대로 발행한다.
+    // out은 직전 send()에서 큐로 move된 상태라 capacity가 0 이다.
+    // -- clear()가 유지할 capacity 자체가 없으므로 이어지는 reserve가 매번 새로 할당한다.
     out.blurs.clear();
     out.blurs.reserve(in.blurs.size());
     for (const auto& blur : in.blurs) {

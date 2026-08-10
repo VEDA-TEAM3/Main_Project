@@ -39,7 +39,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \
         libmosquitto1 \
         ca-certificates \
-        procps \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m veda_user

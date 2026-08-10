@@ -59,12 +59,12 @@ public:
      * @brief   워커 루프와 대기 중인 next()를 깨우고, 진행 중인 RTSP 세션을 즉시 취소 (멱등)
      *
      * @details
-     * 진행 중인 클라이언트에 cancel() 을 걸어 소켓에 shutdown(SHUT_RDWR) 을 하므로 블로킹 중인
-     * recv() 가 즉시 풀린다 → 소멸자의 join 이 recv 타임아웃만큼 지연되지 않는다.
+     * 진행 중인 클라이언트에 cancel()을 걸어 소켓에 shutdown(SHUT_RDWR)을 하므로 블로킹 중인
+     * recv()가 즉시 풀린다 → 소멸자의 join이 recv 타임아웃만큼 지연되지 않는다.
      *
-     * @warning 취소 '플래그'만으로는 부족하다: 스트림이 건강한 동안에는 recv() 가 계속 성공해
-     *          타임아웃이 나지 않으므로 run() 이 반환하지 않고 join 이 무한 대기한다
-     *          (그래서 소켓 shutdown 이 반드시 함께 필요함)
+     * @warning 취소 플래그만으로는 부족하다: 스트림이 건강한 동안에는 recv()가 계속 성공해
+     *          타임아웃이 나지 않으므로 run()이 반환하지 않고 join이 무한 대기한다.
+     *          (그래서 소켓 shutdown이 반드시 함께 필요함)
      */
     void stop() noexcept override;
 
@@ -84,13 +84,10 @@ private:
 
     /**
      * @name 설정으로 빠진 튜닝 값들 (AppConfig)
-     * @details
-     * 예전엔 static constexpr 였음
-     * 기본값은 performance/compute-server.md에 측정된 값 그대로
      *
-     * @note ringCapacity_가 런타임 값이 되면서 인덱스 계산의 % 가 컴파일 타임에
+     * @note ringCapacity_가 런타임 값이 되면서 인덱스 계산의 %가 컴파일 타임에
      *       비트마스크로 접히지 않게 됨
-     *       콜백/next() 당 각 1회씩이고 실측 처리율이 5fps 수준이라 무시 가능한 수준 (측정 지표에 변화 없음)
+     *       콜백/next()당 각 1회씩이고 실측 처리율이 5fps 수준이라 무시 가능한 수준
      * @{
      */
     std::size_t ringCapacity_;
@@ -103,10 +100,10 @@ private:
     std::atomic<bool> stopping_{false};
     std::thread worker_;
 
-    /// @name 진행 중인 RTSP 세션 취소 경로
+    /// @name    진행 중인 RTSP 세션 취소 경로
     /// @details stop()이 워커가 붙들고 있는 클라이언트에 cancel()을 걸 수 있도록 포인터를 공유한다.
-    ///          activeClient_는 clientMutex_로 보호되며, 워커는 클라이언트가 파괴되기 '전에' 반드시
-    ///          이 포인터를 nullptr 로 지운다 → stop()이 이미 죽은 객체를 만지는 UAF를 막음
+    ///          activeClient_는 clientMutex_로 보호되며, 워커는 클라이언트가 파괴되기 전에 반드시
+    ///          이 포인터를 nullptr로 지운다 → stop()이 이미 죽은 객체를 만지는 UAF를 막음
     /// @{
     std::mutex clientMutex_;
     RtspClientV2* activeClient_ = nullptr;
