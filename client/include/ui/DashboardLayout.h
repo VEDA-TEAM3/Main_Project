@@ -42,18 +42,23 @@ inline void alignDeviceStatusCardWidth(UiMainWindow* ui) {
 }
 
 template <typename UiMainWindow>
-inline void orderBottomSectionWidgets(UiMainWindow* ui) {
+inline void orderSectionWidgets(UiMainWindow* ui) {
     if (!ui) {
         return;
     }
+
+    ui->topSectionLayout->removeWidget(ui->cctvCard);
+    ui->topSectionLayout->removeWidget(ui->mapCard);
+    ui->topSectionLayout->insertWidget(0, ui->mapCard);
+    ui->topSectionLayout->insertWidget(1, ui->cctvCard);
 
     ui->bottomSectionLayout->removeWidget(ui->objectListCard);
     ui->bottomSectionLayout->removeWidget(ui->eventLogCard);
     ui->bottomSectionLayout->removeWidget(ui->deviceStatusCard);
 
-    ui->bottomSectionLayout->insertWidget(0, ui->deviceStatusCard);
-    ui->bottomSectionLayout->insertWidget(1, ui->objectListCard);
-    ui->bottomSectionLayout->insertWidget(2, ui->eventLogCard);
+    ui->bottomSectionLayout->insertWidget(0, ui->objectListCard);
+    ui->bottomSectionLayout->insertWidget(1, ui->eventLogCard);
+    ui->bottomSectionLayout->insertWidget(2, ui->deviceStatusCard);
 }
 
 template <typename UiMainWindow>
@@ -93,19 +98,19 @@ inline void apply(QMainWindow* window, UiMainWindow* ui) {
     ui->deviceStatusCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     ui->objectListCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    orderBottomSectionWidgets(ui);
+    orderSectionWidgets(ui);
 
     ui->mainContentLayout->setStretch(0, 0);
     ui->mainContentLayout->setStretch(1, 1);
     ui->mainContentLayout->setStretch(2, 0);
     ui->mainContentLayout->setStretch(3, 0);
 
-    ui->topSectionLayout->setStretch(0, 9);
-    ui->topSectionLayout->setStretch(1, 10);
+    ui->topSectionLayout->setStretch(0, 10);
+    ui->topSectionLayout->setStretch(1, 9);
 
-    ui->bottomSectionLayout->setStretch(0, 47);
-    ui->bottomSectionLayout->setStretch(1, 25);
-    ui->bottomSectionLayout->setStretch(2, 28);
+    ui->bottomSectionLayout->setStretch(0, 25);
+    ui->bottomSectionLayout->setStretch(1, 28);
+    ui->bottomSectionLayout->setStretch(2, 47);
 
     ui->cctvCardLayout->setStretch(0, 0);
     ui->cctvCardLayout->setStretch(1, 1);
