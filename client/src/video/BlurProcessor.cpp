@@ -284,15 +284,6 @@ void BlurProcessor::submitFrame(BlurFrameData frame) {
 void BlurProcessor::observeVideoBuffer(const GstBuffer* buffer) { utcClockMapper_.observe(buffer); }
 
 /**
- * @brief        sink 직전 영상 버퍼의 PTS를 현재 영상 UTC 기준으로 변환합니다.
- * @param buffer framewatch에서 관찰한 디코딩 완료 영상 버퍼
- * @return       변환 가능한 경우 영상 UTC와 sender clock 사용 여부
- */
-std::optional<VideoUtcTimestamp> BlurProcessor::timestampForVideoBuffer(const GstBuffer* buffer) {
-    return utcClockMapper_.timestampFor(buffer);
-}
-
-/**
  * @brief 저장된 블러 좌표와 동기화 상태를 초기화합니다.
  */
 void BlurProcessor::clear() {

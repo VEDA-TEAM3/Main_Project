@@ -30,6 +30,5 @@ signals:
     void statusChanged(const QString& status);
     void errorOccurred(const QString& error);
     void loadingChanged(bool loading);
-    void streamDataReceived();
     void firstFrameReceived();
 };

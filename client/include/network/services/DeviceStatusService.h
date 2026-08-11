@@ -39,9 +39,6 @@ signals:
     void blurFrameReceived(BlurFrameData frame);
     void centralEventReceived(CentralEventData event);
     void brokerConnectionChanged(bool connected);
-    void controllerOnlineChanged(bool online, QString node);
-    void feedbackFailed(int channelIndex, QString detail);
-    void protocolError(QString detail);
 
 private:
     void setupGateway();

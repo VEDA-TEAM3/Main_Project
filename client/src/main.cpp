@@ -26,7 +26,7 @@ namespace {
  */
 void configureGstreamerMinGwRuntime() {
 #ifdef Q_OS_WIN
-    const QString moduleDirectory = QDir(QDir::tempPath()).filePath(QStringLiteral("QtDemo/gio-modules"));
+    const QString moduleDirectory = QDir(QDir::tempPath()).filePath(QStringLiteral("Qtcctvclient/gio-modules"));
     if (!QDir().mkpath(moduleDirectory)) {
         qWarning().noquote()
             << QStringLiteral("[GStreamer] Failed to create isolated GIO module directory: %1").arg(moduleDirectory);

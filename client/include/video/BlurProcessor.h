@@ -21,7 +21,6 @@ public:
     void setTargetsEnabled(bool faceEnabled, bool licensePlateEnabled);
     void submitFrame(BlurFrameData frame);
     void observeVideoBuffer(const GstBuffer* buffer);
-    std::optional<VideoUtcTimestamp> timestampForVideoBuffer(const GstBuffer* buffer);
     void clear();
     void apply(GstVideoFrame& frame);
 

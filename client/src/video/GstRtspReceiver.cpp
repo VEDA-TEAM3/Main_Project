@@ -658,7 +658,6 @@ void GstRtspReceiver::markFirstPacket() {
     const qint64 elapsed = startupTimer_.isValid() ? startupTimer_.elapsed() : 0;
 
     emit statusChanged(QString("First RTP/H264 packet in %1 ms").arg(elapsed));
-    emit streamDataReceived();
 }
 
 /**

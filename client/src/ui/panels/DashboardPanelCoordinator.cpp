@@ -34,7 +34,7 @@ DashboardPanelCoordinator::DashboardPanelCoordinator(DeviceStatusPanel* deviceSt
 
 /**
  * @brief          장비 상태 service의 병합된 UI 상태를 장비 패널에 연결합니다.
- * @param service  demo 또는 실제 MQTT gateway를 소유한 service
+ * @param service  MQTT gateway를 소유한 service
  */
 void DashboardPanelCoordinator::bindDeviceStatusService(DeviceStatusService* service) {
     if (!service || !deviceStatusPanel_) {

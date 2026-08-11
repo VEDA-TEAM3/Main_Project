@@ -19,7 +19,7 @@ constexpr int uiFlushIntervalMsec = 50;
 /**
  * @brief                 장비 상태 service를 생성하고 UI 갱신 병합기를
  * 준비합니다.
- * @param gatewayFactory  실제 MQTT 또는 demo gateway 생성 factory
+ * @param gatewayFactory  장비 상태 gateway 생성 factory
  * @param channelCount    설정된 전체 채널 수
  * @param parent          Qt 객체 소유권을 연결할 부모 객체
  */
@@ -31,7 +31,7 @@ DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFact
 /**
  * @brief                  장비 상태 service를 교체 가능한 실시간 프레임 버퍼와
  * 함께 생성합니다.
- * @param gatewayFactory   실제 MQTT 또는 demo gateway 생성 factory
+ * @param gatewayFactory   장비 상태 gateway 생성 factory
  * @param blurFrameBuffer  채널별 최신 블러 프레임 버퍼
  * @param riskFrameBuffer  최신 위험 프레임 버퍼
  * @param channelCount     설정된 전체 채널 수
@@ -242,7 +242,6 @@ void DeviceStatusService::handleReport(DeviceStatusReport report) {
             handleChannelStatusSnapshot(report);
             return;
         case DeviceStatusReportType::ControllerOnline:
-            emit controllerOnlineChanged(true, report.node);
             return;
         case DeviceStatusReportType::SensorOnline:
             handleSensorHealth(report, SensorHealth::Online);
@@ -260,7 +259,6 @@ void DeviceStatusService::handleReport(DeviceStatusReport report) {
             handleFailedFeedback(report);
             return;
         case DeviceStatusReportType::ProtocolError:
-            emit protocolError(report.detail);
             return;
     }
 }
@@ -272,7 +270,6 @@ void DeviceStatusService::handleReport(DeviceStatusReport report) {
  */
 void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& report) {
     if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
-        emit protocolError(QStringLiteral("Invalid channel status snapshot channel"));
         return;
     }
 
@@ -298,7 +295,6 @@ void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& 
 
 void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, SensorHealth health) {
     if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
-        emit protocolError(QStringLiteral("Invalid sensor health channel"));
         return;
     }
 
@@ -313,7 +309,6 @@ void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, S
 
 void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& report) {
     if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
-        emit protocolError(QStringLiteral("Invalid acknowledged device feedback channel"));
         return;
     }
 
@@ -332,7 +327,6 @@ void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& r
  */
 void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& report) {
     if (report.channelIndex < 0 || report.channelIndex >= channelCount_ || !report.hasOutputState) {
-        emit protocolError(QStringLiteral("Invalid confirmed device feedback"));
         return;
     }
 
@@ -355,7 +349,6 @@ void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& repo
  */
 void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report) {
     if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
-        emit protocolError(QStringLiteral("Invalid failed device feedback channel"));
         return;
     }
 
@@ -366,7 +359,6 @@ void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report)
 
     channelStatuses_.insert(status.channelIndex, status);
     queueChannelStatus(std::move(status));
-    emit feedbackFailed(report.channelIndex, report.detail);
 }
 
 /**
