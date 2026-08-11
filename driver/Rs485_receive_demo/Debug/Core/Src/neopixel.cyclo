@@ -1,0 +1,6 @@
+../Core/Src/neopixel.c:315:13:encode_byte	3
+../Core/Src/neopixel.c:331:16:dma_stream_disable	4
+../Core/Src/neopixel.c:366:26:ws2812_transmit	6
+../Core/Src/neopixel.c:438:17:timer_input_clock_hz	2
+../Core/Src/neopixel.c:449:19:neopixel_init	4
+../Core/Src/neopixel.c:524:19:neopixel_show_solid	8
