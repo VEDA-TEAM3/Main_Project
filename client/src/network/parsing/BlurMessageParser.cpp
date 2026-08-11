@@ -8,7 +8,6 @@
 #include <utility>
 
 namespace {
-constexpr int blurDeviceChannelCount = 4;
 constexpr int blurProtocolVersion = 1;
 constexpr qsizetype maximumBlurRegionsPerFrame = 64;
 
@@ -59,11 +58,12 @@ bool readBlurFiniteNumber(const QJsonObject& object, const QString& name, double
  * @param topicWireChannel 토픽 wildcard에서 검증한 채널 인덱스
  * @param frame   변환된 블러 프레임
  * @param error   실패 원인
+ * @param channelCount 설정된 전체 채널 수
  * @return        변환에 성공하면 true
  */
 bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, int topicWireChannel,
-                              BlurFrameData& frame, QString& error) {
-    if (topicWireChannel < 0 || topicWireChannel >= blurDeviceChannelCount) {
+                              BlurFrameData& frame, QString& error, int channelCount) {
+    if (topicWireChannel < 0 || topicWireChannel >= channelCount) {
         error = QStringLiteral("Invalid blur topic: %1").arg(topic);
         return false;
     }
@@ -82,7 +82,7 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
     if (!readBlurInteger(object, QStringLiteral("v"), version) || version != blurProtocolVersion ||
         !readBlurInteger(object, QStringLiteral("ts"), timestamp) || timestamp <= 0 ||
         !readBlurInteger(object, QStringLiteral("ch"), payloadChannel) || payloadChannel < 0 ||
-        payloadChannel >= blurDeviceChannelCount) {
+        payloadChannel >= channelCount) {
         error = QStringLiteral("Invalid v, ts or ch field on %1").arg(topic);
         return false;
     }

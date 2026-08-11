@@ -1,6 +1,6 @@
 #pragma once
 
-#include <array>
+#include <QVector>
 #include <memory>
 
 #include "network/gateways/DeviceStatusGateway.h"
@@ -40,7 +40,7 @@ private:
     std::unique_ptr<MqttTransport> transport_;
     BlurFrameDispatcher* blurDispatcher_ = nullptr;
     RiskFrameDispatcher* riskDispatcher_ = nullptr;
-    std::array<qint64, 4> lastBlurDebugLogMsec_{};
+    QVector<qint64> lastBlurDebugLogMsec_;
     qint64 lastRiskDebugLogMsec_ = 0;
     int blurDebugLogIntervalMsec_ = 0;
     int riskDebugLogIntervalMsec_ = 0;

@@ -13,13 +13,13 @@
 
 namespace {
 /**
- * @brief               픽셀이 둥근 사각형 블러 영역 안에 포함되는지 확인합니다.
- * @param x             블러 영역 내부 X 좌표
- * @param y             블러 영역 내부 Y 좌표
- * @param width         블러 영역 너비
- * @param height        블러 영역 높이
- * @param cornerRadius  모서리 반지름
- * @return              둥근 사각형 안쪽이면 true
+ * @brief          픽셀이 원형 블러 영역 안에 포함되는지 확인합니다.
+ * @param x        픽셀 X 좌표
+ * @param y        픽셀 Y 좌표
+ * @param centerX  원의 중심 X 좌표
+ * @param centerY  원의 중심 Y 좌표
+ * @param radius   원의 반지름
+ * @return         원 안쪽이면 true
  */
 bool isInsideCircularRegion(int x, int y, double centerX, double centerY, double radius) {
     const double deltaX = static_cast<double>(x) + 0.5 - centerX;

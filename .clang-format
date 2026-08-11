@@ -22,6 +22,7 @@ DerivePointerAlignment: false
 SpaceBeforeParens: ControlStatements
 SpaceAfterCStyleCast: false
 SpacesBeforeTrailingComments: 2
+ReflowComments: false
 
 SortIncludes: true
 IncludeBlocks: Regroup

@@ -28,6 +28,7 @@ struct MqttRuntimeConfig {
     MqttConnectionConfig connection;
     MqttTopicsConfig topics;
     MqttDispatcherConfig dispatcher;
+    int channelCount = 0;
     int blurDebugLogIntervalMsec = 0;
     int riskDebugLogIntervalMsec = 0;
     qsizetype maximumDebugPayloadLength = 0;

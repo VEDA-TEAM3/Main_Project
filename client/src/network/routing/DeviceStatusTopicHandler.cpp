@@ -8,7 +8,6 @@
 #include "network/routing/MqttTopicFilter.h"
 
 namespace {
-constexpr int deviceChannelCount = 8;
 constexpr int protocolVersion = 1;
 
 enum class StatusProtocol {
@@ -71,16 +70,16 @@ bool parseChannelOutputState(const QJsonObject& object, DeviceOutputState& outpu
     return true;
 }
 
-int channelIndexForCentralStatus(qint64 channelId) {
-    return channelId >= 1 && channelId <= deviceChannelCount ? static_cast<int>(channelId - 1) : -1;
+int channelIndexForCentralStatus(qint64 channelId, int channelCount) {
+    return channelId >= 1 && channelId <= channelCount ? static_cast<int>(channelId - 1) : -1;
 }
 
-int channelIndexForControllerStatus(qint64 channelId) {
-    return channelId >= 0 && channelId < deviceChannelCount ? static_cast<int>(channelId) : -1;
+int channelIndexForControllerStatus(qint64 channelId, int channelCount) {
+    return channelId >= 0 && channelId < channelCount ? static_cast<int>(channelId) : -1;
 }
 
 bool parseChannelStatusPayload(const QByteArray& payload, const QString& topic, int topicChannelIndex,
-                               DeviceStatusReport& report, QString& error) {
+                               DeviceStatusReport& report, QString& error, int channelCount) {
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
@@ -99,7 +98,7 @@ bool parseChannelStatusPayload(const QByteArray& payload, const QString& topic, 
         return false;
     }
 
-    report.channelIndex = channelIndexForControllerStatus(channelId);
+    report.channelIndex = channelIndexForControllerStatus(channelId, channelCount);
     if (report.channelIndex < 0 || report.channelIndex != topicChannelIndex) {
         error = QStringLiteral("Topic/payload channel mismatch on %1").arg(topic);
         return false;
@@ -128,7 +127,7 @@ bool parseChannelStatusPayload(const QByteArray& payload, const QString& topic, 
 }
 
 bool parseStatusPayload(const QByteArray& payload, const QString& topic, int topicChannelIndex, StatusProtocol protocol,
-                        DeviceStatusReport& report, QString& error) {
+                        DeviceStatusReport& report, QString& error, int channelCount) {
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
@@ -172,8 +171,9 @@ bool parseStatusPayload(const QByteArray& payload, const QString& topic, int top
             return false;
         }
 
-        report.channelIndex = protocol == StatusProtocol::Controller ? channelIndexForControllerStatus(channelId)
-                                                                     : channelIndexForCentralStatus(channelId);
+        report.channelIndex = protocol == StatusProtocol::Controller
+                                  ? channelIndexForControllerStatus(channelId, channelCount)
+                                  : channelIndexForCentralStatus(channelId, channelCount);
         if (protocol == StatusProtocol::Controller && topicChannelIndex >= 0 &&
             report.channelIndex != topicChannelIndex) {
             error = QStringLiteral("Topic/payload channel mismatch on %1").arg(topic);
@@ -243,8 +243,8 @@ bool parseStatusPayload(const QByteArray& payload, const QString& topic, int top
 }
 
 bool parseAlivePayload(const QByteArray& payload, const QString& topic, int topicChannelIndex,
-                       DeviceStatusReport& report, QString& error) {
-    if (topicChannelIndex < 0 || topicChannelIndex >= deviceChannelCount) {
+                       DeviceStatusReport& report, QString& error, int channelCount) {
+    if (topicChannelIndex < 0 || topicChannelIndex >= channelCount) {
         error = QStringLiteral("Invalid sensor alive topic: %1").arg(topic);
         return false;
     }
@@ -263,8 +263,8 @@ bool parseAlivePayload(const QByteArray& payload, const QString& topic, int topi
     return true;
 }
 
-bool parseCentralEventPayload(const QByteArray& payload, const QString& topic, CentralEventData& event,
-                              QString& error) {
+bool parseCentralEventPayload(const QByteArray& payload, const QString& topic, CentralEventData& event, QString& error,
+                              int channelCount) {
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
@@ -293,7 +293,7 @@ bool parseCentralEventPayload(const QByteArray& payload, const QString& topic, C
         return false;
     }
 
-    event.channelIndex = channelIndexForCentralStatus(channelId);
+    event.channelIndex = channelIndexForCentralStatus(channelId, channelCount);
     if (event.channelIndex < 0) {
         error = QStringLiteral("channelId out of range on %1").arg(topic);
         return false;
@@ -317,7 +317,8 @@ bool parseCentralEventPayload(const QByteArray& payload, const QString& topic, C
 }  // namespace
 
 /** @brief JSON에서 검증한 MQTT 구독 설정으로 상태 핸들러를 생성합니다. */
-DeviceStatusTopicHandler::DeviceStatusTopicHandler(MqttTopicsConfig config) : config_(std::move(config)) {}
+DeviceStatusTopicHandler::DeviceStatusTopicHandler(MqttTopicsConfig config, int channelCount)
+    : config_(std::move(config)), channelCount_(channelCount) {}
 
 /** @brief 장비 상태, 센서 생존 및 중앙 이벤트 구독 목록을 반환합니다. */
 QVector<MqttSubscription> DeviceStatusTopicHandler::subscriptions() const {
@@ -338,7 +339,7 @@ bool DeviceStatusTopicHandler::handle(const QByteArray& payload, const QString& 
                                       QString& error) const {
     if (MqttTopicFilter::matches(config_.centralEvent.topicFilter, topic)) {
         CentralEventData event;
-        if (!parseCentralEventPayload(payload, topic, event, error)) {
+        if (!parseCentralEventPayload(payload, topic, event, error, channelCount_)) {
             return false;
         }
 
@@ -359,14 +360,15 @@ bool DeviceStatusTopicHandler::handle(const QByteArray& payload, const QString& 
     DeviceStatusReport report;
     bool parsed = false;
     if (MqttTopicFilter::matches(config_.centralStatus.topicFilter, topic)) {
-        parsed = parseStatusPayload(payload, topic, -1, StatusProtocol::Central, report, error);
+        parsed = parseStatusPayload(payload, topic, -1, StatusProtocol::Central, report, error, channelCount_);
     } else if (MqttTopicFilter::matches(config_.controllerStatus.topicFilter, topic)) {
         const int channelIndex =
-            MqttTopicFilter::integerWildcardValue(config_.controllerStatus.topicFilter, topic, 0, 7);
-        parsed = parseChannelStatusPayload(payload, topic, channelIndex, report, error);
+            MqttTopicFilter::integerWildcardValue(config_.controllerStatus.topicFilter, topic, 0, channelCount_ - 1);
+        parsed = parseChannelStatusPayload(payload, topic, channelIndex, report, error, channelCount_);
     } else if (MqttTopicFilter::matches(config_.sensorAlive.topicFilter, topic)) {
-        const int channelIndex = MqttTopicFilter::integerWildcardValue(config_.sensorAlive.topicFilter, topic, 0, 7);
-        parsed = parseAlivePayload(payload, topic, channelIndex, report, error);
+        const int channelIndex =
+            MqttTopicFilter::integerWildcardValue(config_.sensorAlive.topicFilter, topic, 0, channelCount_ - 1);
+        parsed = parseAlivePayload(payload, topic, channelIndex, report, error, channelCount_);
     }
 
     if (!parsed) {

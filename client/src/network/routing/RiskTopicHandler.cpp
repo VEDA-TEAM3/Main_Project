@@ -5,7 +5,8 @@
 #include "network/parsing/RiskMessageParser.h"
 #include "network/routing/MqttTopicFilter.h"
 
-RiskTopicHandler::RiskTopicHandler(MqttSubscription subscription) : subscription_(std::move(subscription)) {}
+RiskTopicHandler::RiskTopicHandler(MqttSubscription subscription, int channelCount)
+    : subscription_(std::move(subscription)), channelCount_(channelCount) {}
 
 /** @brief 통합 위험 프레임 구독을 반환합니다. */
 QVector<MqttSubscription> RiskTopicHandler::subscriptions() const { return {subscription_}; }
@@ -19,7 +20,7 @@ bool RiskTopicHandler::matchesTopic(const QString& topic) const {
 bool RiskTopicHandler::handle(const QByteArray& payload, const QString& topic, MqttMessageBatch& messages,
                               QString& error) const {
     RiskFrameData frame;
-    if (!RiskMessageParser::parse(payload, topic, frame, error)) {
+    if (!RiskMessageParser::parse(payload, topic, frame, error, channelCount_)) {
         return false;
     }
 

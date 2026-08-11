@@ -9,7 +9,6 @@
 namespace {
 constexpr int riskProtocolVersion = 2;
 constexpr int minimumZoneId = 0;
-constexpr int maximumZoneId = 7;
 
 bool readInteger(const QJsonObject& object, const QString& name, qint64& value) {
     const QJsonValue jsonValue = object.value(name);
@@ -61,9 +60,9 @@ DigitalTwinRiskLevel highestRiskLevel(DigitalTwinRiskLevel first, DigitalTwinRis
     return static_cast<int>(first) >= static_cast<int>(second) ? first : second;
 }
 
-int parseZoneId(const QJsonObject& object) {
+int parseZoneId(const QJsonObject& object, int channelCount) {
     qint64 zoneId = -1;
-    if (!readInteger(object, QStringLiteral("zoneId"), zoneId) || zoneId < minimumZoneId || zoneId > maximumZoneId) {
+    if (!readInteger(object, QStringLiteral("zoneId"), zoneId) || zoneId < minimumZoneId || zoneId >= channelCount) {
         return -1;
     }
     return static_cast<int>(zoneId);
@@ -76,9 +75,16 @@ int parseZoneId(const QJsonObject& object) {
  * @param topic   수신 토픽
  * @param frame   변환된 위험 프레임
  * @param error   검증 실패 원인
+ * @param channelCount 설정된 전체 채널 수
  * @return        계약 검증과 변환에 성공하면 true
  */
-bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, RiskFrameData& frame, QString& error) {
+bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, RiskFrameData& frame, QString& error,
+                              int channelCount) {
+    if (channelCount <= 0) {
+        error = QStringLiteral("Risk channel count must be positive");
+        return false;
+    }
+
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
@@ -151,7 +157,7 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
             objectClass == QStringLiteral("human") ? QStringLiteral("Human") : QStringLiteral("Vehicle");
         parsedObject.worldPosition = QPointF(x, y);
         parsedObject.riskLevel = objectRiskLevel;
-        parsedObject.zoneId = parseZoneId(sourceObject);
+        parsedObject.zoneId = parseZoneId(sourceObject, channelCount);
 
         qint64 nearestId = 0;
         if (readInteger(sourceObject, QStringLiteral("nearest"), nearestId) && nearestId >= 0) {

@@ -10,7 +10,6 @@
 #include <QVBoxLayout>
 
 namespace {
-constexpr int deviceChannelCount = 8;
 constexpr int visibleChannelCount = 4;
 constexpr int deviceStatusIconSize = 22;
 
@@ -42,13 +41,7 @@ QString channelHealthProperty(const DeviceChannelStatus& status) {
  * @param parent  Qt 객체 소유권을 연결할 부모 위젯
  */
 DeviceStatusPanel::DeviceStatusPanel(QWidget* parent) : QWidget(parent) {
-    channelStatuses_.reserve(deviceChannelCount);
-
-    for (int channelIndex = 0; channelIndex < deviceChannelCount; ++channelIndex) {
-        DeviceChannelStatus status;
-        status.channelIndex = channelIndex;
-        channelStatuses_.append(status);
-    }
+    setChannelCount(visibleChannelCount);
 
     setupUi();
 
@@ -58,12 +51,33 @@ DeviceStatusPanel::DeviceStatusPanel(QWidget* parent) : QWidget(parent) {
 }
 
 /**
+ * @brief              패널이 보관할 전체 장비 채널 수를 설정합니다.
+ * @param channelCount 설정된 전체 채널 수
+ */
+void DeviceStatusPanel::setChannelCount(int channelCount) {
+    const int normalizedChannelCount = qMax(visibleChannelCount, channelCount);
+    if (channelStatuses_.size() == normalizedChannelCount) {
+        return;
+    }
+
+    channelStatuses_.resize(normalizedChannelCount);
+    for (int channelIndex = 0; channelIndex < normalizedChannelCount; ++channelIndex) {
+        channelStatuses_[channelIndex].channelIndex = channelIndex;
+    }
+
+    areaIndex_ = qMin(areaIndex_, normalizedChannelCount / visibleChannelCount - 1);
+    for (int localChannelIndex = 0; localChannelIndex < channelWidgets_.size(); ++localChannelIndex) {
+        updateChannelWidgets(localChannelIndex);
+    }
+}
+
+/**
  * @brief            패널에 표시할 CCTV 구역을 변경합니다.
- * @param
- * areaIndex  0부터 시작하는 구역 인덱스
+ *
+ * @param areaIndex  0부터 시작하는 구역 인덱스
  */
 void DeviceStatusPanel::setAreaIndex(int areaIndex) {
-    if (areaIndex < 0 || areaIndex >= deviceChannelCount / visibleChannelCount || areaIndex_ == areaIndex) {
+    if (areaIndex < 0 || areaIndex >= channelStatuses_.size() / visibleChannelCount || areaIndex_ == areaIndex) {
         return;
     }
 

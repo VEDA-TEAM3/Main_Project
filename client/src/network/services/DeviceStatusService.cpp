@@ -12,7 +12,6 @@
 #include "network/realtime/LatestRiskFrameBuffer.h"
 
 namespace {
-constexpr int statusServiceChannelCount = 8;
 constexpr int maximumRecentReportKeys = 128;
 constexpr int uiFlushIntervalMsec = 50;
 }  // namespace
@@ -21,11 +20,13 @@ constexpr int uiFlushIntervalMsec = 50;
  * @brief                 장비 상태 service를 생성하고 UI 갱신 병합기를
  * 준비합니다.
  * @param gatewayFactory  실제 MQTT 또는 demo gateway 생성 factory
+ * @param channelCount    설정된 전체 채널 수
  * @param parent          Qt 객체 소유권을 연결할 부모 객체
  */
-DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory, QObject* parent)
+DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory, int channelCount,
+                                         QObject* parent)
     : DeviceStatusService(std::move(gatewayFactory), std::make_shared<LatestBlurFrameBuffer>(),
-                          std::make_shared<LatestRiskFrameBuffer>(), parent) {}
+                          std::make_shared<LatestRiskFrameBuffer>(), channelCount, parent) {}
 
 /**
  * @brief                  장비 상태 service를 교체 가능한 실시간 프레임 버퍼와
@@ -33,15 +34,18 @@ DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFact
  * @param gatewayFactory   실제 MQTT 또는 demo gateway 생성 factory
  * @param blurFrameBuffer  채널별 최신 블러 프레임 버퍼
  * @param riskFrameBuffer  최신 위험 프레임 버퍼
+ * @param channelCount     설정된 전체 채널 수
  * @param parent           Qt 객체 소유권을 연결할 부모 객체
  */
 DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory,
                                          std::shared_ptr<BlurFrameBuffer> blurFrameBuffer,
-                                         std::shared_ptr<RiskFrameBuffer> riskFrameBuffer, QObject* parent)
+                                         std::shared_ptr<RiskFrameBuffer> riskFrameBuffer, int channelCount,
+                                         QObject* parent)
     : QObject(parent),
       gatewayFactory_(std::move(gatewayFactory)),
       blurFrameBuffer_(blurFrameBuffer ? std::move(blurFrameBuffer) : std::make_shared<LatestBlurFrameBuffer>()),
-      riskFrameBuffer_(riskFrameBuffer ? std::move(riskFrameBuffer) : std::make_shared<LatestRiskFrameBuffer>()) {
+      riskFrameBuffer_(riskFrameBuffer ? std::move(riskFrameBuffer) : std::make_shared<LatestRiskFrameBuffer>()),
+      channelCount_(qMax(0, channelCount)) {
     qRegisterMetaType<DeviceOutputState>("DeviceOutputState");
     qRegisterMetaType<DeviceStatusReport>("DeviceStatusReport");
     qRegisterMetaType<DeviceChannelStatus>("DeviceChannelStatus");
@@ -213,7 +217,7 @@ void DeviceStatusService::handleBrokerConnection(bool connected) {
         return;
     }
 
-    for (int channelIndex = 0; channelIndex < statusServiceChannelCount; ++channelIndex) {
+    for (int channelIndex = 0; channelIndex < channelCount_; ++channelIndex) {
         DeviceChannelStatus status = channelStatuses_.value(channelIndex);
         status.channelIndex = channelIndex;
         status.sensorHealth = SensorHealth::Unknown;
@@ -267,7 +271,7 @@ void DeviceStatusService::handleReport(DeviceStatusReport report) {
  * @param report  shared/Contract.h의 ChannelStatus 규약으로 검증된 보고
  */
 void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& report) {
-    if (report.channelIndex < 0 || report.channelIndex >= statusServiceChannelCount) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
         emit protocolError(QStringLiteral("Invalid channel status snapshot channel"));
         return;
     }
@@ -293,7 +297,7 @@ void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& 
 }
 
 void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, SensorHealth health) {
-    if (report.channelIndex < 0 || report.channelIndex >= statusServiceChannelCount) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
         emit protocolError(QStringLiteral("Invalid sensor health channel"));
         return;
     }
@@ -308,7 +312,7 @@ void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, S
 }
 
 void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& report) {
-    if (report.channelIndex < 0 || report.channelIndex >= statusServiceChannelCount) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
         emit protocolError(QStringLiteral("Invalid acknowledged device feedback channel"));
         return;
     }
@@ -327,7 +331,7 @@ void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& r
  * @param report  state가 검증된 성공 피드백 보고
  */
 void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& report) {
-    if (report.channelIndex < 0 || report.channelIndex >= statusServiceChannelCount || !report.hasOutputState) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_ || !report.hasOutputState) {
         emit protocolError(QStringLiteral("Invalid confirmed device feedback"));
         return;
     }
@@ -350,7 +354,7 @@ void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& repo
  * @param report  UART timeout 등 상태 확인 실패 보고
  */
 void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report) {
-    if (report.channelIndex < 0 || report.channelIndex >= statusServiceChannelCount) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
         emit protocolError(QStringLiteral("Invalid failed device feedback channel"));
         return;
     }

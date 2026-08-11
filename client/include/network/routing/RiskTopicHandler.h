@@ -4,7 +4,7 @@
 
 class RiskTopicHandler final : public MqttTopicHandler {
 public:
-    explicit RiskTopicHandler(MqttSubscription subscription);
+    RiskTopicHandler(MqttSubscription subscription, int channelCount);
 
     QVector<MqttSubscription> subscriptions() const override;
     bool matchesTopic(const QString& topic) const override;
@@ -14,4 +14,5 @@ public:
 
 private:
     MqttSubscription subscription_;
+    int channelCount_ = 0;
 };

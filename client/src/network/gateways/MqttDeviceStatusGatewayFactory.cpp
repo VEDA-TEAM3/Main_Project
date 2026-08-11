@@ -17,9 +17,9 @@ std::shared_ptr<DeviceStatusGateway> MqttDeviceStatusGatewayFactory::create(QObj
     auto transportFactory = std::make_shared<QtMqttTransportFactory>(config_.connection);
 
     QVector<std::shared_ptr<MqttTopicHandler>> handlers;
-    handlers.append(std::make_shared<DeviceStatusTopicHandler>(config_.topics));
-    handlers.append(std::make_shared<RiskTopicHandler>(config_.topics.risk));
-    handlers.append(std::make_shared<BlurTopicHandler>(config_.topics.blur));
+    handlers.append(std::make_shared<DeviceStatusTopicHandler>(config_.topics, config_.channelCount));
+    handlers.append(std::make_shared<RiskTopicHandler>(config_.topics.risk, config_.channelCount));
+    handlers.append(std::make_shared<BlurTopicHandler>(config_.topics.blur, config_.channelCount));
     auto messageRouter = std::make_shared<MqttMessageRouter>(std::move(handlers));
 
     return std::make_shared<MqttDeviceStatusGateway>(std::move(transportFactory), std::move(messageRouter), config_,

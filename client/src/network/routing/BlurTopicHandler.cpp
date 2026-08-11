@@ -5,7 +5,8 @@
 #include "network/parsing/BlurMessageParser.h"
 #include "network/routing/MqttTopicFilter.h"
 
-BlurTopicHandler::BlurTopicHandler(MqttSubscription subscription) : subscription_(std::move(subscription)) {}
+BlurTopicHandler::BlurTopicHandler(MqttSubscription subscription, int channelCount)
+    : subscription_(std::move(subscription)), channelCount_(channelCount) {}
 
 /** @brief 채널별 블러 메타데이터 구독을 반환합니다. */
 QVector<MqttSubscription> BlurTopicHandler::subscriptions() const { return {subscription_}; }
@@ -19,8 +20,9 @@ bool BlurTopicHandler::matchesTopic(const QString& topic) const {
 bool BlurTopicHandler::handle(const QByteArray& payload, const QString& topic, MqttMessageBatch& messages,
                               QString& error) const {
     BlurFrameData frame;
-    const int channelIndex = MqttTopicFilter::integerWildcardValue(subscription_.topicFilter, topic, 0, 3);
-    if (!BlurMessageParser::parse(payload, topic, channelIndex, frame, error)) {
+    const int channelIndex =
+        MqttTopicFilter::integerWildcardValue(subscription_.topicFilter, topic, 0, channelCount_ - 1);
+    if (!BlurMessageParser::parse(payload, topic, channelIndex, frame, error, channelCount_)) {
         return false;
     }
 

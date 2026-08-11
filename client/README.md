@@ -1,11 +1,12 @@
 # Wise AI 기반 주차장 디지털 트윈 관제 시스템
 
-Qt 6와 GStreamer로 구현한 4채널 주차장 안전 관제 애플리케이션입니다. RTSP 영상, MQTT 장비 상태,
-위험 객체 좌표와 블러 메타데이터를 하나의 대시보드에서 실시간으로 표시합니다.
+Qt 6와 GStreamer로 구현한 다구역 주차장 안전 관제 애플리케이션입니다. 각 구역은 4개 RTSP 채널로
+구성되며, MQTT 장비 상태, 위험 객체 좌표와 블러 메타데이터를 하나의 대시보드에서 실시간으로 표시합니다.
 
 ## 핵심 기능
 
-- GStreamer 기반 RTSP CCTV 4채널 수신 및 자동 재연결
+- GStreamer 기반 구역별 RTSP CCTV 4채널 수신 및 자동 재연결
+- 설정 파일 기반 구역·채널 확장과 구역 전환
 - MQTT TLS 기반 장비 상태, 위험 객체, 블러 영역 수신
 - 디지털 트윈 맵의 객체 위치, 이동 경로, 경고/위험 펄스 표시
 - 얼굴과 차량 번호판 선택적 블러 처리
@@ -81,7 +82,7 @@ VEDA_CONFIG_FILE=C:\secure\veda\app_config.json
 JSON에서 관리하는 주요 값은 다음과 같습니다.
 
 - 창 크기
-- 4채널 카메라 ID, 표시명, RTSP URL, 활성 여부
+- 구역 구성과 구역별 4채널 카메라 ID, 표시명, RTSP URL, 활성 여부
 - GStreamer 네트워크 latency, 의도적 영상 alignment delay, queue, sink, 재연결 설정
 - 블러 동기화 및 영상 필터 설정
 - MQTT Broker, TLS 인증서, keep-alive, 재연결 설정
@@ -89,6 +90,48 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 - 위험 및 블러 디스패처 주기
 - 로그 카테고리별 on/off (`logging`)
 - 탑뷰 객체 아이콘 크기 (`digitalTwin.icons.vehiclePx`, `pedestrianPx`, 각 8~512, 기본 92/62)
+
+### 구역 및 채널 확장
+
+`video.areas`에 구역을 등록하고, 각 구역이 참조하는 스트림 4개를 `video.streams`에 추가합니다. 내부 전역
+채널 인덱스는 다음 공식으로 계산합니다.
+
+```text
+globalChannelIndex = areaIndex * 4 + localChannelIndex
+```
+
+`areaIndex`와 `localChannelIndex`는 모두 0부터 시작합니다. 사용자 화면에는 각 구역마다 로컬 채널 번호
+`CH 01`~`CH 04`를 표시하고, MQTT와 내부 모델은 전역 채널 인덱스를 사용합니다.
+
+| 구역 | areaIndex | 전역 channelIndex | 화면 표시 |
+| --- | ---: | ---: | --- |
+| 제 1구역 | 0 | 0~3 | CH 01~CH 04 |
+| 제 2구역 | 1 | 4~7 | CH 01~CH 04 |
+| 제 3구역 | 2 | 8~11 | CH 01~CH 04 |
+
+구역을 추가할 때는 다음 조건을 모두 지켜야 합니다.
+
+- `areaId`와 `cameraId`는 전체 설정에서 중복되지 않아야 합니다.
+- 각 `areas[].streamIds`에는 정확히 4개의 카메라 ID가 있어야 합니다.
+- 전체 스트림 수는 `구역 수 * 4`여야 합니다.
+- `channelIndex`는 0부터 `전체 스트림 수 - 1`까지 빠짐없이 연속이어야 합니다.
+- 각 구역의 `streamIds` 순서는 해당 구역의 로컬 `CH 01`~`CH 04` 순서와 같아야 합니다.
+- `initialAreaId`는 `areas`에 등록된 구역 ID여야 합니다.
+- RTSP URL의 계정, 비밀번호와 호스트는 실제 장비 값으로 교체해야 합니다.
+
+제 1구역에 `channelIndex` 0~3, 제 2구역에 4~7을 배치한 `app_config.example.json` 예시는 위 규칙을
+충족하므로 그대로 사용할 수 있습니다. 테스트 환경에서는 두 구역이 같은 RTSP URL을 참조해도 되지만,
+운영 환경에서는 구역별 실제 CCTV 주소를 지정합니다.
+
+설정만 추가하면 다음 항목은 전체 채널 수에 맞춰 자동 확장됩니다.
+
+- RTSP 스트림 세션과 구역별 CCTV 화면
+- MQTT 장비 상태, 위험 `zoneId`, 블러 채널의 범위 검증과 라우팅
+- 채널별 장비 상태 저장 및 선택 구역 표시
+- 환경 변수 `VEDA_RTSP_URL_1`부터 `VEDA_RTSP_URL_N`까지의 URL 재정의
+
+새 구역의 실제 지도 도면, 장치 아이콘 위치와 서버의 전역 `zoneId` 매핑은 설정만으로 생성되지 않습니다.
+해당 자산과 배치는 별도로 추가하고, 서버도 같은 전역 채널 공식으로 값을 발행해야 합니다.
 
 로그는 카테고리별로 켜고 끕니다. 전부 켜면 고빈도 항목(`mqttStatusPayload`, `mqttBlur`, `blurApply`)이
 초당 수백 줄을 쏟아내 정작 봐야 할 줄이 묻히므로, 필요한 것만 `true`로 둡니다. 오류 로그는 어떤
@@ -116,7 +159,7 @@ JSON에서 관리하는 주요 값은 다음과 같습니다.
 | 환경 변수 | 설명 |
 | --- | --- |
 | `VEDA_CONFIG_FILE` | 사용할 JSON 설정 파일의 절대 경로 |
-| `VEDA_RTSP_URL_1` ... `VEDA_RTSP_URL_4` | 채널별 RTSP URL |
+| `VEDA_RTSP_URL_1` ... `VEDA_RTSP_URL_N` | 설정된 전체 채널의 RTSP URL |
 | `VEDA_MQTT_HOST` | MQTT Broker 주소 |
 | `VEDA_MQTT_PORT` | MQTT TLS 포트 |
 | `VEDA_MQTT_CA_FILE` | CA 인증서 경로 |

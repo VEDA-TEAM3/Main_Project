@@ -9,7 +9,6 @@
 #include "network/realtime/LatestBlurFrameBuffer.h"
 #include "video/StreamReceiver.h"
 #include "video/StreamReceiverFactory.h"
-#include "video/VideoRuntimeConfig.h"
 
 /**
  * @brief                  스트림 세션 관리자를 생성합니다.
@@ -77,14 +76,23 @@ void StreamSessionManager::stop() {
 }
 
 void StreamSessionManager::submitBlurFrame(BlurFrameData frame) {
-    const int localChannelIndex = frame.channelIndex;
-    if (localChannelIndex < 0 || localChannelIndex >= videoChannelsPerArea) {
+    if (frame.channelIndex < 0) {
+        return;
+    }
+
+    QString sourceUrl;
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex == frame.channelIndex) {
+            sourceUrl = worker.config.url;
+            break;
+        }
+    }
+    if (sourceUrl.isEmpty()) {
         return;
     }
 
     for (const ReceiverWorker& worker : receiverWorkers_) {
-        if (videoLocalChannelIndex(worker.config.channelIndex) != localChannelIndex || !worker.receiver ||
-            !worker.thread || !worker.thread->isRunning()) {
+        if (worker.config.url != sourceUrl || !worker.receiver || !worker.thread || !worker.thread->isRunning()) {
             continue;
         }
 
@@ -185,11 +193,8 @@ void StreamSessionManager::setVideoPreprocessingSettings(int channelIndex, const
 
 /**
  * @brief              지정한 채널의 디코더 이후 영상 처리와 출력을 전환합니다.
- * @param channelIndex 적용할 0
- * 기반 채널 인덱스
- * @param active       true면 화면 출력, false면 RTSP와 디코더만 워밍 상태로
- * 유지
-
+ * @param channelIndex 적용할 0 기반 채널 인덱스
+ * @param active       true면 화면 출력, false면 RTSP와 디코더만 워밍 상태로 유지
  */
 void StreamSessionManager::setPresentationActive(int channelIndex, bool active) {
     presentationActiveByChannel_.insert(channelIndex, active);

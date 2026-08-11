@@ -7,6 +7,9 @@
 #include <utility>
 
 namespace {
+constexpr int channelsPerArea = 4;
+constexpr int minimumZoneId = 0;
+
 /**
  * @brief             객체 종류를 화면 표시용 한글 이름으로 변환합니다.
  * @param objectType  디지털 트윈 객체 종류
@@ -49,24 +52,29 @@ QString positionTextForObject(const DigitalTwinObject& object) {
 }
 
 /**
- * @brief         서버 채널 기준의 물리 CCTV 구역명을 반환합니다.
- * @param object  구역명을 표시할 객체
- * @return        구역 내 CH-01~CH-04 또는 미배정 표시
+ * @brief         서버 zoneId 기준의 물리 CCTV 구역명을 반환합니다.
+ * @param zoneId  서버가 확정한 0 기반 zoneId
+ * @return        1구역, 2구역 또는 미배정 표시
  */
-QString zoneTextForChannel(int channelIndex) {
-    if (channelIndex < 0) {
+QString areaTextForZoneId(int zoneId) {
+    if (zoneId < minimumZoneId) {
         return QStringLiteral("미배정");
     }
 
-    return QStringLiteral("%1구역").arg(channelIndex / 4 + 1);
+    return QStringLiteral("%1구역").arg(zoneId / channelsPerArea + 1);
 }
 
-QString channelText(int channelIndex) {
-    if (channelIndex < 0) {
+/**
+ * @brief         서버 zoneId를 해당 구역의 1~4 채널 표시로 변환합니다.
+ * @param zoneId  서버가 확정한 0 기반 zoneId
+ * @return        CH-01~CH-04 또는 미배정 표시
+ */
+QString localChannelTextForZoneId(int zoneId) {
+    if (zoneId < minimumZoneId) {
         return QStringLiteral("-");
     }
 
-    return QStringLiteral("CH-%1").arg(channelIndex % 4 + 1, 2, 10, QLatin1Char('0'));
+    return QStringLiteral("CH-%1").arg(zoneId % channelsPerArea + 1, 2, 10, QLatin1Char('0'));
 }
 
 /**
@@ -170,9 +178,9 @@ QVariant DigitalTwinObjectTableModel::data(const QModelIndex& index, int role) c
         case ObjectPositionColumn:
             return positionTextForObject(object);
         case ObjectZoneColumn:
-            return zoneTextForChannel(object.channelIndex);
+            return areaTextForZoneId(object.channelIndex);
         case ObjectChannelColumn:
-            return channelText(object.channelIndex);
+            return localChannelTextForZoneId(object.channelIndex);
         default:
             return {};
     }

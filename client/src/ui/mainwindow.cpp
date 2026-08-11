@@ -15,6 +15,7 @@
 #include <QShortcut>
 #include <QShowEvent>
 #include <QSizePolicy>
+#include <QStackedWidget>
 #include <QStyle>
 #include <QTimer>
 #include <QUuid>
@@ -203,13 +204,9 @@ void MainWindow::setReportButtonsEnabled(bool enabled) {
 }
 
 /**
- * @brief           현재 표시 구역의 슬롯을 실제 전역 채널
- * 번호로 변환합니다.
- * @param slotIndex 0부터
- * 3까지의 화면 슬롯 인덱스
- * @return          사용자 표시용 1 기반 채널
- * 번호
-
+ * @brief           현재 표시 구역의 슬롯을 사용자 표시 채널 번호로 변환합니다.
+ * @param slotIndex 0부터 3까지의 화면 슬롯 인덱스
+ * @return          사용자 표시용 1 기반 채널 번호
  */
 int MainWindow::reportChannelNumberForSlot(int slotIndex) const { return slotIndex + 1; }
 
@@ -482,6 +479,9 @@ void MainWindow::setupDashboardPanels() {
     deviceStatusPanel_ = panels.deviceStatusPanel;
     eventLogPanel_ = panels.eventLogPanel;
     objectListPanel_ = panels.objectListPanel;
+    if (deviceStatusPanel_) {
+        deviceStatusPanel_->setChannelCount(static_cast<int>(streamConfigs_.size()));
+    }
 }
 
 /**
@@ -521,7 +521,8 @@ void MainWindow::setupDeviceStatusService() {
         return;
     }
 
-    deviceStatusService_ = std::make_shared<DeviceStatusService>(deviceStatusGatewayFactory_);
+    deviceStatusService_ =
+        std::make_shared<DeviceStatusService>(deviceStatusGatewayFactory_, static_cast<int>(streamConfigs_.size()));
 
     connect(deviceStatusService_.get(), &DeviceStatusService::brokerConnectionChanged, this,
             &MainWindow::updateSystemStatus, Qt::QueuedConnection);
@@ -614,11 +615,32 @@ void MainWindow::setupVideoViewEvents() {
     };
 
     videoAreaLayouts_ = {ui_->videoGridLayoutArea1, ui_->videoGridLayoutArea2};
-    if (videoConfig_.areas.size() != videoAreaLayouts_.size()) {
-        qWarning() << "[MainWindow] Video area UI/config count mismatch" << videoAreaLayouts_.size()
-                   << videoConfig_.areas.size();
+    const qsizetype areaCount = videoConfig_.areas.size();
+    const qsizetype channelCount = streamConfigs_.size();
+    if (areaCount <= 0 || channelCount != areaCount * videoChannelsPerArea) {
+        qWarning() << "[MainWindow] Invalid video area/channel configuration" << areaCount << channelCount;
         return;
     }
+
+    while (videoAreaLayouts_.size() < areaCount) {
+        auto* page = new QWidget(ui_->videoAreaStackedWidget);
+        auto* grid = new QGridLayout(page);
+        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setSpacing(8);
+        grid->setRowStretch(0, 1);
+        grid->setRowStretch(1, 1);
+        grid->setColumnStretch(0, 1);
+        grid->setColumnStretch(1, 1);
+        ui_->videoAreaStackedWidget->addWidget(page);
+        videoAreaLayouts_.append(grid);
+
+        for (int slotIndex = 0; slotIndex < videoChannelsPerArea; ++slotIndex) {
+            videoWidgets_.append(new ClickableVideoWidget(page));
+        }
+    }
+
+    videoAreaLayouts_.resize(areaCount);
+    videoWidgets_.resize(channelCount);
 
     videoTileFrames_.resize(videoWidgets_.size());
 
@@ -708,12 +730,9 @@ void MainWindow::openVideoAreaSelectionDialog() {
 }
 
 /**
- * @brief           전역 채널이 속한 영상 구역 인덱스를 찾습니다.
- *
+ * @brief              전역 채널이 속한 영상 구역 인덱스를 찾습니다.
  * @param channelIndex 0 기반 전역 채널 인덱스
-
- * *
- * @return          구역 인덱스 또는 -1
+ * @return             구역 인덱스 또는 -1
  */
 int MainWindow::videoAreaIndexForChannel(int channelIndex) const {
     for (qsizetype areaIndex = 0; areaIndex < videoConfig_.areas.size(); ++areaIndex) {
@@ -726,11 +745,8 @@ int MainWindow::videoAreaIndexForChannel(int channelIndex) const {
 
 /**
  * @brief           구역에 배정된 전역 채널 인덱스를 반환합니다.
- *
  * @param areaIndex 조회할 구역 인덱스
-
- * *
- * @return 화면 슬롯 순서의 채널 인덱스
+ * @return           화면 슬롯 순서의 채널 인덱스
  */
 const QVector<int>& MainWindow::channelsForArea(int areaIndex) const {
     static const QVector<int> emptyChannels;
@@ -747,8 +763,6 @@ bool MainWindow::isChannelVisible(int channelIndex) const {
 
 /**
  * @brief           워밍 스트림을 유지한 채 CCTV 표시 구역을 전환합니다.
-
- * *
  * @param areaIndex 새로 표시할 구역 인덱스
  */
 void MainWindow::switchVideoArea(int areaIndex) {
@@ -795,7 +809,7 @@ void MainWindow::switchVideoArea(int areaIndex) {
 /**
  * @brief             디지털 트윈의 채널별 위험 상태를 CCTV 타일 테두리에
  * 반영합니다.
- * @param riskLevels  zoneId 0부터 7까지의 현재 위험 단계
+ * @param riskLevels  설정된 전역 채널 순서의 현재 위험 단계
  */
 void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels) {
     if (latestVideoRiskLevels_.size() != streamConfigs_.size()) {

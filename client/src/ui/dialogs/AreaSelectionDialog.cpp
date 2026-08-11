@@ -3,6 +3,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListView>
 #include <QListWidget>
 #include <QPushButton>
 #include <QShowEvent>
@@ -11,9 +12,12 @@
 #include <QVBoxLayout>
 
 namespace {
-constexpr int dialogWidth = 430;
-constexpr int dialogHeight = 340;
-constexpr int areaRowHeight = 50;
+constexpr int dialogWidth = 590;
+constexpr int dialogHeight = 280;
+constexpr int areaButtonWidth = 124;
+constexpr int areaButtonHeight = 34;
+constexpr int areaCellWidth = 132;
+constexpr int areaCellHeight = 42;
 }  // namespace
 
 /**
@@ -36,8 +40,8 @@ AreaSelectionDialog::AreaSelectionDialog(QWidget* parent) : QWidget(parent) {
     rootLayout->addWidget(panel);
 
     auto* panelLayout = new QVBoxLayout(panel);
-    panelLayout->setContentsMargins(26, 22, 26, 24);
-    panelLayout->setSpacing(16);
+    panelLayout->setContentsMargins(22, 18, 22, 20);
+    panelLayout->setSpacing(12);
 
     auto* headerLayout = new QHBoxLayout();
     auto* titleLabel = new QLabel(QStringLiteral("모니터링 구역 선택"), panel);
@@ -62,6 +66,15 @@ AreaSelectionDialog::AreaSelectionDialog(QWidget* parent) : QWidget(parent) {
     areaList_->setObjectName(QStringLiteral("areaSelectionList"));
     areaList_->setCursor(Qt::PointingHandCursor);
     areaList_->setFocusPolicy(Qt::NoFocus);
+    areaList_->setViewMode(QListView::IconMode);
+    areaList_->setFlow(QListView::LeftToRight);
+    areaList_->setWrapping(true);
+    areaList_->setResizeMode(QListView::Adjust);
+    areaList_->setMovement(QListView::Static);
+    areaList_->setUniformItemSizes(true);
+    areaList_->setGridSize(QSize(areaCellWidth, areaCellHeight));
+    areaList_->setSpacing(0);
+    areaList_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     areaList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     connect(areaList_, &QListWidget::itemDoubleClicked, this, [this]() { confirmSelection(); });
     panelLayout->addWidget(areaList_, 1);
@@ -98,8 +111,8 @@ void AreaSelectionDialog::setAreas(const QStringList& areaNames, int currentArea
     for (qsizetype areaIndex = 0; areaIndex < areaNames.size(); ++areaIndex) {
         auto* item = new QListWidgetItem(areaNames[areaIndex], areaList_);
         item->setData(Qt::UserRole, areaIndex);
-        item->setSizeHint(QSize(0, areaRowHeight));
-        item->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        item->setSizeHint(QSize(areaButtonWidth, areaButtonHeight));
+        item->setTextAlignment(Qt::AlignCenter);
     }
 
     setCurrentAreaIndex(currentAreaIndex);

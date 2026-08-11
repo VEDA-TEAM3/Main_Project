@@ -4,6 +4,7 @@
 #include "network/parsing/RiskMessageParser.h"
 
 namespace {
+constexpr int channelCount = 12;
 int failureCount = 0;
 
 void check(bool condition, const char* description) {
@@ -17,7 +18,7 @@ void check(bool condition, const char* description) {
 
 bool parse(const QByteArray& payload, RiskFrameData& frame) {
     QString error;
-    return RiskMessageParser::parse(payload, QStringLiteral("veda/risk"), frame, error);
+    return RiskMessageParser::parse(payload, QStringLiteral("veda/risk"), frame, error, channelCount);
 }
 
 /**
@@ -31,19 +32,21 @@ void checkZoneIdValidation() {
             {"gid": 1, "cls": "human", "pos": {"x": -50, "y": 0}, "zoneId": 0, "riskLevel": "normal"},
             {"gid": 2, "cls": "vehicle", "pos": {"x": 50, "y": 0}, "zoneId": 7, "riskLevel": "warning"},
             {"gid": 3, "cls": "human", "pos": {"x": 0, "y": 0}, "zoneId": 8, "riskLevel": "danger"},
-            {"gid": 4, "cls": "human", "pos": {"x": 0, "y": 0}, "zoneId": 1.5, "riskLevel": "normal"},
-            {"gid": 5, "cls": "human", "pos": {"x": 0, "y": 0}, "riskLevel": "normal"}
+            {"gid": 4, "cls": "human", "pos": {"x": 0, "y": 0}, "zoneId": 12, "riskLevel": "normal"},
+            {"gid": 5, "cls": "human", "pos": {"x": 0, "y": 0}, "zoneId": 1.5, "riskLevel": "normal"},
+            {"gid": 6, "cls": "human", "pos": {"x": 0, "y": 0}, "riskLevel": "normal"}
         ]
     })";
 
     RiskFrameData frame;
     check(parse(payload, frame), "valid v2 frame must parse");
-    check(frame.objects.size() == 5, "all supported objects must be retained");
+    check(frame.objects.size() == 6, "all supported objects must be retained");
     check(frame.objects.value(0).zoneId == 0, "zoneId 0 must be accepted");
     check(frame.objects.value(1).zoneId == 7, "zoneId 7 must be accepted");
-    check(frame.objects.value(2).zoneId == -1, "out-of-range zoneId must become unassigned");
-    check(frame.objects.value(3).zoneId == -1, "non-integer zoneId must become unassigned");
-    check(frame.objects.value(4).zoneId == -1, "missing zoneId must become unassigned");
+    check(frame.objects.value(2).zoneId == 8, "zoneId 8 must be accepted for a third area");
+    check(frame.objects.value(3).zoneId == -1, "out-of-range zoneId must become unassigned");
+    check(frame.objects.value(4).zoneId == -1, "non-integer zoneId must become unassigned");
+    check(frame.objects.value(5).zoneId == -1, "missing zoneId must become unassigned");
 }
 
 void checkLegacyVersionRejected() {

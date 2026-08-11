@@ -7,5 +7,6 @@
 
 class RiskMessageParser final {
 public:
-    static bool parse(const QByteArray& payload, const QString& topic, RiskFrameData& frame, QString& error);
+    static bool parse(const QByteArray& payload, const QString& topic, RiskFrameData& frame, QString& error,
+                      int channelCount);
 };

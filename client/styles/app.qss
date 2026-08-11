@@ -548,29 +548,29 @@ QLabel#reportActionTitleLabel {
 }
 
 QPushButton#videoAreaButton {
-    color: #e6f8ff;
+    color: #f2fbff;
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                       stop:0 #195174, stop:0.48 #103b58, stop:1 #0a2941);
-    border: 1px solid #55bde4;
-    border-top-color: #8de6ff;
+                                       stop:0 #16405c, stop:0.5 #102f49, stop:1 #0a2136);
+    border: 1px solid #3f82a4;
+    border-top-color: #64c4e7;
     border-radius: 5px;
     padding: 0 14px;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 17px;
-    font-weight: 900;
+    font-family: "Malgun Gothic", "Segoe UI";
+    font-size: 15px;
+    font-weight: 800;
 }
 
 QPushButton#videoAreaButton:hover {
     color: #ffffff;
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                       stop:0 #267ca3, stop:0.52 #175b7d, stop:1 #103d5a);
-    border-color: #a7efff;
+                                       stop:0 #1d5877, stop:0.52 #15435f, stop:1 #0d2c44);
+    border-color: #72d8f7;
 }
 
 QPushButton#videoAreaButton:pressed {
-    color: #bfeeff;
-    background-color: #0a2a40;
-    border-color: #3f93b6;
+    color: #d8f5ff;
+    background-color: #081c2e;
+    border-color: #357899;
 }
 
 QPushButton#reportChannelButton1, QPushButton#reportChannelButton2,
@@ -989,37 +989,36 @@ QPushButton#areaSelectionCloseButton:hover {
 
 QListWidget#areaSelectionList {
     color: #d9edf6;
-    background-color: #071b2c;
+    background-color: #071827;
     border: 1px solid #315f7e;
     border-radius: 5px;
     outline: 0;
-    padding: 5px;
+    padding: 8px;
     font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 800;
 }
 
 QListWidget#areaSelectionList::item {
-    color: #c6dce6;
-    background-color: #0a2438;
-    border: 1px solid #244c67;
-    border-radius: 4px;
-    padding-left: 18px;
-    margin: 3px;
+    color: #b9d5e2;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #12354b, stop:1 #0a2032);
+    border: 1px solid #3a6a84;
+    border-radius: 3px;
+    margin: 4px;
 }
 
 QListWidget#areaSelectionList::item:hover {
-    color: #effbff;
-    background-color: #123c56;
-    border-color: #4fa5c9;
+    color: #ffffff;
+    background-color: #174965;
+    border-color: #70cce9;
 }
 
 QListWidget#areaSelectionList::item:selected {
     color: #ffffff;
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #17678d, stop:0.7 #124967, stop:1 #0d344d);
-    border: 1px solid #7ae1ff;
-    border-left: 4px solid #55dcff;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                      stop:0 #2385ae, stop:1 #155474);
+    border: 1px solid #9beaff;
 }
 
 QPushButton#areaSelectionCancelButton,

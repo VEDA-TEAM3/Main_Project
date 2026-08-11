@@ -5,7 +5,7 @@
 
 class DeviceStatusTopicHandler final : public MqttTopicHandler {
 public:
-    explicit DeviceStatusTopicHandler(MqttTopicsConfig config);
+    DeviceStatusTopicHandler(MqttTopicsConfig config, int channelCount);
 
     QVector<MqttSubscription> subscriptions() const override;
     bool matchesTopic(const QString& topic) const override;
@@ -14,4 +14,5 @@ public:
 
 private:
     MqttTopicsConfig config_;
+    int channelCount_ = 0;
 };

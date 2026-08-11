@@ -510,8 +510,7 @@ void MapSettingsDialog::setBlurTargetsEnabled(bool faceEnabled, bool licensePlat
 
 /**
  * @brief                   영상 설정에서 선택할 CCTV 구역과 채널 구성을 반영합니다.
- * @param
- * areas 구역별 전역 채널 인덱스
+ * @param areas             구역별 전역 채널 인덱스
  * @param selectedAreaIndex 처음 표시할 구역 인덱스
  */
 void MapSettingsDialog::setVideoAreas(const QVector<VideoAreaConfig>& areas, int selectedAreaIndex) {

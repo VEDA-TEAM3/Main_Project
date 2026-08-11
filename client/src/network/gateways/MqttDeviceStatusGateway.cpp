@@ -12,8 +12,6 @@
 #include "network/transport/MqttTransportFactory.h"
 
 namespace {
-constexpr int mqttDeviceChannelCount = 4;
-
 QString riskLevelName(DigitalTwinRiskLevel riskLevel) {
     switch (riskLevel) {
         case DigitalTwinRiskLevel::Warning:
@@ -48,6 +46,7 @@ MqttDeviceStatusGateway::MqttDeviceStatusGateway(std::shared_ptr<MqttTransportFa
     : DeviceStatusGateway(parent),
       transportFactory_(std::move(transportFactory)),
       messageRouter_(std::move(messageRouter)),
+      lastBlurDebugLogMsec_(qMax(0, config.channelCount), 0),
       blurDebugLogIntervalMsec_(config.blurDebugLogIntervalMsec),
       riskDebugLogIntervalMsec_(config.riskDebugLogIntervalMsec),
       maximumDebugPayloadLength_(config.maximumDebugPayloadLength),
@@ -200,12 +199,12 @@ void MqttDeviceStatusGateway::logReceivedMessage(const QByteArray& payload, cons
 
 /** @brief 고빈도 블러 수신 상태를 채널별 제한 주기로 출력합니다. */
 void MqttDeviceStatusGateway::logBlurFrame(const QString& topic, const BlurFrameData& frame) {
-    if (!logBlur_ || frame.channelIndex < 0 || frame.channelIndex >= mqttDeviceChannelCount) {
+    if (!logBlur_ || frame.channelIndex < 0 || frame.channelIndex >= lastBlurDebugLogMsec_.size()) {
         return;
     }
 
     const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
-    qint64& lastLogMsec = lastBlurDebugLogMsec_[static_cast<std::size_t>(frame.channelIndex)];
+    qint64& lastLogMsec = lastBlurDebugLogMsec_[frame.channelIndex];
     if (blurDebugLogIntervalMsec_ <= 0 || (lastLogMsec > 0 && nowMsec - lastLogMsec < blurDebugLogIntervalMsec_)) {
         return;
     }
@@ -237,11 +236,11 @@ void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrame
                              .arg(frame.objects.size());
 
     for (const RiskObjectData& object : frame.objects) {
-        if (object.worldPosition.x() <= 0.0 || object.zoneId < 4 || object.zoneId > 7) {
+        if (object.zoneId < 0) {
             continue;
         }
 
-        qInfo().noquote() << QStringLiteral("[MQTT RISK Z2] gid=%1 pos=(%2,%3) cls=%4 risk=%5 zoneId=%6")
+        qInfo().noquote() << QStringLiteral("[MQTT RISK OBJECT] gid=%1 pos=(%2,%3) cls=%4 risk=%5 zoneId=%6")
                                  .arg(object.globalId)
                                  .arg(object.worldPosition.x(), 0, 'f', 2)
                                  .arg(object.worldPosition.y(), 0, 'f', 2)

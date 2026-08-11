@@ -285,10 +285,9 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
 
         const qint64 globalId = iterator.key();
         if (diagnostics_.level >= 2) {
-            qDebug().noquote()
-                << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
-                       .arg(globalId)
-                       .arg(arrivalTimeMsec - iterator.value());
+            qDebug().noquote() << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
+                                      .arg(globalId)
+                                      .arg(arrivalTimeMsec - iterator.value());
         }
 
         // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는
@@ -307,10 +306,9 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         if (diagnostics_.level >= 2 && !knownObject) {
             qDebug().noquote() << QStringLiteral("[TV LIFE] CREATE gid=%1").arg(object.globalId);
         } else if (diagnostics_.level >= 2 && restoredObject) {
-            qDebug().noquote()
-                << QStringLiteral("[TV LIFE] RESTORE gid=%1 elapsed=%2ms")
-                       .arg(object.globalId)
-                       .arg(arrivalTimeMsec - previousArrivalMsec);
+            qDebug().noquote() << QStringLiteral("[TV LIFE] RESTORE gid=%1 elapsed=%2ms")
+                                      .arg(object.globalId)
+                                      .arg(arrivalTimeMsec - previousArrivalMsec);
         }
 
         retainedObjects_.insert(object.globalId, object);
@@ -390,9 +388,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     }
 
     const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &currentChannelIndexes,
-                               &sourceChannelIndexes, &pairKeys, &includedObjectIds, &observedObjectIds](
-                                  const RiskObjectData& sourceObject, qreal opacity, qint64 objectFrameSequence,
-                                  bool observed) {
+                               &sourceChannelIndexes, &pairKeys, &includedObjectIds,
+                               &observedObjectIds](const RiskObjectData& sourceObject, qreal opacity,
+                                                   qint64 objectFrameSequence, bool observed) {
         if (includedObjectIds.contains(sourceObject.globalId)) {
             return;
         }
@@ -401,14 +399,14 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         DigitalTwinObject object;
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
-                                                                           : DigitalTwinObjectType::Vehicle;
+                                                                          : DigitalTwinObjectType::Vehicle;
         const QPointF targetPosition = sourceObject.worldPosition;
-        object.position = observed
-                              ? transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec)
-                              : targetPosition;
+        object.position =
+            observed ? transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec)
+                     : targetPosition;
         object.channelIndex = sourceObject.zoneId;
-        object.velocity = observed ? object.position - previousPositions_.value(object.objectId, object.position)
-                                   : QPointF();
+        object.velocity =
+            observed ? object.position - previousPositions_.value(object.objectId, object.position) : QPointF();
         const int nearestChannelIndex = sourceChannelIndexes.value(sourceObject.nearestId, -1);
         const bool crossCctvPair = sourceObject.nearestId > 0 && sourceObject.zoneId >= 0 && nearestChannelIndex >= 0 &&
                                    sourceObject.zoneId / 4 != nearestChannelIndex / 4;
@@ -443,7 +441,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         if (!observedObjectIds.contains(sourceObject.globalId)) {
             continue;
         }
-        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_, true);
+        appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_,
+                     true);
     }
 
     QVector<qint64> expiredObjectIds;
@@ -461,9 +460,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
             expiredObjectIds.append(iterator.key());
             if (diagnostics_.level >= 2) {
                 qDebug().noquote()
-                    << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
-                           .arg(iterator.key())
-                           .arg(missingAgeMsec);
+                    << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms").arg(iterator.key()).arg(missingAgeMsec);
             }
             continue;
         }
@@ -472,9 +469,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
             missingObjectIds_.insert(iterator.key());
             if (diagnostics_.level >= 2) {
                 qDebug().noquote()
-                    << QStringLiteral("[TV LIFE] GRACE gid=%1 elapsed=%2ms")
-                           .arg(iterator.key())
-                           .arg(missingAgeMsec);
+                    << QStringLiteral("[TV LIFE] GRACE gid=%1 elapsed=%2ms").arg(iterator.key()).arg(missingAgeMsec);
             }
         }
 
@@ -929,12 +924,11 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
 }
 
 /**
- * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬
- * 시간으로 전환합니다.
+ * @brief                   새 Risk 좌표를 현재 표시 위치에서 목표 위치까지 로컬 시간으로 전환합니다.
  * @param objectId          추적 객체 식별자
  * @param targetPosition    최신 RiskFrame에서 받은 목표 월드 좌표
- * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번 (RiskFrame.ts는
- * 단조 증가가 아니라 쓰지 않는다)
+ * @param frameSequence     목표 좌표가 속한 프레임의 수신 순번
+ *                          RiskFrame.ts는 단조 증가가 아니므로 사용하지 않습니다.
  * @param localTimeMsec     현재 로컬 monotonic 시각
  * @return                  현재 렌더 시점의 월드 좌표
  */

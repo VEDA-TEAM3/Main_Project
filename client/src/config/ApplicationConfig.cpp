@@ -18,9 +18,6 @@
 #include <utility>
 
 namespace {
-constexpr int requiredAreaCount = 2;
-constexpr int requiredChannelCount = videoChannelsPerArea * requiredAreaCount;
-
 bool isValidTopicFilter(const QString& filter) {
     const QStringList levels = filter.split(QLatin1Char('/'), Qt::KeepEmptyParts);
     if (levels.isEmpty()) {
@@ -236,10 +233,10 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
     return true;
 }
 
-bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QString& error) {
+bool parseStreams(const QJsonObject& video, int channelCount, QVector<StreamConfig>& streams, QString& error) {
     const QJsonValue streamValue = video.value(QStringLiteral("streams"));
-    if (!streamValue.isArray() || streamValue.toArray().size() != requiredChannelCount) {
-        error = QStringLiteral("video.streams must contain exactly %1 channels").arg(requiredChannelCount);
+    if (!streamValue.isArray() || streamValue.toArray().size() != channelCount) {
+        error = QStringLiteral("video.streams must contain exactly %1 channels").arg(channelCount);
         return false;
     }
 
@@ -258,8 +255,7 @@ bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QStr
         if (!readString(streamObject, QStringLiteral("cameraId"), stream.cameraId, error) ||
             !readString(streamObject, QStringLiteral("name"), stream.name, error) ||
             !readString(streamObject, QStringLiteral("url"), stream.url, error) ||
-            !readInt(streamObject, QStringLiteral("channelIndex"), 0, requiredChannelCount - 1, stream.channelIndex,
-                     error) ||
+            !readInt(streamObject, QStringLiteral("channelIndex"), 0, channelCount - 1, stream.channelIndex, error) ||
             !readBoolean(streamObject, QStringLiteral("enabled"), stream.enabled, error)) {
             error = QStringLiteral("video.streams[%1]: %2").arg(index).arg(error);
             return false;
@@ -281,10 +277,10 @@ bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QStr
         streams.append(std::move(stream));
     }
 
-    for (int channelIndex = 0; channelIndex < requiredChannelCount; ++channelIndex) {
+    for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
         if (!channelIndexes.contains(channelIndex)) {
             error = QStringLiteral("video.streams channelIndex values must be contiguous from 0 to %1")
-                        .arg(requiredChannelCount - 1);
+                        .arg(channelCount - 1);
             return false;
         }
     }
@@ -298,8 +294,8 @@ bool parseStreams(const QJsonObject& video, QVector<StreamConfig>& streams, QStr
 bool parseVideoAreas(const QJsonObject& video, const QVector<StreamConfig>& streams, VideoRuntimeConfig& config,
                      QString& error) {
     const QJsonValue areaValue = video.value(QStringLiteral("areas"));
-    if (!areaValue.isArray() || areaValue.toArray().size() != requiredAreaCount) {
-        error = QStringLiteral("video.areas must contain exactly %1 areas").arg(requiredAreaCount);
+    if (!areaValue.isArray() || areaValue.toArray().isEmpty()) {
+        error = QStringLiteral("video.areas must contain at least one area");
         return false;
     }
 
@@ -522,12 +518,23 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
 
 bool parseVideo(const QJsonObject& root, VideoRuntimeConfig& config, QString& error) {
     QJsonObject video;
-    return readObject(root, QStringLiteral("video"), video, error) &&
-           readInt(video, QStringLiteral("initialStartDelayMs"), 0, 600000, config.initialStartDelayMsec, error) &&
+    if (!readObject(root, QStringLiteral("video"), video, error)) {
+        return false;
+    }
+
+    const QJsonValue areaValue = video.value(QStringLiteral("areas"));
+    if (!areaValue.isArray() || areaValue.toArray().isEmpty() ||
+        areaValue.toArray().size() > std::numeric_limits<int>::max() / videoChannelsPerArea) {
+        error = QStringLiteral("video.areas must contain a supported, non-empty area list");
+        return false;
+    }
+
+    const int channelCount = static_cast<int>(areaValue.toArray().size()) * videoChannelsPerArea;
+    return readInt(video, QStringLiteral("initialStartDelayMs"), 0, 600000, config.initialStartDelayMsec, error) &&
            readInt(video, QStringLiteral("receiverStartSpacingMs"), 0, 600000, config.receiverStartSpacingMsec,
                    error) &&
-           parseStreams(video, config.streams, error) && parseVideoAreas(video, config.streams, config, error) &&
-           parseReceiverConfig(video, config.receiver, error);
+           parseStreams(video, channelCount, config.streams, error) &&
+           parseVideoAreas(video, config.streams, config, error) && parseReceiverConfig(video, config.receiver, error);
 }
 
 bool parseMqtt(const QJsonObject& root, MqttRuntimeConfig& config, QString& clientIdPrefix, QString& error) {
@@ -791,6 +798,8 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
         !parseLogging(root, result.config, result.error)) {
         return result;
     }
+
+    result.config.mqtt.channelCount = static_cast<int>(result.config.video.streams.size());
 
     applyEnvironmentOverrides(result.config, clientIdPrefix);
     applyLoggingMasterSwitch(result.config);

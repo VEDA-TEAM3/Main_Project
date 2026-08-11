@@ -23,10 +23,11 @@ class DeviceStatusService final : public QObject {
     Q_OBJECT
 
 public:
-    explicit DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory, QObject* parent = nullptr);
+    DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory, int channelCount,
+                        QObject* parent = nullptr);
     DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory,
                         std::shared_ptr<BlurFrameBuffer> blurFrameBuffer,
-                        std::shared_ptr<RiskFrameBuffer> riskFrameBuffer, QObject* parent = nullptr);
+                        std::shared_ptr<RiskFrameBuffer> riskFrameBuffer, int channelCount, QObject* parent = nullptr);
     ~DeviceStatusService() override;
 
     void start();
@@ -72,4 +73,5 @@ private:
     QSet<QString> recentReportKeys_;
     QQueue<QString> reportKeyOrder_;
     QTimer uiFlushTimer_;
+    int channelCount_ = 0;
 };

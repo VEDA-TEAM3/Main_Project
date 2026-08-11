@@ -66,7 +66,7 @@ void DashboardPanelCoordinator::consumeDigitalTwinSnapshot(DigitalTwinSnapshot s
 }
 
 void DashboardPanelCoordinator::consumeCentralEvent(CentralEventData event) {
-    if (!eventLogPanel_ || event.channelIndex < 0 || event.channelIndex >= 8 || event.sourceTimestamp <= 0) {
+    if (!eventLogPanel_ || event.channelIndex < 0 || event.sourceTimestamp <= 0) {
         return;
     }
 
