@@ -76,6 +76,9 @@ int main(int argc, char* argv[]) {
     int ret = 0;
 
     {
+#ifdef Q_OS_WIN
+        qputenv("QT_ENABLE_HIGHDPI_SCALING", "0");
+#endif
         QApplication app(argc, argv);
         app.setWindowIcon(QIcon(QStringLiteral(":/icons/main.png")));
 

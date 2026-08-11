@@ -430,9 +430,27 @@ void MainWindow::updateSystemStatus(bool connected) {
  * 반영합니다.
  */
 void MainWindow::updateStreamConnectionStatus() {
-    const bool allStreamsReady =
-        !streamChannelReady_.isEmpty() && streamChannelReady_.size() == streamConfigs_.size() &&
-        std::all_of(streamChannelReady_.cbegin(), streamChannelReady_.cend(), [](bool ready) { return ready; });
+    bool hasEnabledStream = false;
+    bool allStreamsReady = true;
+
+    for (int channelIndex : channelsForArea(currentVideoAreaIndex_)) {
+        if (channelIndex < 0 || channelIndex >= streamConfigs_.size() || channelIndex >= streamChannelReady_.size()) {
+            allStreamsReady = false;
+            break;
+        }
+
+        if (!streamConfigs_[channelIndex].enabled) {
+            continue;
+        }
+
+        hasEnabledStream = true;
+        if (!streamChannelReady_[channelIndex]) {
+            allStreamsReady = false;
+            break;
+        }
+    }
+
+    allStreamsReady = hasEnabledStream && allStreamsReady;
 
     setTopBarStatus(ui_->connectionStatusLabel, QStringLiteral("CCTV 상태"),
                     allStreamsReady ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"),
@@ -792,6 +810,7 @@ void MainWindow::switchVideoArea(int areaIndex) {
     }
     updateReportButtons();
     updateVideoRiskBorders(latestVideoRiskLevels_);
+    updateStreamConnectionStatus();
 
     for (int channelIndex : channelsForArea(areaIndex)) {
         if (auto* videoWidget = qobject_cast<ClickableVideoWidget*>(videoWidgets_.value(channelIndex))) {
