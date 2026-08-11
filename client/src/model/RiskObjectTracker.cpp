@@ -248,15 +248,12 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         medianPositions.reserve(frame.objects.size());
     }
 
-    // 정규화와 경계 확장 이전에 프레임 단위로 걸러야 이상치가 배율까지 흔드는
-    // 것을 막는다. 속도 상한도 렌더 틱이 아니라 여기서 건다: 좌표는 프레임마다만
-    // 바뀌므로, 렌더 틱마다 걸면 한 프레임 분량의 이동이 한 틱에 몰려 정상
-    // 이동까지 상한에 걸린다
+    // 서버 좌표는 계약 원본으로 보존하고 화면 표시용 좌표만 별도 상태에서
+    // 보정한다. 속도 상한은 렌더 틱이 아니라 새 프레임이 들어올 때만 갱신한다.
     for (RiskObjectData& object : frame.objects) {
         const QPointF rawPosition = object.worldPosition;
-        object.worldPosition = medianFilteredWorldPosition(object.globalId, object.worldPosition);
-        const QPointF medianPosition = object.worldPosition;
-        object.worldPosition = rateLimitedWorldPosition(object.globalId, object.worldPosition, arrivalTimeMsec);
+        const QPointF medianPosition = medianFilteredWorldPosition(object.globalId, rawPosition);
+        rateLimitedWorldPosition(object.globalId, medianPosition, arrivalTimeMsec);
 
         if (diagnostics_.level > 0) {
             const QPointF medianDelta = medianPosition - rawPosition;
@@ -400,7 +397,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         object.objectId = QStringLiteral("G-%1").arg(sourceObject.globalId);
         object.type = sourceObject.objectClass == QStringLiteral("Human") ? DigitalTwinObjectType::Pedestrian
                                                                           : DigitalTwinObjectType::Vehicle;
-        const QPointF targetPosition = sourceObject.worldPosition;
+        const QPointF targetPosition = filteredPositions_.value(sourceObject.globalId, sourceObject.worldPosition);
         object.position =
             observed ? transitionedPosition(object.objectId, targetPosition, objectFrameSequence, localTimeMsec)
                      : targetPosition;
@@ -410,7 +407,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         const int nearestChannelIndex = sourceChannelIndexes.value(sourceObject.nearestId, -1);
         const bool crossCctvPair = sourceObject.nearestId > 0 && sourceObject.zoneId >= 0 && nearestChannelIndex >= 0 &&
                                    sourceObject.zoneId / 4 != nearestChannelIndex / 4;
-        object.riskLevel = crossCctvPair ? DigitalTwinRiskLevel::Normal : sourceObject.riskLevel;
+        object.riskLevel = sourceObject.riskLevel;
         object.opacity = qBound(0.0, opacity, 1.0);
         object.observed = observed;
         snapshot.objects.append(object);
@@ -418,7 +415,8 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         currentChannelIndexes.insert(object.objectId, object.channelIndex);
 
         if (!observed || sourceObject.nearestId <= 0 || !observedObjectIds.contains(sourceObject.nearestId) ||
-            object.riskLevel == DigitalTwinRiskLevel::Normal || sourceObject.zoneId < 0 || nearestChannelIndex < 0) {
+            object.riskLevel == DigitalTwinRiskLevel::Normal || sourceObject.zoneId < 0 || nearestChannelIndex < 0 ||
+            crossCctvPair) {
             return;
         }
 
@@ -578,7 +576,7 @@ void RiskObjectTracker::updateAutomaticWorldBounds(const RiskFrameData& frame) {
         if (automaticWorldSamples_.size() >= config_.world.automaticBoundsMaximumSamples) {
             break;
         }
-        automaticWorldSamples_.append(object.worldPosition);
+        automaticWorldSamples_.append(filteredPositions_.value(object.globalId, object.worldPosition));
     }
 
     const bool warmupComplete =
@@ -635,10 +633,11 @@ void RiskObjectTracker::expandAutomaticWorldBounds(const RiskFrameData& frame) {
     double top = automaticWorldBounds_.top();
     double bottom = automaticWorldBounds_.bottom();
     for (const RiskObjectData& object : frame.objects) {
-        left = qMin(left, object.worldPosition.x());
-        right = qMax(right, object.worldPosition.x());
-        top = qMin(top, object.worldPosition.y());
-        bottom = qMax(bottom, object.worldPosition.y());
+        const QPointF position = filteredPositions_.value(object.globalId, object.worldPosition);
+        left = qMin(left, position.x());
+        right = qMax(right, position.x());
+        top = qMin(top, position.y());
+        bottom = qMax(bottom, position.y());
     }
 
     const QRectF candidateBounds(left, top, right - left, bottom - top);

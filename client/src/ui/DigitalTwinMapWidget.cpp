@@ -623,20 +623,22 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
     updateMarkerPixmap(&demoItems_.last());
     updateVisualItem(&demoItems_.last());
 
-    if (liveMode_ && liveConfig_.debugDetail && object.position.x() > 0.0 && object.channelIndex >= channelsPerZone &&
-        object.channelIndex < digitalTwinChannelCount) {
+    if (liveMode_ && liveConfig_.debugDetail) {
         const QPointF scenePosition = scenePointForObject(object.position, object.channelIndex);
         const int mapIndex = object.position.x() <= liveConfig_.world.bounds.center().x() ? 0 : 1;
         qDebug().noquote() << QStringLiteral(
                                   "[TV SCENE] CREATE gid=%1 world=(%2,%3) zoneId=%4 "
-                                  "scene=(%5,%6) inside=%7")
+                                  "map=%5 scene=(%6,%7) inside=%8 worldInside=%9")
                                   .arg(object.objectId)
                                   .arg(object.position.x(), 0, 'f', 2)
                                   .arg(object.position.y(), 0, 'f', 2)
                                   .arg(object.channelIndex)
+                                  .arg(mapIndex + 1)
                                   .arg(scenePosition.x(), 0, 'f', 1)
                                   .arg(scenePosition.y(), 0, 'f', 1)
                                   .arg(objectAreaRects_[mapIndex].contains(scenePosition) ? QStringLiteral("yes")
+                                                                                          : QStringLiteral("no"))
+                                  .arg(liveConfig_.world.bounds.contains(object.position) ? QStringLiteral("yes")
                                                                                           : QStringLiteral("no"));
     }
 }

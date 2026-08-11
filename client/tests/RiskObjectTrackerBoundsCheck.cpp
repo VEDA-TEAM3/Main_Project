@@ -137,10 +137,10 @@ void checkPhysicalCctvRiskIsolation() {
     const DigitalTwinObject* second = findObject(snapshot, 20);
     check(snapshot.pairRiskStates.isEmpty(), "different physical CCTV maps must not share pair risk");
     check(tracker.takeRiskEvents().isEmpty(), "different physical CCTV maps must not share pulse events");
-    check(first != nullptr && first->riskLevel == DigitalTwinRiskLevel::Normal,
-          "cross-map risk must not activate the first map");
-    check(second != nullptr && second->riskLevel == DigitalTwinRiskLevel::Normal,
-          "cross-map risk must not activate the second map");
+    check(first != nullptr && first->riskLevel == DigitalTwinRiskLevel::Danger,
+          "client must preserve the first server risk level");
+    check(second != nullptr && second->riskLevel == DigitalTwinRiskLevel::Danger,
+          "client must preserve the second server risk level");
 }
 
 /**

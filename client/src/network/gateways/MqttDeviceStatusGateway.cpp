@@ -236,10 +236,6 @@ void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrame
                              .arg(frame.objects.size());
 
     for (const RiskObjectData& object : frame.objects) {
-        if (object.zoneId < 0) {
-            continue;
-        }
-
         qInfo().noquote() << QStringLiteral("[MQTT RISK OBJECT] gid=%1 pos=(%2,%3) cls=%4 risk=%5 zoneId=%6")
                                  .arg(object.globalId)
                                  .arg(object.worldPosition.x(), 0, 'f', 2)
