@@ -90,8 +90,8 @@
            </property>
           </widget>
          </item>
-          <item>
-           <spacer name="topSpacer">
+         <item>
+          <spacer name="topSpacer">
            <property name="orientation">
             <enum>Qt::Orientation::Horizontal</enum>
            </property>
@@ -101,48 +101,48 @@
              <height>20</height>
             </size>
            </property>
-           </spacer>
-          </item>
-          <item>
-           <widget class="QPushButton" name="videoAreaButton">
-            <property name="minimumSize">
-             <size>
-              <width>140</width>
-              <height>38</height>
-             </size>
-            </property>
-            <property name="maximumSize">
-             <size>
-              <width>140</width>
-              <height>38</height>
-             </size>
-            </property>
-            <property name="cursor">
-             <cursorShape>PointingHandCursor</cursorShape>
-            </property>
-            <property name="focusPolicy">
-             <enum>Qt::FocusPolicy::NoFocus</enum>
-            </property>
-            <property name="text">
-             <string>제 1구역</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <spacer name="topSpacerRight">
-            <property name="orientation">
-             <enum>Qt::Orientation::Horizontal</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>40</width>
-              <height>20</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-          <item>
-           <widget class="QLabel" name="dateLabel">
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="videoAreaButton">
+           <property name="minimumSize">
+            <size>
+             <width>140</width>
+             <height>38</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>140</width>
+             <height>38</height>
+            </size>
+           </property>
+           <property name="cursor">
+            <cursorShape>PointingHandCursor</cursorShape>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::FocusPolicy::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>제 1구역</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="topSpacerRight">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QLabel" name="dateLabel">
            <property name="text">
             <string>2026-07-06 14:21:08</string>
            </property>
@@ -245,141 +245,10 @@
                 </property>
                </spacer>
               </item>
-                <item>
-                <layout class="QHBoxLayout" name="reportButtonLayout">
-                 <property name="spacing">
-                  <number>6</number>
-                 </property>
-                 <property name="leftMargin">
-                  <number>0</number>
-                 </property>
-                 <property name="topMargin">
-                  <number>0</number>
-                 </property>
-                 <property name="rightMargin">
-                  <number>0</number>
-                 </property>
-                 <property name="bottomMargin">
-                  <number>0</number>
-                 </property>
-                 <item>
-                  <widget class="QFrame" name="reportActionCard">
-                   <property name="frameShape">
-                    <enum>QFrame::Shape::StyledPanel</enum>
-                   </property>
-                   <layout class="QHBoxLayout" name="reportActionCardLayout">
-                    <property name="spacing">
-                     <number>1</number>
-                    </property>
-                    <property name="leftMargin">
-                     <number>8</number>
-                    </property>
-                    <property name="topMargin">
-                     <number>0</number>
-                    </property>
-                    <property name="rightMargin">
-                     <number>9</number>
-                    </property>
-                    <property name="bottomMargin">
-                     <number>0</number>
-                    </property>
-                    <item>
-                     <widget class="QLabel" name="reportActionIconLabel">
-                      <property name="minimumSize">
-                       <size>
-                        <width>26</width>
-                        <height>26</height>
-                       </size>
-                      </property>
-                      <property name="maximumSize">
-                       <size>
-                        <width>26</width>
-                        <height>26</height>
-                       </size>
-                      </property>
-                      <property name="text">
-                       <string/>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QLabel" name="reportActionTitleLabel">
-                      <property name="text">
-                       <string>신고</string>
-                      </property>
-                      <property name="alignment">
-                       <set>Qt::AlignmentFlag::AlignCenter</set>
-                      </property>
-                     </widget>
-                    </item>
-                   </layout>
-                  </widget>
-                 </item>
-                 <item>
-                  <widget class="QPushButton" name="reportChannelButton1">
-                   <property name="cursor">
-                    <cursorShape>PointingHandCursor</cursorShape>
-                   </property>
-                   <property name="toolTip">
-                    <string>CH 01 신고</string>
-                   </property>
-                   <property name="text">
-                    <string>CH 01</string>
-                   </property>
-                  </widget>
-                 </item>
-                 <item>
-                  <widget class="QPushButton" name="reportChannelButton2">
-                   <property name="cursor">
-                    <cursorShape>PointingHandCursor</cursorShape>
-                   </property>
-                   <property name="toolTip">
-                    <string>CH 02 신고</string>
-                   </property>
-                   <property name="text">
-                    <string>CH 02</string>
-                   </property>
-                  </widget>
-                 </item>
-                 <item>
-                  <widget class="QPushButton" name="reportChannelButton3">
-                   <property name="cursor">
-                    <cursorShape>PointingHandCursor</cursorShape>
-                   </property>
-                   <property name="toolTip">
-                    <string>CH 03 신고</string>
-                   </property>
-                   <property name="text">
-                    <string>CH 03</string>
-                   </property>
-                  </widget>
-                 </item>
-                 <item>
-                  <widget class="QPushButton" name="reportChannelButton4">
-                   <property name="cursor">
-                    <cursorShape>PointingHandCursor</cursorShape>
-                   </property>
-                   <property name="toolTip">
-                    <string>CH 04 신고</string>
-                   </property>
-                   <property name="text">
-                    <string>CH 04</string>
-                   </property>
-                  </widget>
-                 </item>
-                </layout>
-               </item>
-             </layout>
-            </item>
-            <item>
-             <widget class="QStackedWidget" name="videoAreaStackedWidget">
-              <property name="frameShape">
-               <enum>QFrame::Shape::NoFrame</enum>
-              </property>
-              <widget class="QWidget" name="videoAreaPage1">
-               <layout class="QGridLayout" name="videoGridLayoutArea1">
+              <item>
+               <layout class="QHBoxLayout" name="reportButtonLayout">
                 <property name="spacing">
-                 <number>8</number>
+                 <number>6</number>
                 </property>
                 <property name="leftMargin">
                  <number>0</number>
@@ -392,6 +261,137 @@
                 </property>
                 <property name="bottomMargin">
                  <number>0</number>
+                </property>
+                <item>
+                 <widget class="QFrame" name="reportActionCard">
+                  <property name="frameShape">
+                   <enum>QFrame::Shape::StyledPanel</enum>
+                  </property>
+                  <layout class="QHBoxLayout" name="reportActionCardLayout">
+                   <property name="spacing">
+                    <number>1</number>
+                   </property>
+                   <property name="leftMargin">
+                    <number>8</number>
+                   </property>
+                   <property name="topMargin">
+                    <number>0</number>
+                   </property>
+                   <property name="rightMargin">
+                    <number>9</number>
+                   </property>
+                   <property name="bottomMargin">
+                    <number>0</number>
+                   </property>
+                   <item>
+                    <widget class="QLabel" name="reportActionIconLabel">
+                     <property name="minimumSize">
+                      <size>
+                       <width>26</width>
+                       <height>26</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>26</width>
+                       <height>26</height>
+                      </size>
+                     </property>
+                     <property name="text">
+                      <string/>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QLabel" name="reportActionTitleLabel">
+                     <property name="text">
+                      <string>신고</string>
+                     </property>
+                     <property name="alignment">
+                      <set>Qt::AlignmentFlag::AlignCenter</set>
+                     </property>
+                    </widget>
+                   </item>
+                  </layout>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="reportChannelButton1">
+                  <property name="cursor">
+                   <cursorShape>PointingHandCursor</cursorShape>
+                  </property>
+                  <property name="toolTip">
+                   <string>CH 01 신고</string>
+                  </property>
+                  <property name="text">
+                   <string>CH 01</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="reportChannelButton2">
+                  <property name="cursor">
+                   <cursorShape>PointingHandCursor</cursorShape>
+                  </property>
+                  <property name="toolTip">
+                   <string>CH 02 신고</string>
+                  </property>
+                  <property name="text">
+                   <string>CH 02</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="reportChannelButton3">
+                  <property name="cursor">
+                   <cursorShape>PointingHandCursor</cursorShape>
+                  </property>
+                  <property name="toolTip">
+                   <string>CH 03 신고</string>
+                  </property>
+                  <property name="text">
+                   <string>CH 03</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="reportChannelButton4">
+                  <property name="cursor">
+                   <cursorShape>PointingHandCursor</cursorShape>
+                  </property>
+                  <property name="toolTip">
+                   <string>CH 04 신고</string>
+                  </property>
+                  <property name="text">
+                   <string>CH 04</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QStackedWidget" name="videoAreaStackedWidget">
+              <property name="frameShape">
+               <enum>QFrame::Shape::NoFrame</enum>
+              </property>
+              <widget class="QWidget" name="videoAreaPage1">
+               <layout class="QGridLayout" name="videoGridLayoutArea1">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <property name="spacing">
+                 <number>8</number>
                 </property>
                 <item row="0" column="0">
                  <widget class="ClickableVideoWidget" name="camView1" native="true"/>
@@ -409,9 +409,6 @@
               </widget>
               <widget class="QWidget" name="videoAreaPage2">
                <layout class="QGridLayout" name="videoGridLayoutArea2">
-                <property name="spacing">
-                 <number>8</number>
-                </property>
                 <property name="leftMargin">
                  <number>0</number>
                 </property>
@@ -423,6 +420,9 @@
                 </property>
                 <property name="bottomMargin">
                  <number>0</number>
+                </property>
+                <property name="spacing">
+                 <number>8</number>
                 </property>
                 <item row="0" column="0">
                  <widget class="ClickableVideoWidget" name="camView5" native="true"/>
@@ -470,7 +470,7 @@
             <item>
              <widget class="QLabel" name="mapTitleLabel">
               <property name="text">
-               <string>디지털 트윈 주차장 맵 (B1F)</string>
+               <string>디지털 트윈 2D 맵</string>
               </property>
              </widget>
             </item>
@@ -620,7 +620,7 @@
          <item>
           <widget class="QLabel" name="safeLabel">
            <property name="text">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 정상 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 안전 상태&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 정상 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 안전 상태&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
           </widget>
          </item>
@@ -634,7 +634,7 @@
          <item>
           <widget class="QLabel" name="warnLabel">
            <property name="text">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 주의 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 유의 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 주의 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 유의 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
           </widget>
          </item>
@@ -648,7 +648,7 @@
          <item>
           <widget class="QLabel" name="dangerLabel">
            <property name="text">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 위험 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 즉시 대응 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;● 위험 &lt;span style=&quot;color:#f0f8fb;&quot;&gt;: 즉시 대응 필요&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
           </widget>
          </item>
@@ -673,7 +673,7 @@
    </layout>
   </widget>
  </widget>
-  <customwidgets>
+ <customwidgets>
   <customwidget>
    <class>ClickableVideoWidget</class>
    <extends>QWidget</extends>
