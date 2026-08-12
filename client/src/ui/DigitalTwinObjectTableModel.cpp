@@ -1,10 +1,11 @@
 #include "ui/DigitalTwinObjectTableModel.h"
 
-#include <QBrush>
-#include <QIcon>
+#include <QColor>
 #include <QString>
 #include <algorithm>
 #include <utility>
+
+#include "ui/TableModelRoles.h"
 
 namespace {
 constexpr int channelsPerArea = 4;
@@ -27,19 +28,19 @@ QString objectTypeText(DigitalTwinObjectType objectType) {
 }
 
 /**
- * @brief             객체 종류별 기본 아이콘 resource 경로를 반환합니다.
+ * @brief             객체 종류별 기본 아이콘 resource URL을 반환합니다.
  * @param objectType  디지털 트윈 객체 종류
- * @return            Qt resource icon path
+ * @return            QML Image가 읽을 수 있는 qrc URL
  */
-QString objectTypeIconPath(DigitalTwinObjectType objectType) {
+QString objectTypeIconUrl(DigitalTwinObjectType objectType) {
     switch (objectType) {
         case DigitalTwinObjectType::Vehicle:
-            return QStringLiteral(":/icons/vehicle_icon.png");
+            return QStringLiteral("qrc:/icons/vehicle_icon.png");
         case DigitalTwinObjectType::Pedestrian:
-            return QStringLiteral(":/icons/human_icon.png");
+            return QStringLiteral("qrc:/icons/human_icon.png");
     }
 
-    return QStringLiteral(":/icons/vehicle_icon.png");
+    return QStringLiteral("qrc:/icons/vehicle_icon.png");
 }
 
 /**
@@ -80,18 +81,18 @@ QString localChannelTextForZoneId(int zoneId) {
 /**
  * @brief         위험 단계에 맞는 행 글자색을 반환합니다.
  * @param object  표시할 객체
- * @return        목록에 사용할 foreground brush
+ * @return        목록에 사용할 글자색
  */
-QBrush foregroundBrushForObject(const DigitalTwinObject& object) {
+QColor textColorForObject(const DigitalTwinObject& object) {
     if (object.riskLevel == DigitalTwinRiskLevel::Danger) {
-        return QBrush(QColor(QStringLiteral("#ff5a5f")));
+        return QColor(QStringLiteral("#ff5a5f"));
     }
 
     if (object.riskLevel == DigitalTwinRiskLevel::Warning) {
-        return QBrush(QColor(QStringLiteral("#ffd43b")));
+        return QColor(QStringLiteral("#ffd43b"));
     }
 
-    return QBrush(QColor(QStringLiteral("#d8e3f2")));
+    return QColor(QStringLiteral("#d8e3f2"));
 }
 
 /**
@@ -149,21 +150,22 @@ int DigitalTwinObjectTableModel::columnCount(const QModelIndex& parent) const {
  */
 QVariant DigitalTwinObjectTableModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.row() < 0 || index.row() >= objects_.size()) {
-        return {};
+        return emptyCellValueForRole(role);
     }
 
     const DigitalTwinObject& object = objects_[index.row()];
 
-    if (role == Qt::TextAlignmentRole) {
-        return Qt::AlignCenter;
+    if (role == TextColorRole) {
+        return textColorForObject(object);
     }
 
-    if (role == Qt::ForegroundRole) {
-        return foregroundBrushForObject(object);
+    // 객체 목록은 행 배경을 강조하지 않고 표가 알아서 줄무늬를 넣게 둡니다.
+    if (role == RowColorRole) {
+        return QColor(Qt::transparent);
     }
 
-    if (role == Qt::DecorationRole && index.column() == ObjectTypeColumn) {
-        return QIcon(objectTypeIconPath(object.type));
+    if (role == IconSourceRole) {
+        return index.column() == ObjectTypeColumn ? objectTypeIconUrl(object.type) : QString();
     }
 
     if (role != Qt::DisplayRole) {
@@ -182,7 +184,7 @@ QVariant DigitalTwinObjectTableModel::data(const QModelIndex& index, int role) c
         case ObjectChannelColumn:
             return localChannelTextForZoneId(object.channelIndex);
         default:
-            return {};
+            return QString();
     }
 }
 
@@ -215,55 +217,48 @@ QVariant DigitalTwinObjectTableModel::headerData(int section, Qt::Orientation or
 }
 
 /**
- * @brief        view item의 동작 플래그를 반환합니다.
- * @param index  요청된 model index
- * @return       선택/편집 없이 표시만 허용하는 플래그
+ * @brief   QML delegate가 읽을 역할 이름표를 반환합니다.
+ * @return  역할 번호 → QML 속성 이름 대응표
  */
-Qt::ItemFlags DigitalTwinObjectTableModel::flags(const QModelIndex& index) const {
-    if (!index.isValid()) {
-        return Qt::NoItemFlags;
-    }
-
-    return Qt::ItemIsEnabled;
-}
+QHash<int, QByteArray> DigitalTwinObjectTableModel::roleNames() const { return tableModelRoleNames(); }
 
 /**
  * @brief          worker에서 전달된 최신 객체 목록을 model에 반영합니다.
  * @param objects  최신 객체 목록
  */
 void DigitalTwinObjectTableModel::updateObjects(QVector<DigitalTwinObject> objects) {
-    QVector<DigitalTwinObject> sortedObjects = sortedObjectsById(std::move(objects));
+    const QVector<DigitalTwinObject> sortedObjects = sortedObjectsById(std::move(objects));
 
-    if (!hasSameIdentityOrder(sortedObjects)) {
-        beginResetModel();
-        objects_ = std::move(sortedObjects);
-        endResetModel();
-        return;
-    }
-
-    objects_ = std::move(sortedObjects);
-
-    if (!objects_.isEmpty()) {
-        emit dataChanged(index(0, 0), index(static_cast<int>(objects_.size() - 1), ObjectListColumnCount - 1),
-                         {Qt::DisplayRole, Qt::DecorationRole, Qt::ForegroundRole});
-    }
-}
-
-/**
- * @brief          기존 행 순서와 새 객체 ID 순서가 같은지 확인합니다.
- * @param objects  비교할 새 객체 목록
- * @return         행 구조 변경 없이 dataChanged만 emit해도 되면 true
- */
-bool DigitalTwinObjectTableModel::hasSameIdentityOrder(const QVector<DigitalTwinObject>& objects) const {
-    if (objects_.size() != objects.size()) {
-        return false;
-    }
-
-    for (int index = 0; index < objects.size(); ++index) {
-        if (objects_[index].objectId != objects[index].objectId) {
-            return false;
+    // 초당 다섯 번 model 전체를 reset하면 view가 표시 상태를 매번 버립니다.
+    // 양쪽 다 objectId로 정렬돼 있으므로 사라진 행과 새로 생긴 행만 알립니다.
+    int row = 0;
+    while (row < objects_.size()) {
+        const QString existingId = objects_[row].objectId;
+        const auto stillAlive = std::find_if(
+            sortedObjects.cbegin(), sortedObjects.cend(),
+            [&existingId](const DigitalTwinObject& candidate) { return candidate.objectId == existingId; });
+        if (stillAlive == sortedObjects.cend()) {
+            beginRemoveRows(QModelIndex(), row, row);
+            objects_.remove(row);
+            endRemoveRows();
+            continue;
         }
+        ++row;
     }
 
-    return true;
+    for (int targetRow = 0; targetRow < sortedObjects.size(); ++targetRow) {
+        if (targetRow >= objects_.size() || objects_[targetRow].objectId != sortedObjects[targetRow].objectId) {
+            beginInsertRows(QModelIndex(), targetRow, targetRow);
+            objects_.insert(targetRow, sortedObjects[targetRow]);
+            endInsertRows();
+            continue;
+        }
+
+        objects_[targetRow] = sortedObjects[targetRow];
+    }
+
+    // 역할을 나열하면 빠뜨린 역할이 갱신되지 않아 아이콘과 글자가 어긋납니다. 전체 역할을 알립니다.
+    if (!objects_.isEmpty()) {
+        emit dataChanged(index(0, 0), index(static_cast<int>(objects_.size() - 1), ObjectListColumnCount - 1));
+    }
 }

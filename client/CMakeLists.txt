@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(ProcessorCount)
 
-find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickWidgets Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickControls2 QuickWidgets Widgets)
 
 set(GSTREAMER_ROOT "C:/Program Files/gstreamer/1.0/mingw_x86_64" CACHE PATH
     "GStreamer MinGW x86_64 runtime root")
@@ -48,6 +48,8 @@ qt_add_executable(Qtcctvclient
     src/ui/panels/EventLogPanel.cpp
     include/ui/panels/ObjectListPanel.h
     src/ui/panels/ObjectListPanel.cpp
+    include/ui/SharedQmlEngine.h
+    include/ui/TableModelRoles.h
     include/ui/DigitalTwinMapWidget.h
     src/ui/DigitalTwinMapWidget.cpp
     include/ui/DigitalTwinMapSceneBuilder.h
@@ -185,8 +187,12 @@ qt_add_resources(Qtcctvclient "qml_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/CctvToolbar.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLegend.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OverlayDialog.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/qml/SettingsForm.ui.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/qml/DashboardForm.ui.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/DataTable.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/DeviceStatusView.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/SettingsDialog.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionCheckBox.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionComboBox.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionSlider.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLabel.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBar.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBarForm.ui.qml"
@@ -301,6 +307,7 @@ target_link_libraries(Qtcctvclient PRIVATE
     Qt6::Mqtt
     Qt6::Network
     Qt6::Quick
+    Qt6::QuickControls2
     Qt6::QuickWidgets
 
     gstreamer-1.0
@@ -323,6 +330,16 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+
+    add_executable(table_model_roles_check
+        tests/TableModelRolesCheck.cpp
+    )
+
+    target_include_directories(table_model_roles_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(table_model_roles_check PRIVATE Qt6::Gui)
 
     add_executable(risk_message_parser_check
         tests/RiskMessageParserCheck.cpp

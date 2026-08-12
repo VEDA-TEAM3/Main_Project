@@ -1,21 +1,14 @@
 #include "ui/panels/DeviceStatusPanel.h"
 
-#include <QEasingCurve>
-#include <QFrame>
-#include <QGraphicsOpacityEffect>
-#include <QGridLayout>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPixmap>
-#include <QPropertyAnimation>
-#include <QSizePolicy>
-#include <QStyle>
+#include <QQuickItem>
+#include <QQuickWidget>
 #include <QVBoxLayout>
+#include <QVariantList>
+
+#include "ui/SharedQmlEngine.h"
 
 namespace {
 constexpr int visibleChannelCount = 4;
-constexpr int deviceStatusIconSize = 22;
-constexpr int stateFadeDurationMsec = 180;
 
 bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
     return left.channelIndex == right.channelIndex && left.outputs.ledRed == right.outputs.ledRed &&
@@ -26,7 +19,12 @@ bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& r
            left.detail == right.detail && left.confirmedSourceTimestamp == right.confirmedSourceTimestamp;
 }
 
-QString channelHealthProperty(const DeviceChannelStatus& status) {
+/**
+ * @brief         카드 테두리 색을 고르는 데 쓰는 상태 이름을 반환합니다.
+ * @param status  대상 채널 상태
+ * @return        confirmed, failed 또는 unknown
+ */
+QString channelHealthState(const DeviceChannelStatus& status) {
     if (status.feedbackHealth == DeviceFeedbackHealth::Failed) {
         return QStringLiteral("failed");
     }
@@ -38,6 +36,22 @@ QString channelHealthProperty(const DeviceChannelStatus& status) {
     return QStringLiteral("confirmed");
 }
 
+/**
+ * @brief         카드에 표시할 안내 문구를 반환합니다.
+ * @param status  대상 채널 상태
+ * @return        피드백 상태 설명
+ */
+QString channelTooltip(const DeviceChannelStatus& status) {
+    if (status.feedbackHealth == DeviceFeedbackHealth::Failed) {
+        return QStringLiteral("마지막 확정 상태 표시 중\n상태 확인 실패: %1").arg(status.detail);
+    }
+
+    if (status.feedbackHealth == DeviceFeedbackHealth::Confirmed) {
+        return QStringLiteral("장비 출력 피드백 확인됨");
+    }
+
+    return QStringLiteral("장비 상태 미수신");
+}
 }  // namespace
 
 /**
@@ -46,12 +60,8 @@ QString channelHealthProperty(const DeviceChannelStatus& status) {
  */
 DeviceStatusPanel::DeviceStatusPanel(QWidget* parent) : QWidget(parent) {
     setChannelCount(visibleChannelCount);
-
     setupUi();
-
-    for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
-        updateChannelWidgets(localChannelIndex);
-    }
+    refreshChannels();
 }
 
 /**
@@ -70,14 +80,11 @@ void DeviceStatusPanel::setChannelCount(int channelCount) {
     }
 
     areaIndex_ = qMin(areaIndex_, normalizedChannelCount / visibleChannelCount - 1);
-    for (int localChannelIndex = 0; localChannelIndex < channelWidgets_.size(); ++localChannelIndex) {
-        updateChannelWidgets(localChannelIndex);
-    }
+    refreshChannels();
 }
 
 /**
  * @brief            패널에 표시할 CCTV 구역을 변경합니다.
- *
  * @param areaIndex  0부터 시작하는 구역 인덱스
  */
 void DeviceStatusPanel::setAreaIndex(int areaIndex) {
@@ -86,27 +93,34 @@ void DeviceStatusPanel::setAreaIndex(int areaIndex) {
     }
 
     areaIndex_ = areaIndex;
-    for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
-        updateChannelWidgets(localChannelIndex);
-    }
+    refreshChannels();
 }
 
 /**
- * @brief        단일 채널 장비 상태를 UI에 반영합니다.
+ * @brief         단일 채널 장비 상태를 보관합니다.
  * @param status  갱신할 채널 상태
+ * @return        현재 보이는 구역의 값이 실제로 바뀌었으면 true
  */
-void DeviceStatusPanel::setChannelStatus(const DeviceChannelStatus& status) {
+bool DeviceStatusPanel::storeChannelStatus(const DeviceChannelStatus& status) {
     if (status.channelIndex < 0 || status.channelIndex >= channelStatuses_.size()) {
-        return;
+        return false;
     }
 
     if (statusesEqual(channelStatuses_[status.channelIndex], status)) {
-        return;
+        return false;
     }
 
     channelStatuses_[status.channelIndex] = status;
-    if (status.channelIndex / visibleChannelCount == areaIndex_) {
-        updateChannelWidgets(status.channelIndex % visibleChannelCount);
+    return status.channelIndex / visibleChannelCount == areaIndex_;
+}
+
+/**
+ * @brief         단일 채널 장비 상태를 UI에 반영합니다.
+ * @param status  갱신할 채널 상태
+ */
+void DeviceStatusPanel::setChannelStatus(const DeviceChannelStatus& status) {
+    if (storeChannelStatus(status)) {
+        refreshChannels();
     }
 }
 
@@ -115,217 +129,52 @@ void DeviceStatusPanel::setChannelStatus(const DeviceChannelStatus& status) {
  * @param statuses  갱신할 채널 상태 목록
  */
 void DeviceStatusPanel::setChannelStatuses(const QVector<DeviceChannelStatus>& statuses) {
-    if (statuses.isEmpty()) {
-        return;
-    }
-
-    const bool restoreUpdates = updatesEnabled();
-
-    if (restoreUpdates) {
-        setUpdatesEnabled(false);
-    }
-
+    bool visibleChanged = false;
     for (const DeviceChannelStatus& status : statuses) {
-        setChannelStatus(status);
+        visibleChanged = storeChannelStatus(status) || visibleChanged;
     }
 
-    if (restoreUpdates) {
-        setUpdatesEnabled(true);
-        update();
+    if (visibleChanged) {
+        refreshChannels();
     }
 }
 
 /**
- * @brief   장비 상태 패널의 전체 레이아웃을 구성합니다.
+ * @brief   장비 상태 QML 뷰를 패널에 배치합니다.
  */
 void DeviceStatusPanel::setupUi() {
-    auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(6, 6, 6, 6);
-    rootLayout->setSpacing(0);
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
-    auto* gridLayout = new QGridLayout();
-    gridLayout->setContentsMargins(0, 0, 0, 0);
-    gridLayout->setHorizontalSpacing(8);
-    gridLayout->setVerticalSpacing(6);
+    view_ = createQmlPanelView(QStringLiteral("DeviceStatusView.qml"), this);
+    if (view_) {
+        layout->addWidget(view_);
+    }
+}
 
+/**
+ * @brief   현재 구역의 네 채널 상태를 QML이 읽는 배열로 만들어 넘깁니다.
+ */
+void DeviceStatusPanel::refreshChannels() {
+    QVariantList channels;
     for (int localChannelIndex = 0; localChannelIndex < visibleChannelCount; ++localChannelIndex) {
-        gridLayout->addWidget(createChannelCard(localChannelIndex), localChannelIndex / 2, localChannelIndex % 2);
+        const int globalChannelIndex = areaIndex_ * visibleChannelCount + localChannelIndex;
+        const DeviceChannelStatus status = channelStatuses_.value(globalChannelIndex);
+        const bool outputsKnown = status.hasConfirmedState;
+
+        // ponytail: QVariantMap을 담으면 heap이 깨져서(자세한 내용은 CLAUDE.md) 평평한 배열로 넘깁니다.
+        // 자리 순서는 DeviceStatusView.qml의 readonly 속성과 짝을 맞춰야 합니다.
+        // QVariant로 감싸지 않으면 QList::append(const QList&) 오버로드가 골라져 통째로 펼쳐집니다.
+        channels.append(QVariant(
+            QVariantList{QStringLiteral("CH %1").arg(localChannelIndex + 1, 2, 10, QLatin1Char('0')),
+                         channelHealthState(status), channelTooltip(status), outputsKnown && status.outputs.ledGreen,
+                         outputsKnown && status.outputs.ledYellow, outputsKnown && status.outputs.ledRed,
+                         outputsKnown && !status.outputs.beacon, outputsKnown && status.outputs.beacon,
+                         outputsKnown && !status.outputs.buzzer, outputsKnown && status.outputs.buzzer}));
     }
 
-    gridLayout->setColumnStretch(0, 1);
-    gridLayout->setColumnStretch(1, 1);
-    gridLayout->setRowStretch(0, 1);
-    gridLayout->setRowStretch(1, 1);
-    rootLayout->addLayout(gridLayout, 1);
-}
-
-/**
- * @brief               채널 하나의 LED, 경광등, 부저 상태 카드를 생성합니다.
- * @param channelIndex  생성할 채널 index
- * @return              생성된 채널 카드 frame
- */
-QFrame* DeviceStatusPanel::createChannelCard(int channelIndex) {
-    ChannelWidgets widgets;
-    widgets.card = new QFrame(this);
-    widgets.card->setObjectName(QStringLiteral("deviceChannelCard"));
-
-    auto* cardLayout = new QVBoxLayout(widgets.card);
-    cardLayout->setContentsMargins(6, 4, 6, 6);
-    cardLayout->setSpacing(4);
-
-    widgets.titleLabel =
-        new QLabel(QStringLiteral("CH %1").arg(channelIndex + 1, 2, 10, QLatin1Char('0')), widgets.card);
-    widgets.titleLabel->setObjectName(QStringLiteral("deviceChannelTitleLabel"));
-    cardLayout->addWidget(widgets.titleLabel);
-
-    widgets.ledSafeLabel = createStatusSegment({QStringLiteral("SAFE"), QStringLiteral("safe")});
-    widgets.ledWarningLabel = createStatusSegment({QStringLiteral("WARNING"), QStringLiteral("warning")});
-    widgets.ledDangerLabel = createStatusSegment({QStringLiteral("DANGER"), QStringLiteral("danger")});
-    cardLayout->addWidget(createStatusRow({QStringLiteral(":/icons/led_icon.png"),
-                                           QStringLiteral("LED 전광판"),
-                                           {widgets.ledSafeLabel, widgets.ledWarningLabel, widgets.ledDangerLabel}}));
-
-    widgets.beaconOffLabel = createStatusSegment({QStringLiteral("OFF"), QStringLiteral("off")});
-    widgets.beaconOnLabel = createStatusSegment({QStringLiteral("ON"), QStringLiteral("on")});
-    cardLayout->addWidget(createStatusRow({QStringLiteral(":/icons/siren_icon.png"),
-                                           QStringLiteral("경광등"),
-                                           {widgets.beaconOffLabel, widgets.beaconOnLabel}}));
-
-    widgets.buzzerOffLabel = createStatusSegment({QStringLiteral("OFF"), QStringLiteral("off")});
-    widgets.buzzerOnLabel = createStatusSegment({QStringLiteral("ON"), QStringLiteral("on")});
-    cardLayout->addWidget(createStatusRow({QStringLiteral(":/icons/buzzer_icon.png"),
-                                           QStringLiteral("부저"),
-                                           {widgets.buzzerOffLabel, widgets.buzzerOnLabel}}));
-
-    channelWidgets_.append(widgets);
-
-    return widgets.card;
-}
-
-/**
- * @brief        아이콘과 상태 선택 segment를 가진 장비 상태 행을 생성합니다.
- * @param spec   아이콘, tooltip, segment를 묶은 행 명세
- * @return       생성된 상태 행 frame
- */
-QFrame* DeviceStatusPanel::createStatusRow(const StatusRowSpec& spec) {
-    auto* rowFrame = new QFrame(this);
-    rowFrame->setObjectName(QStringLiteral("deviceStatusRow"));
-    rowFrame->setToolTip(spec.tooltip);
-
-    auto* rowLayout = new QHBoxLayout(rowFrame);
-    rowLayout->setContentsMargins(5, 2, 5, 2);
-    rowLayout->setSpacing(6);
-
-    auto* iconLabel = new QLabel(rowFrame);
-    iconLabel->setObjectName(QStringLiteral("deviceStatusIconLabel"));
-    iconLabel->setFixedSize(deviceStatusIconSize, deviceStatusIconSize);
-    iconLabel->setAlignment(Qt::AlignCenter);
-    iconLabel->setPixmap(
-        QPixmap(spec.iconPath)
-            .scaled(deviceStatusIconSize, deviceStatusIconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    rowLayout->addWidget(iconLabel);
-
-    auto* separator = new QFrame(rowFrame);
-    separator->setObjectName(QStringLiteral("deviceStatusSeparator"));
-    separator->setFixedWidth(1);
-    separator->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    rowLayout->addWidget(separator);
-
-    for (auto* segment : spec.segments) {
-        segment->setParent(rowFrame);
-        rowLayout->addWidget(segment, 1);
-    }
-
-    return rowFrame;
-}
-
-/**
- * @brief        상태 segment label을 생성합니다.
- * @param spec   표시 문자열과 QSS 상태 종류를 묶은 segment 명세
- * @return       생성된 segment label
- */
-QLabel* DeviceStatusPanel::createStatusSegment(const StatusSegmentSpec& spec) {
-    auto* segment = new QLabel(spec.text);
-    segment->setObjectName(QStringLiteral("deviceStateSegment"));
-    segment->setAlignment(Qt::AlignCenter);
-    segment->setMinimumHeight(20);
-    segment->setProperty("stateKind", spec.stateKind);
-    segment->setProperty("active", false);
-
-    auto* opacityEffect = new QGraphicsOpacityEffect(segment);
-    opacityEffect->setOpacity(1.0);
-    segment->setGraphicsEffect(opacityEffect);
-
-    auto* fadeAnimation = new QPropertyAnimation(opacityEffect, "opacity", segment);
-    fadeAnimation->setObjectName(QStringLiteral("stateFadeAnimation"));
-    fadeAnimation->setDuration(stateFadeDurationMsec);
-    fadeAnimation->setStartValue(0.55);
-    fadeAnimation->setEndValue(1.0);
-    fadeAnimation->setEasingCurve(QEasingCurve::OutCubic);
-
-    return segment;
-}
-
-/**
- * @brief               채널 상태값에 맞춰 각 segment 활성 상태를 갱신합니다.
- * @param channelIndex  갱신할 채널 index
- */
-void DeviceStatusPanel::updateChannelWidgets(int channelIndex) {
-    const int globalChannelIndex = areaIndex_ * visibleChannelCount + channelIndex;
-    if (channelIndex < 0 || channelIndex >= channelWidgets_.size() || globalChannelIndex < 0 ||
-        globalChannelIndex >= channelStatuses_.size()) {
-        return;
-    }
-
-    const DeviceChannelStatus& status = channelStatuses_[globalChannelIndex];
-    const ChannelWidgets& widgets = channelWidgets_[channelIndex];
-    const bool outputsKnown = status.hasConfirmedState;
-
-    setSegmentActive(widgets.ledSafeLabel, outputsKnown && status.outputs.ledGreen);
-    setSegmentActive(widgets.ledWarningLabel, outputsKnown && status.outputs.ledYellow);
-    setSegmentActive(widgets.ledDangerLabel, outputsKnown && status.outputs.ledRed);
-    setSegmentActive(widgets.beaconOffLabel, outputsKnown && !status.outputs.beacon);
-    setSegmentActive(widgets.beaconOnLabel, outputsKnown && status.outputs.beacon);
-    setSegmentActive(widgets.buzzerOffLabel, outputsKnown && !status.outputs.buzzer);
-    setSegmentActive(widgets.buzzerOnLabel, outputsKnown && status.outputs.buzzer);
-
-    const QString healthProperty = channelHealthProperty(status);
-    if (widgets.card->property("healthState").toString() != healthProperty) {
-        widgets.card->setProperty("healthState", healthProperty);
-        widgets.card->style()->unpolish(widgets.card);
-        widgets.card->style()->polish(widgets.card);
-        widgets.card->update();
-    }
-
-    if (status.feedbackHealth == DeviceFeedbackHealth::Failed) {
-        widgets.card->setToolTip(QStringLiteral("마지막 확정 상태 표시 중\n상태 확인 실패: %1").arg(status.detail));
-    } else if (status.feedbackHealth == DeviceFeedbackHealth::Confirmed) {
-        widgets.card->setToolTip(QStringLiteral("장비 출력 피드백 확인됨"));
-    } else {
-        widgets.card->setToolTip(QStringLiteral("장비 상태 미수신"));
-    }
-}
-
-/**
- * @brief         상태 segment의 현재 활성 여부를 QSS 속성으로 반영합니다.
- * @param label   갱신할 segment label
- * @param active  현재 상태이면 true
- */
-void DeviceStatusPanel::setSegmentActive(QLabel* label, bool active) {
-    if (!label) {
-        return;
-    }
-
-    if (label->property("active").toBool() == active) {
-        return;
-    }
-
-    label->setProperty("active", active);
-    label->style()->unpolish(label);
-    label->style()->polish(label);
-
-    if (auto* animation = label->findChild<QPropertyAnimation*>(QStringLiteral("stateFadeAnimation"))) {
-        animation->stop();
-        animation->start();
+    if (view_ && view_->rootObject()) {
+        view_->rootObject()->setProperty("channels", channels);
     }
 }

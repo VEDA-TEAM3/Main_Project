@@ -7,6 +7,8 @@ Rectangle {
     property alias text: label.text
     property url iconSource
     property bool selected: false
+    /** 창을 열자마자 현재 선택으로 바로 보이도록, 여는 순간에는 전환을 끄고 스냅합니다. */
+    property bool animated: true
     signal clicked
 
     implicitWidth: 92
@@ -18,8 +20,8 @@ Rectangle {
     opacity: root.enabled ? 1.0 : 0.45
     scale: tapHandler.pressed ? 0.98 : 1.0
 
-    Behavior on color { ColorAnimation { duration: 120 } }
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    Behavior on color { enabled: root.animated; ColorAnimation { duration: 120 } }
+    Behavior on border.color { enabled: root.animated; ColorAnimation { duration: 120 } }
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
     Row {

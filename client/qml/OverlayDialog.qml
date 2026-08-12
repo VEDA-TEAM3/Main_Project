@@ -11,13 +11,21 @@ PanelFrame {
     property string mode: "information"
     property string titleText: "안내"
     property string messageText: ""
+    property string channelText: ""
+    property string riskText: ""
     property var choices: []
     property int selectedIndex: 0
+    /** 창을 여는 순간에는 전환을 꺼서 현재 구역이 곧바로 선택된 상태로 보이게 합니다. */
+    property bool selectionAnimated: true
     signal accepted(int selectedIndex)
     signal rejected
 
-    implicitWidth: root.mode === "area" ? 590 : 460
-    implicitHeight: root.mode === "area" ? 280 : 230
+    readonly property bool reportMode: root.mode === "confirmation" || root.mode === "success"
+    readonly property color riskColor: root.riskText === "위험" ? Theme.danger
+                                                                : (root.riskText === "주의" ? Theme.warning : Theme.safe)
+
+    implicitWidth: root.mode === "area" ? 590 : 470
+    implicitHeight: root.mode === "area" ? 280 : (root.reportMode ? 288 : 230)
     radius: 0
     color: Theme.surfaceRaised
     border.color: Theme.borderStrong
@@ -100,31 +108,117 @@ PanelFrame {
                 anchors.topMargin: 10
                 anchors.bottomMargin: 12
 
-                Column {
-                    anchors.centerIn: parent
-                    width: parent.width
-                    spacing: root.mode === "area" ? 10 : 0
+                // 신고 확인/완료는 대상 채널과 현재 위험 상태를 함께 보여 줍니다.
+                Rectangle {
+                    anchors.fill: parent
+                    visible: root.reportMode
+                    color: Theme.background
+                    border.width: 1
+                    border.color: Theme.border
+                    radius: 4
 
-                    Text {
-                        width: parent.width
-                        visible: root.messageText.length > 0
-                        text: root.messageText
-                        color: Theme.text
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        wrapMode: Text.WordWrap
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 15
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 0
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 14
+
+                        Row {
+                            width: parent.width
+                            height: 34
+                            spacing: 10
+
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: channelLabel.implicitWidth + 22
+                                height: 30
+                                radius: 3
+                                color: Theme.surfaceRaised
+                                border.width: 1
+                                border.color: Theme.cyan
+
+                                Text {
+                                    id: channelLabel
+
+                                    anchors.centerIn: parent
+                                    text: root.channelText
+                                    color: Theme.cyan
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 15
+                                    font.weight: Font.Bold
+                                    font.letterSpacing: 0
+                                }
+                            }
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "현재 상태"
+                                color: Theme.textMuted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0
+                            }
+
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 9
+                                    height: 9
+                                    radius: 4.5
+                                    color: root.riskColor
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: root.riskText
+                                    color: root.riskColor
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 14
+                                    font.weight: Font.Bold
+                                    font.letterSpacing: 0
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: Theme.border
+                            opacity: 0.7
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: root.messageText
+                            color: Theme.text
+                            wrapMode: Text.WordWrap
+                            lineHeight: 1.25
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0
+                        }
                     }
+                }
+
+                // 구역 선택은 안내 문구 없이 버튼만 두고 배경 상자를 깝니다.
+                // 구역이 늘어나면 격자가 이 상자 안에서 왼쪽 위부터 계속 이어집니다.
+                Rectangle {
+                    anchors.fill: parent
+                    visible: root.mode === "area"
+                    color: Theme.background
+                    border.width: 1
+                    border.color: Theme.border
+                    radius: 4
 
                     GridView {
                         id: choiceGrid
 
-                        visible: root.mode === "area"
-                        width: parent.width
-                        height: visible ? 104 : 0
+                        anchors.fill: parent
+                        anchors.margins: 12
                         cellWidth: width / 4
                         cellHeight: 48
                         model: root.choices
@@ -145,10 +239,26 @@ PanelFrame {
                                 height: 38
                                 text: choiceDelegate.modelData
                                 selected: root.selectedIndex === choiceDelegate.index
+                                animated: root.selectionAnimated
                                 onClicked: root.selectedIndex = choiceDelegate.index
                             }
                         }
                     }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    width: parent.width
+                    visible: !root.reportMode && root.mode !== "area" && root.messageText.length > 0
+                    text: root.messageText
+                    color: Theme.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 0
                 }
             }
     }

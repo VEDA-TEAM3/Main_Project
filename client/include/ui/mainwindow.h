@@ -24,7 +24,6 @@ class QFrame;
 class QGridLayout;
 class QLabel;
 class QBoxLayout;
-class QQmlEngine;
 class QQuickWidget;
 class MapSettingsDialog;
 class QResizeEvent;
@@ -105,6 +104,7 @@ private:
     void setQuickTopBarProperty(const char* name, const QVariant& value);
     void setQuickDialogProperty(const char* name, const QVariant& value);
     void showQuickDialog(const QString& mode, const QString& title, const QString& message);
+    void setReportDialogChannelProperties(int channelNumber);
     QRect quickDialogHostGeometry() const;
     void toggleFullScreen();
 
@@ -134,7 +134,6 @@ private:
     MapSettingsDialog* mapSettingsDialog_ = nullptr;
     QWidget* expandedWidget_ = nullptr;
     QTimer clockTimer_;
-    QQmlEngine* quickEngine_ = nullptr;
     QQuickWidget* quickTopBar_ = nullptr;
     QQuickWidget* quickCctvToolbar_ = nullptr;
     QQuickWidget* quickLegend_ = nullptr;

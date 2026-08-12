@@ -6,12 +6,7 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QKeySequence>
-#include <QLabel>
 #include <QMessageBox>
-#include <QMouseEvent>
-#include <QPixmap>
-#include <QPushButton>
-#include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QResizeEvent>
@@ -39,6 +34,7 @@
 #include "ui/ClickableVideoWidget.h"
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
+#include "ui/SharedQmlEngine.h"
 #include "ui/VideoRiskBorderFrame.h"
 #include "ui/dialogs/MapSettingsDialog.h"
 #include "ui/panels/DashboardPanelCoordinator.h"
@@ -225,8 +221,18 @@ QString MainWindow::reportRiskLevel(int channelNumber) const {
 void MainWindow::openReportConfirmationDialog(int channelNumber) {
     pendingReportChannelNumber_ = qBound(1, channelNumber, videoChannelsPerArea);
     quickDialogMode_ = QuickDialogMode::ReportConfirmation;
+    setReportDialogChannelProperties(pendingReportChannelNumber_);
     showQuickDialog(QStringLiteral("confirmation"), QStringLiteral("신고 확인"),
-                    QStringLiteral("%1 채널을 신고하겠습니까?").arg(pendingReportChannelNumber_));
+                    QStringLiteral("이 채널의 현재 상황을 안전 센터로 신고합니다. 계속하시겠습니까?"));
+}
+
+/**
+ * @brief               신고 다이얼로그에 대상 채널과 현재 위험 단계를 전달합니다.
+ * @param channelNumber 사용자에게 표시할 1부터 4까지의 채널 번호
+ */
+void MainWindow::setReportDialogChannelProperties(int channelNumber) {
+    setQuickDialogProperty("channelText", QStringLiteral("CH %1").arg(channelNumber, 2, 10, QLatin1Char('0')));
+    setQuickDialogProperty("riskText", reportRiskLevel(channelNumber));
 }
 
 /**
@@ -236,8 +242,9 @@ void MainWindow::openReportConfirmationDialog(int channelNumber) {
 void MainWindow::openReportSuccessDialog(int channelNumber) {
     pendingReportChannelNumber_ = qBound(1, channelNumber, videoChannelsPerArea);
     quickDialogMode_ = QuickDialogMode::ReportSuccess;
+    setReportDialogChannelProperties(pendingReportChannelNumber_);
     showQuickDialog(QStringLiteral("success"), QStringLiteral("신고 완료"),
-                    QStringLiteral("%1 채널을 안전 센터에 신고하였습니다!").arg(pendingReportChannelNumber_));
+                    QStringLiteral("안전 센터로 신고가 접수되었습니다."));
 }
 
 /**
@@ -386,6 +393,7 @@ void MainWindow::setupQuickDialogOverlay() {
     quickDialogOverlay_->setWindowModality(Qt::WindowModal);
     quickDialogOverlay_->setClearColor(QColor(QStringLiteral("#123a55")));
     quickDialogOverlay_->hide();
+    setQuickDialogProperty("selectionAnimated", false);
     connect(quickDialogOverlay_->rootObject(), SIGNAL(accepted(int)), this, SLOT(handleQuickDialogAccepted(int)));
     connect(quickDialogOverlay_->rootObject(), SIGNAL(rejected()), this, SLOT(closeQuickDialog()));
 }
@@ -397,11 +405,7 @@ void MainWindow::setupQuickDialogOverlay() {
  * @return        루트 객체 로딩까지 성공하면 QQuickWidget, 실패하면 nullptr
  */
 QQuickWidget* MainWindow::createQuickView(const QString& qmlFile, QWidget* parent, Qt::WindowFlags windowFlags) {
-    if (!quickEngine_) {
-        quickEngine_ = new QQmlEngine(this);
-    }
-
-    auto* view = new QQuickWidget(quickEngine_, parent);
+    auto* view = new QQuickWidget(sharedQmlEngine(), parent);
     // 플래그는 반드시 setSource 이전에 지정합니다. 이후에 바꾸면 네이티브 창이 다시 만들어지면서
     // 이미 올라간 scene graph가 화면에 나오지 않습니다.
     if (windowFlags != Qt::WindowFlags()) {
@@ -796,8 +800,7 @@ void MainWindow::openVideoAreaSelectionDialog() {
     quickDialogMode_ = QuickDialogMode::AreaSelection;
     setQuickDialogProperty("choices", areaNames);
     setQuickDialogProperty("selectedIndex", currentVideoAreaIndex_);
-    showQuickDialog(QStringLiteral("area"), QStringLiteral("모니터링 구역 선택"),
-                    QStringLiteral("화면에 출력할 주차 구역을 선택하세요."));
+    showQuickDialog(QStringLiteral("area"), QStringLiteral("모니터링 구역 선택"), QString());
 }
 
 /** @brief Qt Quick 오버레이의 확인 동작을 현재 모드에 따라 처리합니다. */
@@ -817,6 +820,9 @@ void MainWindow::closeQuickDialog() {
     if (quickDialogOverlay_) {
         quickDialogOverlay_->hide();
     }
+    // 다음에 열 때 현재 선택이 곧바로 보이도록, 닫는 시점부터 전환을 꺼 둡니다.
+    // showQuickDialog보다 먼저 selectedIndex가 설정되는 경로가 있어 여는 쪽에서 끄면 늦습니다.
+    setQuickDialogProperty("selectionAnimated", false);
     quickDialogMode_ = QuickDialogMode::None;
 }
 
@@ -833,12 +839,24 @@ void MainWindow::showQuickDialog(const QString& mode, const QString& title, cons
         return;
     }
 
+    // 이전에 열었던 선택이 새 선택으로 흘러가는 전환이 보이지 않도록 여는 동안에는 끕니다.
+    setQuickDialogProperty("selectionAnimated", false);
     setQuickDialogProperty("mode", mode);
     setQuickDialogProperty("titleText", title);
     setQuickDialogProperty("messageText", message);
-    quickDialogOverlay_->setGeometry(quickDialogHostGeometry());
+
+    // QML이 알려준 패널 크기를 창 크기로 고정합니다. setGeometry만으로는 위젯 sizeHint에
+    // 밀려 창이 작게 잡히면서 버튼이 잘렸습니다.
+    QQuickItem* rootObject = quickDialogOverlay_->rootObject();
+    const QSize panelSize(qRound(rootObject->implicitWidth()), qRound(rootObject->implicitHeight()));
+    quickDialogOverlay_->setFixedSize(panelSize);
+    const QWidget* host = ui_->centralwidget;
+    const QPoint hostCenter = host->mapToGlobal(host->rect().center());
+    quickDialogOverlay_->move(hostCenter - QPoint(panelSize.width() / 2, panelSize.height() / 2));
     quickDialogOverlay_->show();
     quickDialogOverlay_->raise();
+    // 첫 프레임이 그려진 뒤에 되살려 여는 순간의 전환을 확실히 막습니다.
+    QTimer::singleShot(150, this, [this]() { setQuickDialogProperty("selectionAnimated", true); });
 }
 
 /** @brief QML이 알려준 패널 크기로 오버레이 창을 메인 윈도우 중앙에 맞춥니다. */

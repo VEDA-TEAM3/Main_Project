@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QVariant>
 #include <QVector>
 #include <QWidget>
 
@@ -7,13 +8,8 @@
 #include "model/VideoPreprocessingSettings.h"
 #include "video/VideoRuntimeConfig.h"
 
-class QCheckBox;
-class QComboBox;
-class QGraphicsOpacityEffect;
-class QLabel;
-class QPropertyAnimation;
+class QQuickWidget;
 class QShowEvent;
-class QSlider;
 class InformationDialog;
 
 class MapSettingsDialog final : public QWidget {
@@ -43,38 +39,32 @@ signals:
 protected:
     void showEvent(QShowEvent* event) override;
 
+private slots:
+    void handleApplied();
+    void handleAreaSelected(int areaIndex);
+    void handleChannelSelected(int listIndex);
+    void handlePresetSelected(int presetIndex);
+    void handleAdjusted();
+    void handlePreprocessingToggled(bool enabled);
+    void handleResetRequested();
+    void handleApplySelectedRequested();
+    void handleApplyAreaRequested();
+    void handleApplyAllRequested();
+
 private:
+    void connectQmlSignals();
+    QVariant qmlValue(const char* name) const;
+    void setQmlValue(const char* name, const QVariant& value);
     void applyPreprocessingPreset(VideoPreprocessingPreset preset);
     void setPreprocessingControls(const VideoPreprocessingSettings& settings);
-    void updatePreprocessingValueLabels();
-    void setPreprocessingControlsEnabled(bool enabled);
     void markPreprocessingAsCustom();
     void loadPreprocessingChannel(int channelIndex);
     void storeCurrentPreprocessingChannel();
-    void rebuildPreprocessingChannelComboBox(int preferredChannelIndex = -1);
+    void rebuildPreprocessingChannelList(int preferredChannelIndex = -1);
     void showPreprocessingAppliedMessage(const QString& message);
 
-    QCheckBox* movementTrailsCheckBox_ = nullptr;
-    QCheckBox* ledCheckBox_ = nullptr;
-    QCheckBox* cctvCheckBox_ = nullptr;
-    QCheckBox* alertDeviceCheckBox_ = nullptr;
-    QCheckBox* videoRiskBordersCheckBox_ = nullptr;
-    QCheckBox* faceBlurCheckBox_ = nullptr;
-    QCheckBox* licensePlateBlurCheckBox_ = nullptr;
-    QCheckBox* preprocessingEnabledCheckBox_ = nullptr;
-    QComboBox* preprocessingAreaComboBox_ = nullptr;
-    QComboBox* preprocessingChannelComboBox_ = nullptr;
-    QComboBox* preprocessingPresetComboBox_ = nullptr;
-    QSlider* brightnessSlider_ = nullptr;
-    QSlider* contrastSlider_ = nullptr;
-    QSlider* gammaSlider_ = nullptr;
-    QLabel* brightnessValueLabel_ = nullptr;
-    QLabel* contrastValueLabel_ = nullptr;
-    QLabel* gammaValueLabel_ = nullptr;
-    QWidget* preprocessingControlsWidget_ = nullptr;
+    QQuickWidget* settingsView_ = nullptr;
     InformationDialog* informationDialog_ = nullptr;
-    QGraphicsOpacityEffect* panelOpacityEffect_ = nullptr;
-    QPropertyAnimation* panelRevealAnimation_ = nullptr;
     QVector<VideoAreaConfig> videoAreas_;
     QVector<VideoPreprocessingSettings> preprocessingSettingsByChannel_;
     int currentVideoAreaIndex_ = 0;

@@ -8,7 +8,7 @@ Item {
     required property string status
     required property color statusColor
 
-    width: 176
+    width: 200
     height: 62
 
     Row {
@@ -19,7 +19,7 @@ Item {
             text: root.title
             color: Theme.text
             font.family: Theme.fontFamily
-            font.pixelSize: 14
+            font.pixelSize: 17
             font.weight: Font.Bold
             font.letterSpacing: 0
         }
@@ -28,7 +28,7 @@ Item {
             text: root.status
             color: root.statusColor
             font.family: Theme.fontFamily
-            font.pixelSize: 14
+            font.pixelSize: 17
             font.weight: Font.Bold
             font.letterSpacing: 0
         }

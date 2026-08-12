@@ -56,9 +56,19 @@ GStreamer 기본 경로는 `GSTREAMER_ROOT`(`C:/Program Files/gstreamer/1.0/ming
 **소스 목록이 명시적입니다.** `CMakeLists.txt`의 `qt_add_executable`에 헤더/소스를 한 줄씩 나열하므로,
 새 파일을 추가하면 반드시 여기에 등록해야 합니다(glob 없음). 새 아이콘/QSS도 `qt_add_resources` 목록에 추가합니다.
 
-클라이언트에는 단위 테스트가 없습니다. `ctest`로 도는 테스트는 저장소 루트의 compute-server 대상뿐입니다
-(루트에서 `cmake -B build -S . -DBUILD_TESTING=ON` 후 `ctest`). 클라이언트 변경의 검증은 **실제 실행**이
-유일한 수단이므로, UI를 건드렸으면 아래 실행 절차로 최소 30초 띄워보고 크래시 여부까지 확인합니다.
+클라이언트에는 테스트 프레임워크가 없고, 대신 `tests/`에 프레임워크 없는 자체 검사(`*Check.cpp`)가 있습니다.
+`QTCCTV_BUILD_CHECKS=ON`(debug preset 기본값)이면 각각 독립 실행 파일로 빌드되고, 실패하면 0이 아닌 값을 냅니다:
+
+```powershell
+& "C:\Qt\Tools\CMake_64\bin\cmake.exe" --build --preset debug-ninja --target table_model_roles_check
+$env:Path = "C:\Qt\6.11.1\mingw_64\bin;" + $env:Path
+build\debug-ninja\table_model_roles_check.exe
+```
+
+새 검사를 추가할 때는 `tests/`에 파일을 만들고 `CMakeLists.txt`의 `QTCCTV_BUILD_CHECKS` 블록에 target을 등록합니다.
+`ctest`로 도는 테스트는 저장소 루트의 compute-server 대상뿐입니다
+(루트에서 `cmake -B build -S . -DBUILD_TESTING=ON` 후 `ctest`). UI 쪽 변경은 자체 검사로 잡히지 않으므로
+**실제 실행**이 유일한 수단입니다. UI를 건드렸으면 아래 실행 절차로 최소 30초 띄워보고 크래시 여부까지 확인합니다.
 
 ## 실행과 검증
 
@@ -141,9 +151,19 @@ UI는 **QWidget 골격 + 부분 QML** 하이브리드입니다. `qml/`의 컴포
 QML 파일도 `CMakeLists.txt`의 `qt_add_resources(qml_resources)`에 등록해야 `qrc:/qml/...`로 잡힙니다.
 
 현재 QML로 옮긴 범위: 상단 표시줄, CCTV 툴바, 5개 패널 중 4개의 제목(`PanelHeader.qml`), 상태 범례,
-구역 선택·신고 다이얼로그. 영상 타일, 맵, 표(객체 목록·이벤트 로그), 장비 상태는 위젯 그대로입니다.
+구역 선택·신고 다이얼로그, 표 2종(객체 목록·이벤트 로그, `DataTable.qml`),
+설정 팝업(`SettingsDialog.qml` + `OptionCheckBox`/`OptionComboBox`/`OptionSlider`),
+장비 상태 패널(`DeviceStatusView.qml`).
+영상 타일, 맵, 안내 팝업(`InformationDialog`)은 위젯 그대로입니다.
 
-이 조합에서 반복해서 발목을 잡는 세 가지:
+설정 팝업의 컨트롤은 **QtQuick.Controls.Basic**을 테마에 맞게 재스타일해 씁니다(`Qt6::QuickControls2` 링크).
+값은 컨트롤이 직접 들고 C++은 `property alias`로 읽고 씁니다 — `checked: someProperty` 식으로 바인딩하면
+사용자가 클릭하는 순간 바인딩이 끊겨 C++이 되돌려 쓴 값이 반영되지 않습니다.
+사용자 조작만 C++에 올릴 때는 `ComboBox.activated`, `Slider.moved`, `AbstractButton.clicked`를 씁니다
+(`currentIndexChanged`/`toggled`는 프로그램적 갱신에도 울립니다).
+QML 루트의 `signal`은 동적 metaobject에만 있으므로 C++ 연결은 `SIGNAL()`/`SLOT()` 문자열로 합니다.
+
+이 조합에서 반복해서 발목을 잡는 것들:
 
 - **자식 QQuickWidget의 배경 투명**은 `setClearColor(Qt::transparent)`만으로는 안 되고
   `WA_TranslucentBackground` + `WA_AlwaysStackOnTop`이 **함께** 있어야 합니다. 하나라도 빠지면 검은 박스가 됩니다.
@@ -152,13 +172,53 @@ QML 파일도 `CMakeLists.txt`의 `qt_add_resources(qml_resources)`에 등록해
   (`Qt::Dialog | Qt::FramelessWindowHint`)으로 띄웁니다. 새 팝업을 만들 때도 이 규칙을 따르세요.
   덧붙여 최상위 QQuickWidget은 `WA_TranslucentBackground`를 걸면 아무것도 렌더되지 않고,
   윈도우 플래그는 반드시 `setSource()` **이전에** 지정해야 합니다(이후에 바꾸면 scene graph가 깨집니다).
-- **표(객체 목록·이벤트 로그)를 QML로 옮기려는 시도는 한 번 실패했습니다.** `DataTable.qml` 구현이
-  수십 초 안에 heap을 깨뜨렸고, 백트레이스는 `QQmlDelegateModel::cancel` →
-  `QQuickItemView::destroyingItem` → `polishItems`로 앱 코드가 없었습니다. 다만 이후 최소 재현으로
-  다음을 **모두 배제**했습니다: RHI 백엔드(d3d11/opengl/software 전부 정상), QQuickWidget + ListView 조합,
-  C++ `QAbstractTableModel` 바인딩(120ms마다 행 삽입해도 정상). 즉 Qt 결함이 아니라 그때 작성한
-  QML/패널 배선의 문제이므로, 다시 시도할 때는 동작이 확인된 최소 형태(ListView + `display` 역할 델리게이트)에서
-  한 조각씩 키워가며 어디서 깨지는지 좁히세요.
+- **QQuickWidget을 담은 최상위 창 위에 또 다른 QQuickWidget 최상위 창을 띄우면 안쪽이 검은 상자가 됩니다.**
+  설정 팝업(QML) 위에서 안내 팝업을 QML로 띄워 봤더니 QML 오류 하나 없이 470x230 검은 사각형만 나왔고,
+  `QDialog`→`QWidget`(`Qt::Dialog | Qt::FramelessWindowHint`) 교체로도 안 고쳐졌습니다.
+  그래서 `InformationDialog`는 **의도적으로 위젯으로 남겨** 두었습니다. 설정 팝업에서 여는 2차 팝업을
+  QML로 바꾸려면 이 문제부터 푸세요(별도 창 대신 설정 QML 안의 오버레이로 그리는 쪽이 현실적입니다).
+- **`roleNames()`를 override할 땐 반드시 한 번 만든 값을 돌려주세요.** 호출할 때마다 새 `QHash`를 만들면
+  QML에 붙이는 순간 heap이 깨집니다(`0xC0000374`/`0xC0000005`). 표를 QML로 옮기는 시도를 네 번 말아먹은
+  원인이 이거였습니다.
+
+  ```cpp
+  // 이렇게 (include/ui/TableModelRoles.h)
+  inline QHash<int, QByteArray> tableModelRoleNames() {
+      static const QHash<int, QByteArray> names = { ... };
+      return names;   // 암시적 공유 → 매 호출이 같은 실체
+  }
+  ```
+
+  `QQmlAdaptorModel`은 `roleNames()`를 여러 번 부른 뒤 **서로 다른 호출 결과의 iterator를 짝지어** 씁니다.
+  Qt 기본 구현은 정적 hash 하나를 공유해 돌려주므로 우연히 안전하고, 매번 새로 만들면 다른 실체의
+  `begin()`/`end()`를 순회해 heap이 망가집니다. 증상은 delegate 생성 중 `RtlFreeHeap`에서 즉사이고
+  백트레이스는 `QQmlTableInstanceModel::resolveModelItem`(TableView) 또는 `QQmlDelegateModel::cancel`
+  (ListView)로 찍히지만, **거기는 손상된 heap을 처음 만지는 곳일 뿐 원인이 아닙니다.**
+  역할 이름의 개수나 내용은 무관합니다 — `{display}` 하나만 돌려줘도 매번 새로 만들면 똑같이 죽습니다.
+
+  이 함정 때문에 헛다리를 짚은 것들(전부 무관으로 실측 확인): RHI 백엔드(d3d11·opengl·software),
+  `ListView`↔`TableView`↔`Flickable`+`Repeater`, `reuseItems`, add 트랜지션, `pragma ComponentBehavior`,
+  delegate 복잡도, 엔진 분리/공유, QQuickWidget 투명 속성, 부모 `QFrame`의 QSS 배경/모서리,
+  model reset 여부, 패널 위치.
+
+  `QAbstractTableModel`에는 `ListView`가 아니라 **`TableView`를 씁니다**(delegate가 `row`/`column`/역할을
+  자동으로 받고, 열 너비는 `columnWidthProvider`로 정합니다). `DataTable.qml`이 그 형태입니다.
+  열 제목은 C++에서 넘기지 않고 model의 `headerData()`를 QML에서 직접 부릅니다.
+- **표 delegate의 역할 속성은 `required property var`로 받고 기본값으로 막습니다.** 행이 새로 생기는
+  프레임에는 역할 값이 아직 안 채워져 `undefined`이고, `color`/`string`으로 선언해 두면 그 한 프레임에
+  셀에 "undefined"가 찍히고 `QQuickColorValueType ... undefined` 경고가 초당 수십 줄씩 쏟아집니다.
+  같은 이유로 model의 `data()`는 범위를 벗어난 index에도 역할별 빈 값을 돌려줍니다
+  (`emptyCellValueForRole()`). 두 가지를 다 해야 로그가 깨끗해집니다.
+- **`dataChanged`에 역할을 나열할 거면 QML이 읽는 역할을 빠짐없이 넣으세요.** 빠진 역할은 갱신되지 않아
+  아이콘은 새 행, 글자는 옛 행이 되는 식으로 어긋납니다. 표가 작으면 그냥 역할 인자를 생략하는 편이 안전합니다.
+- **QML로 넘기는 목록에 `QVariantMap`을 담지 마세요. 평평한 `QVariantList`로 넘깁니다.**
+  장비 상태 패널을 만들 때 채널마다 `QVariantMap`을 담은 `QVariantList`를 만들면 그 목록이 소멸하는
+  자리에서 heap이 깨졌습니다(`RtlFreeHeap` 즉사, 시작 4초 안에). 같은 자리에서 int 목록, 문자열 240개
+  목록은 멀쩡했고 `QVariantList`를 원소로 담으면 정상입니다 — 전부 실측으로 확인했습니다.
+  그래서 `DeviceStatusPanel::refreshChannels()`는 자리 순서를 정해 평평한 배열로 넘기고
+  `DeviceStatusView.qml`이 `modelData[0]`처럼 위치로 읽습니다(양쪽 주석에 순서를 적어 두었습니다).
+  덧붙여 `QVariantList`를 원소로 넣을 때는 **반드시 `QVariant()`로 감싸세요.**
+  `channels.append(innerList)`는 `QList::append(const QList&)` 오버로드가 골라져 통째로 펼쳐집니다.
 
 ### 스레딩
 
