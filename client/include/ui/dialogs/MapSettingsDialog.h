@@ -9,7 +9,9 @@
 
 class QCheckBox;
 class QComboBox;
+class QGraphicsOpacityEffect;
 class QLabel;
+class QPropertyAnimation;
 class QShowEvent;
 class QSlider;
 class InformationDialog;
@@ -71,6 +73,8 @@ private:
     QLabel* gammaValueLabel_ = nullptr;
     QWidget* preprocessingControlsWidget_ = nullptr;
     InformationDialog* informationDialog_ = nullptr;
+    QGraphicsOpacityEffect* panelOpacityEffect_ = nullptr;
+    QPropertyAnimation* panelRevealAnimation_ = nullptr;
     QVector<VideoAreaConfig> videoAreas_;
     QVector<VideoPreprocessingSettings> preprocessingSettingsByChannel_;
     int currentVideoAreaIndex_ = 0;

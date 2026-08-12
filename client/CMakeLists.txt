@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(ProcessorCount)
 
-find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickWidgets Widgets)
 
 set(GSTREAMER_ROOT "C:/Program Files/gstreamer/1.0/mingw_x86_64" CACHE PATH
     "GStreamer MinGW x86_64 runtime root")
@@ -34,14 +34,8 @@ qt_add_executable(Qtcctvclient
     src/ui/ClickableVideoWidget.cpp
     include/ui/dialogs/MapSettingsDialog.h
     src/ui/dialogs/MapSettingsDialog.cpp
-    include/ui/dialogs/AreaSelectionDialog.h
-    src/ui/dialogs/AreaSelectionDialog.cpp
     include/ui/dialogs/InformationDialog.h
     src/ui/dialogs/InformationDialog.cpp
-    include/ui/dialogs/ReportConfirmationDialog.h
-    src/ui/dialogs/ReportConfirmationDialog.cpp
-    include/ui/dialogs/ReportSuccessDialog.h
-    src/ui/dialogs/ReportSuccessDialog.cpp
     include/ui/DashboardLayout.h
     include/ui/panels/DashboardPanelFactory.h
     include/ui/panels/DefaultDashboardPanelFactory.h
@@ -180,6 +174,24 @@ qt_add_resources(Qtcctvclient "style_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/styles/app.qss"
 )
 
+qt_add_resources(Qtcctvclient "qml_resources"
+    PREFIX "/qml"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/Theme.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/NeonButton.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PanelFrame.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PanelHeader.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/CctvToolbar.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLegend.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/OverlayDialog.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/SettingsForm.ui.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/DashboardForm.ui.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLabel.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBar.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBarForm.ui.qml"
+)
+
 qt_add_resources(Qtcctvclient "icon_resources"
     PREFIX "/icons"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons"
@@ -288,6 +300,8 @@ target_link_libraries(Qtcctvclient PRIVATE
     Qt6::Widgets
     Qt6::Mqtt
     Qt6::Network
+    Qt6::Quick
+    Qt6::QuickWidgets
 
     gstreamer-1.0
     gstbase-1.0

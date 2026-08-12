@@ -3,7 +3,9 @@
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QEasingCurve>
 #include <QFrame>
+#include <QGraphicsOpacityEffect>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -11,6 +13,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QPolygonF>
+#include <QPropertyAnimation>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QShowEvent>
@@ -156,6 +159,12 @@ void addSliderRow(QGridLayout* layout, int row, const QString& title, int minimu
  */
 MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("mapSettingsDialog"));
+    // 자식 위젯으로 메인 윈도우를 덮으면 Qt가 QQuickWidget 텍스처 합성을 건너뛰어 QML 패널이
+    // 통째로 사라집니다. 화면 전체를 덮는 딤 없이 패널 크기의 최상위 창으로 띄웁니다.
+    // 반투명(WA_TranslucentBackground) 창으로 만들면 ClearType 서브픽셀 렌더링이 꺼져 글자가 뭉개지므로
+    // 불투명하게 둡니다.
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    setWindowModality(Qt::WindowModal);
     setAttribute(Qt::WA_StyledBackground, true);
     setFocusPolicy(Qt::StrongFocus);
 
@@ -169,6 +178,15 @@ MapSettingsDialog::MapSettingsDialog(QWidget* parent) : QWidget(parent) {
     panel->setObjectName(QStringLiteral("mapSettingsDialogPanel"));
     panel->setFixedSize(dialogPanelWidth, dialogPanelHeight);
     overlayLayout->addWidget(panel);
+
+    panelOpacityEffect_ = new QGraphicsOpacityEffect(panel);
+    panelOpacityEffect_->setOpacity(1.0);
+    panel->setGraphicsEffect(panelOpacityEffect_);
+    panelRevealAnimation_ = new QPropertyAnimation(panelOpacityEffect_, "opacity", panel);
+    panelRevealAnimation_->setDuration(180);
+    panelRevealAnimation_->setStartValue(0.0);
+    panelRevealAnimation_->setEndValue(1.0);
+    panelRevealAnimation_->setEasingCurve(QEasingCurve::OutCubic);
 
     auto* panelLayout = new QVBoxLayout(panel);
     panelLayout->setContentsMargins(32, 22, 32, 22);
@@ -762,8 +780,14 @@ void MapSettingsDialog::markPreprocessingAsCustom() {
 void MapSettingsDialog::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
     if (parentWidget()) {
-        setGeometry(parentWidget()->rect());
+        const QSize panelSize(dialogPanelWidth, dialogPanelHeight);
+        const QPoint parentCenter = parentWidget()->mapToGlobal(parentWidget()->rect().center());
+        setGeometry(QRect(parentCenter - QPoint(panelSize.width() / 2, panelSize.height() / 2), panelSize));
     }
     raise();
     setFocus(Qt::PopupFocusReason);
+    if (panelRevealAnimation_) {
+        panelRevealAnimation_->stop();
+        panelRevealAnimation_->start();
+    }
 }

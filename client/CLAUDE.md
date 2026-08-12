@@ -57,7 +57,28 @@ GStreamer 기본 경로는 `GSTREAMER_ROOT`(`C:/Program Files/gstreamer/1.0/ming
 새 파일을 추가하면 반드시 여기에 등록해야 합니다(glob 없음). 새 아이콘/QSS도 `qt_add_resources` 목록에 추가합니다.
 
 클라이언트에는 단위 테스트가 없습니다. `ctest`로 도는 테스트는 저장소 루트의 compute-server 대상뿐입니다
-(루트에서 `cmake -B build -S . -DBUILD_TESTING=ON` 후 `ctest`).
+(루트에서 `cmake -B build -S . -DBUILD_TESTING=ON` 후 `ctest`). 클라이언트 변경의 검증은 **실제 실행**이
+유일한 수단이므로, UI를 건드렸으면 아래 실행 절차로 최소 30초 띄워보고 크래시 여부까지 확인합니다.
+
+## 실행과 검증
+
+빌드 산출물은 `build/debug-ninja/Qtcctvclient.exe`이고, GStreamer와 Qt DLL이 PATH에 있어야 뜹니다:
+
+```powershell
+$env:Path = "C:\Program Files\gstreamer\1.0\mingw_x86_64\bin;C:\Qt\6.11.1\mingw_64\bin;" + $env:Path
+build\debug-ninja\Qtcctvclient.exe
+```
+
+브로커/RTSP 없이도 창은 뜨고 내장 데모가 돕니다(로그에 RTSP·MQTT 오류가 잔뜩 찍히는 건 정상).
+크래시는 조용히 죽는 형태라 종료 코드로 판별합니다: `-1073740940`(0xC0000374)은 heap corruption,
+`-1073741819`(0xC0000005)는 access violation입니다. 원인 추적은 `gdb --batch -ex run -ex bt --args Qtcctvclient.exe`.
+
+PR CI와 같은 검사를 로컬에서 돌립니다(둘 다 저장소 루트 기준):
+
+```powershell
+& "C:\Qt\Tools\QtCreator\bin\clang\bin\clang-format.exe" --dry-run --Werror client/src/ui/mainwindow.cpp
+& "C:\Qt\6.11.1\mingw_64\bin\qmllint.exe" -I client/qml client/qml/PanelHeader.qml
+```
 
 ## 실행 설정
 
@@ -112,6 +133,33 @@ world 좌표는 Y가 위쪽 양수이므로 화면 매핑 시 Y를 뒤집습니�
 수신 좌표에서 자동으로 경계를 확장하지만, 정확한 채널 사분면 배치에는 고정 경계가 필요합니다.
 실 데이터가 처음 들어오면 내장 데모(`DigitalTwinSimulationWorker`)가 중지되고, 5초간 프레임이 없는 채널은 제거됩니다.
 
+### Qt Quick(QML) 계층
+
+UI는 **QWidget 골격 + 부분 QML** 하이브리드입니다. `qml/`의 컴포넌트를 `MainWindow::createQuickView()`가
+`QQuickWidget`으로 만들어 기존 `.ui` 레이아웃 자리에 끼워 넣고, 원래 있던 위젯은 `hideLayoutContents()`로
+숨깁니다(로딩 실패 시 위젯이 그대로 남아 화면이 비지 않도록). 색·글꼴 값은 `qml/Theme.js` 하나에서만 옵니다.
+QML 파일도 `CMakeLists.txt`의 `qt_add_resources(qml_resources)`에 등록해야 `qrc:/qml/...`로 잡힙니다.
+
+현재 QML로 옮긴 범위: 상단 표시줄, CCTV 툴바, 5개 패널 중 4개의 제목(`PanelHeader.qml`), 상태 범례,
+구역 선택·신고 다이얼로그. 영상 타일, 맵, 표(객체 목록·이벤트 로그), 장비 상태는 위젯 그대로입니다.
+
+이 조합에서 반복해서 발목을 잡는 세 가지:
+
+- **자식 QQuickWidget의 배경 투명**은 `setClearColor(Qt::transparent)`만으로는 안 되고
+  `WA_TranslucentBackground` + `WA_AlwaysStackOnTop`이 **함께** 있어야 합니다. 하나라도 빠지면 검은 박스가 됩니다.
+- **화면 전체를 덮는 자식 위젯을 띄우면 그 창의 QQuickWidget이 전부 사라집니다.** Qt가 텍스처 합성을
+  건너뛰기 때문입니다. 그래서 `MapSettingsDialog`와 QML 오버레이는 자식이 아니라 **독립 최상위 창**
+  (`Qt::Dialog | Qt::FramelessWindowHint`)으로 띄웁니다. 새 팝업을 만들 때도 이 규칙을 따르세요.
+  덧붙여 최상위 QQuickWidget은 `WA_TranslucentBackground`를 걸면 아무것도 렌더되지 않고,
+  윈도우 플래그는 반드시 `setSource()` **이전에** 지정해야 합니다(이후에 바꾸면 scene graph가 깨집니다).
+- **표(객체 목록·이벤트 로그)를 QML로 옮기려는 시도는 한 번 실패했습니다.** `DataTable.qml` 구현이
+  수십 초 안에 heap을 깨뜨렸고, 백트레이스는 `QQmlDelegateModel::cancel` →
+  `QQuickItemView::destroyingItem` → `polishItems`로 앱 코드가 없었습니다. 다만 이후 최소 재현으로
+  다음을 **모두 배제**했습니다: RHI 백엔드(d3d11/opengl/software 전부 정상), QQuickWidget + ListView 조합,
+  C++ `QAbstractTableModel` 바인딩(120ms마다 행 삽입해도 정상). 즉 Qt 결함이 아니라 그때 작성한
+  QML/패널 배선의 문제이므로, 다시 시도할 때는 동작이 확인된 최소 형태(ListView + `display` 역할 델리게이트)에서
+  한 조각씩 키워가며 어디서 깨지는지 좁히세요.
+
 ### 스레딩
 
 GUI 객체는 GUI 스레드에서만 갱신합니다. MQTT 게이트웨이와 각 RTSP 수신기는 별도 스레드에서 돌고,
@@ -127,6 +175,11 @@ GUI 객체는 GUI 스레드에서만 갱신합니다. MQTT 게이트웨이와 �
 - C++에서 `#define` 상수 금지 → `constexpr`/`const`, `new`/`delete`/`malloc` 직접 호출 금지 → `std::shared_ptr` 기본
 - Doxygen 주석은 클래스·함수 단위에만 (기존 코드처럼 한국어로 작성)
 - 4칸 들여쓰기, 120열, 포인터는 왼쪽 정렬(`int* p`)
+
+QML에는 clang-format이 적용되지 않습니다. 색·글꼴은 리터럴 대신 `Theme.js`를 쓰고, 글꼴은 `font.family`
+하나만 지정합니다(QML `font` 값 타입에 `families`는 없습니다 — qmllint가 잡아줍니다).
+위젯 QSS(`styles/app.qss`)와 QML은 같은 글꼴 목록을 쓰지만 래스터라이저가 달라 미세하게 다르게 보입니다.
+`QQuickWindow::setTextRenderType(NativeTextRendering)`으로 맞출 수 있지만 QML 쪽 모양이 바뀌므로 임의로 켜지 마세요.
 
 ## Git
 

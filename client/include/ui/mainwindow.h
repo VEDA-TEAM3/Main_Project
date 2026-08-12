@@ -12,7 +12,6 @@
 #include "video/VideoRuntimeConfig.h"
 
 class ClickableVideoWidget;
-class AreaSelectionDialog;
 class DashboardPanelCoordinator;
 class DashboardPanelFactory;
 class DeviceStatusGatewayFactory;
@@ -24,16 +23,18 @@ class QEvent;
 class QFrame;
 class QGridLayout;
 class QLabel;
+class QBoxLayout;
+class QQmlEngine;
+class QQuickWidget;
 class MapSettingsDialog;
 class QResizeEvent;
 class QShowEvent;
-class ReportConfirmationDialog;
 class ReportGateway;
-class ReportSuccessDialog;
 class StreamReceiverFactory;
 class StreamSessionManager;
 class VideoRiskBorderFrame;
 class QWidget;
+class QVariant;
 enum class DigitalTwinRiskLevel;
 
 QT_BEGIN_NAMESPACE
@@ -60,6 +61,12 @@ protected:
 
 private:
     void setupDashboardLayout();
+    void setupQuickTopBar();
+    void setupQuickDashboardChrome();
+    void setupQuickPanelHeaders();
+    void setupQuickDialogOverlay();
+    void addQuickPanelHeader(QBoxLayout* layout, const QString& title);
+    QQuickWidget* createQuickView(const QString& qmlFile, QWidget* parent, Qt::WindowFlags windowFlags = {});
     void setupDashboardPanels();
     void setupDashboardPanelCoordinator();
     void setupDeviceStatusService();
@@ -70,9 +77,15 @@ private:
     void setupVideoViewEvents();
     void setupVideoAreaSelector();
     void setupReportActions();
+
+private slots:
     void openMapSettingsDialog();
     void openVideoAreaSelectionDialog();
     void openReportConfirmationDialog(int channelNumber);
+    void handleQuickDialogAccepted(int selectedIndex);
+    void closeQuickDialog();
+
+private:
     void openReportSuccessDialog(int channelNumber);
     void sendReport(int channelNumber);
     void handleReportFailure(int channelNumber, const QString& error);
@@ -83,14 +96,16 @@ private:
     const QVector<int>& channelsForArea(int areaIndex) const;
     bool isChannelVisible(int channelIndex) const;
     void switchVideoArea(int areaIndex);
-    void updateReportButtons();
 
     void updateDashboardAdaptiveSizes();
     void updateSystemStatus(bool connected);
     void updateStreamConnectionStatus();
     void updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels);
     void updateCurrentDateTime();
-    void setTopBarStatus(QLabel* label, const QString& title, const QString& status, const QString& color);
+    void setQuickTopBarProperty(const char* name, const QVariant& value);
+    void setQuickDialogProperty(const char* name, const QVariant& value);
+    void showQuickDialog(const QString& mode, const QString& title, const QString& message);
+    QRect quickDialogHostGeometry() const;
     void toggleFullScreen();
 
     void toggleExpandVideo(QWidget* targetWidget);
@@ -117,16 +132,27 @@ private:
     EventLogPanel* eventLogPanel_ = nullptr;
     ObjectListPanel* objectListPanel_ = nullptr;
     MapSettingsDialog* mapSettingsDialog_ = nullptr;
-    AreaSelectionDialog* areaSelectionDialog_ = nullptr;
-    ReportConfirmationDialog* reportConfirmationDialog_ = nullptr;
-    ReportSuccessDialog* reportSuccessDialog_ = nullptr;
     QWidget* expandedWidget_ = nullptr;
     QTimer clockTimer_;
+    QQmlEngine* quickEngine_ = nullptr;
+    QQuickWidget* quickTopBar_ = nullptr;
+    QQuickWidget* quickCctvToolbar_ = nullptr;
+    QQuickWidget* quickLegend_ = nullptr;
+    QQuickWidget* quickDialogOverlay_ = nullptr;
     DigitalTwinMapDisplaySettings mapDisplaySettings_;
     QVector<VideoPreprocessingSettings> videoPreprocessingSettingsByChannel_;
     QVector<DigitalTwinRiskLevel> latestVideoRiskLevels_;
     int selectedPreprocessingChannelIndex_ = 0;
     int currentVideoAreaIndex_ = 0;
+    int pendingReportChannelNumber_ = 1;
+
+    enum class QuickDialogMode {
+        None,
+        AreaSelection,
+        ReportConfirmation,
+        ReportSuccess,
+    };
+    QuickDialogMode quickDialogMode_ = QuickDialogMode::None;
 
     bool streamSessionStarted_ = false;
     bool videoRiskBordersEnabled_ = true;

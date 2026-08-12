@@ -1,7 +1,7 @@
 * {
-    font-family: "Segoe UI", "Malgun Gothic";
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 14px;
-    color: #dce8ee;
+    color: #f5f9ff;
     background-color: #06101b;
     selection-background-color: #1681a6;
     selection-color: #ffffff;
@@ -19,140 +19,34 @@ QLabel {
     background-color: transparent;
 }
 
-QFrame#sidebarFrame {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #0a141c, stop:1 #0c1d27);
-    border-right: 1px solid #304b5a;
-}
-
-QLabel#menuIconLabel {
-    color: #a9bec9;
-    font-size: 15px;
-    font-weight: 800;
-    padding: 0 6px 16px 6px;
-}
-
-QLabel#navDashboard, QLabel#navCctv, QLabel#navTwin, QLabel#navEvents,
-QLabel#navControl, QLabel#navStats, QLabel#navReports, QLabel#navSystem, QLabel#navCollapse {
-    color: #a9bdcc;
-    min-height: 34px;
-    padding: 6px 10px;
-    border-radius: 7px;
-}
-
-QLabel#navDashboard {
-    color: #edf5f8;
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #1a5268, stop:0.55 #174455, stop:1 #12323f);
-    border: 1px solid #55a9c6;
-    font-weight: 900;
-}
-
-QLabel#navCctv:hover, QLabel#navTwin:hover, QLabel#navEvents:hover,
-QLabel#navControl:hover, QLabel#navStats:hover, QLabel#navReports:hover, QLabel#navSystem:hover {
-    background-color: #152832;
-    color: #89c9dc;
-}
-
-QLabel#navCollapse {
-    color: #7893a6;
-    border-top: 1px solid #18394d;
-    border-radius: 0;
-}
-
 QFrame#topBarFrame {
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #123653, stop:0.18 #0e2b46,
-                                      stop:0.8 #0a1e34, stop:1 #071526);
-    border: 1px solid #3f7fa5;
-    border-top-color: #55bfe8;
-    border-radius: 6px;
+    background-color: transparent;
+    border: 0;
 }
 
 QLabel#titleLabel {
     color: #f5fbfd;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 25px;
-    font-weight: 900;
-}
-
-QLabel#dateLabel {
-    color: #c4d8e1;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 14px;
-    font-weight: 800;
-    min-width: 154px;
-}
-
-QLabel#systemStatusLabel {
-    color: #c8d3d9;
-    font-weight: 800;
-    padding-left: 14px;
-    border-left: 1px solid #314753;
-}
-
-QLabel#connectionStatusLabel {
-    color: #c8d3d9;
-    font-weight: 800;
-    padding-left: 14px;
-    border-left: 1px solid #314753;
-}
-
-QLabel#safeLabel {
-    color: #48f27a;
-    font-weight: 900;
-    padding-right: 14px;
-}
-
-QLabel#warnLabel {
-    color: #ffd43b;
-    font-weight: 900;
-    padding-right: 14px;
-}
-
-QLabel#dangerLabel {
-    color: #ff4351;
-    font-weight: 900;
-    padding-right: 14px;
-}
-
-QLabel#separateLabel_1, QLabel#separateLabel_2, QLabel#separateLabel_3 {
-    color: #315c6e;
-    font-weight: 800;
-}
-
-QLabel#settingsLabel {
-    color: #d0eaf4;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #163c59, stop:0.55 #102f49, stop:1 #0b263e);
-    border: 1px solid #4d8aac;
-    border-top-color: #63c8ec;
-    border-radius: 5px;
-    padding: 0;
-    font-weight: 800;
-}
-
-QLabel#settingsLabel:hover {
-    color: #ffffff;
-    background-color: #1a4d6c;
-    border-color: #78daf8;
+    font-weight: 700;
 }
 
 QWidget#mapSettingsDialog {
-    background-color: rgba(1, 7, 16, 224);
+    background-color: #0b263b;
 }
 
 QFrame#mapSettingsDialogPanel {
     background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                      stop:0 #12314a, stop:0.52 #0d2941, stop:1 #081829);
-    border: 1px solid #4c94b7;
-    border-top-color: #60c5eb;
-    border-radius: 8px;
+                                      stop:0 #123a55, stop:0.52 #0b263b, stop:1 #061726);
+    border: 1px solid #59d9ff;
+    border-radius: 6px;
 }
 
 QLabel#mapSettingsTitleLabel {
-    color: #f2f9fc;
+    color: #f5f9ff;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 24px;
-    font-weight: 900;
+    font-weight: 700;
     border-left: 3px solid #57cfff;
     padding-left: 10px;
 }
@@ -177,8 +71,8 @@ QPushButton#mapSettingsCloseButton:hover {
 
 QFrame#mapSettingsOptionsFrame {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0f293f, stop:0.68 #0a1d31, stop:1 #081626);
-    border: 1px solid #315f7e;
+                                      stop:0 #0b263b, stop:0.68 #081d30, stop:1 #061726);
+    border: 1px solid #397391;
     border-top: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
@@ -236,7 +130,7 @@ QTabWidget#settingsTabs QTabBar::tab:selected {
 
 QWidget#settingsTabPage {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0f293f, stop:0.68 #0a1d31, stop:1 #081626);
+                                      stop:0 #0b263b, stop:0.68 #081d30, stop:1 #061726);
     border: 0;
 }
 
@@ -245,9 +139,10 @@ QWidget#videoPreprocessingControls {
 }
 
 QLabel#mapSettingsSectionLabel {
-    color: #57cfff;
+    color: #55dcff;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 QFrame#mapSettingsSectionDivider {
@@ -313,7 +208,7 @@ QLabel#videoPreprocessingValueLabel {
     border-radius: 4px;
     padding: 4px 6px;
     font-size: 14px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 QSlider#videoPreprocessingSlider {
@@ -426,7 +321,7 @@ QPushButton#videoPreprocessingApplyAllButton {
     border: 1px solid #376b88;
     border-radius: 5px;
     font-size: 14px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 QPushButton#videoPreprocessingSecondaryButton:hover {
@@ -453,7 +348,7 @@ QPushButton#mapSettingsApplyButton {
     min-height: 48px;
     border-radius: 5px;
     font-size: 16px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 QPushButton#mapSettingsCancelButton {
@@ -490,126 +385,35 @@ QPushButton#mapSettingsApplyButton:pressed {
     border-color: #4aa0c4;
 }
 
-QFrame#topSectionFrame, QFrame#bottomSectionFrame {
+QFrame#topSectionFrame,
+QFrame#bottomSectionFrame {
     background-color: transparent;
     border: 0;
 }
 
-QFrame#cctvCard, QFrame#mapCard, QFrame#eventLogCard, QFrame#deviceStatusCard,
-QFrame#objectListCard, QFrame#legendFrame {
+QFrame#cctvCard,
+QFrame#mapCard,
+QFrame#eventLogCard,
+QFrame#deviceStatusCard,
+QFrame#objectListCard {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #12314a, stop:0.1 #0f293f,
-                                      stop:0.68 #0a1d31, stop:1 #081626);
-    border: 1px solid #315f7e;
-    border-top-color: #4c94b7;
+                                      stop:0 #143b56, stop:0.1 #102f48,
+                                      stop:0.68 #0b2237, stop:1 #081a2b);
+    border: 1px solid #397391;
+    border-top-color: #58b6da;
     border-radius: 6px;
 }
 
 QFrame#legendFrame {
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #12324a, stop:0.55 #0e2940, stop:1 #0b2034);
-    border-color: #376b8b;
-    border-top-color: #53a4c7;
-}
-
-QLabel#monitorTitleLabel, QLabel#mapTitleLabel, QLabel#eventLogTitleLabel,
-QLabel#deviceStatusTitleLabel, QLabel#objectListTitleLabel {
-    color: #f0f8fb;
-    font-size: 16px;
-    font-weight: 800;
-    border-left: 3px solid #57cfff;
-    padding-left: 8px;
-}
-
-QFrame#reportActionCard {
-    min-width: 80px;
-    max-width: 80px;
-    min-height: 30px;
-    max-height: 30px;
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #123b56, stop:0.55 #0d2c43, stop:1 #0a2033);
-    border: 1px solid #42b8df;
-    border-left: 3px solid #65dcff;
-    border-radius: 4px;
-}
-
-QLabel#reportActionIconLabel {
     background-color: transparent;
     border: 0;
 }
 
-QLabel#reportActionTitleLabel {
-    color: #eafaff;
-    background-color: transparent;
-    border: 0;
-    font-family: "Segoe UI";
-    font-size: 13px;
-    font-weight: 800;
-}
-
-QPushButton#videoAreaButton {
-    color: #f2fbff;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                       stop:0 #16405c, stop:0.5 #102f49, stop:1 #0a2136);
-    border: 1px solid #3f82a4;
-    border-top-color: #64c4e7;
-    border-radius: 5px;
-    padding: 0 14px;
-    font-family: "Malgun Gothic", "Segoe UI";
-    font-size: 15px;
-    font-weight: 800;
-}
-
-QPushButton#videoAreaButton:hover {
-    color: #ffffff;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                       stop:0 #1d5877, stop:0.52 #15435f, stop:1 #0d2c44);
-    border-color: #72d8f7;
-}
-
-QPushButton#videoAreaButton:pressed {
-    color: #d8f5ff;
-    background-color: #081c2e;
-    border-color: #357899;
-}
-
-QPushButton#reportChannelButton1, QPushButton#reportChannelButton2,
-QPushButton#reportChannelButton3, QPushButton#reportChannelButton4 {
-    min-width: 62px;
-    max-width: 62px;
-    min-height: 30px;
-    max-height: 30px;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #16415f, stop:0.55 #0e304a, stop:1 #092237);
-    border: 1px solid #3b91b7;
-    border-top-color: #58c9ef;
-    border-radius: 4px;
-    color: #d3f5ff;
-    font-family: "Segoe UI";
-    font-size: 12px;
-    font-weight: 800;
-    padding: 0 6px;
-}
-
-QPushButton#reportChannelButton1:hover, QPushButton#reportChannelButton2:hover,
-QPushButton#reportChannelButton3:hover, QPushButton#reportChannelButton4:hover {
-    background-color: #175577;
-    border-color: #72dcff;
-    color: #ffffff;
-}
-
-QPushButton#reportChannelButton1:pressed, QPushButton#reportChannelButton2:pressed,
-QPushButton#reportChannelButton3:pressed, QPushButton#reportChannelButton4:pressed {
-    background-color: #0a2b42;
-    border-color: #3989ac;
-    color: #9ddcf1;
-}
-
-QDialog#reportConfirmationDialog, QDialog#reportSuccessDialog, QDialog#informationDialog {
+QDialog#informationDialog {
     background-color: transparent;
 }
 
-QFrame#reportConfirmationPanel, QFrame#reportSuccessPanel, QFrame#informationPanel {
+QFrame#informationPanel {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                       stop:0 #123651, stop:0.42 #0c273d, stop:1 #071928);
     border: 1px solid #50c8ee;
@@ -617,74 +421,36 @@ QFrame#reportConfirmationPanel, QFrame#reportSuccessPanel, QFrame#informationPan
     border-radius: 8px;
 }
 
-QLabel#reportConfirmationIcon, QLabel#reportSuccessIcon {
-    background-color: transparent;
-    border: 0;
-}
-
-QLabel#reportConfirmationTitle, QLabel#reportSuccessTitle, QLabel#informationTitle {
+QLabel#informationTitle {
     color: #eafaff;
     background-color: transparent;
     border: 0;
-    font-family: "Segoe UI";
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
-QLabel#reportConfirmationMessage, QLabel#reportSuccessMessage, QLabel#informationMessage {
+QLabel#informationMessage {
     color: #f4fbff;
     background-color: #081d2e;
     border: 1px solid #2f6685;
     border-radius: 5px;
-    font-family: "Segoe UI";
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 16px;
     font-weight: 700;
     padding: 18px 14px;
 }
 
-QPushButton#reportDialogCloseButton {
-    min-width: 32px;
-    max-width: 32px;
-    min-height: 32px;
-    max-height: 32px;
-    background-color: #0d2a40;
-    border: 1px solid #396d8d;
-    border-radius: 5px;
-    color: #ccefff;
-    font-size: 18px;
-    font-weight: 700;
-}
-
-QPushButton#reportDialogCloseButton:hover {
-    background-color: #17435f;
-    border-color: #67d5f7;
-    color: #ffffff;
-}
-
-QPushButton#reportDialogCancelButton, QPushButton#reportDialogConfirmButton,
-QPushButton#reportSuccessConfirmButton, QPushButton#informationConfirmButton {
+QPushButton#informationConfirmButton {
     min-width: 104px;
     min-height: 38px;
     max-height: 38px;
     border-radius: 5px;
-    font-family: "Segoe UI";
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 14px;
-    font-weight: 800;
+    font-weight: 700;
 }
 
-QPushButton#reportDialogCancelButton {
-    background-color: #0a2134;
-    border: 1px solid #396b89;
-    color: #c7dfeb;
-}
-
-QPushButton#reportDialogCancelButton:hover {
-    background-color: #123650;
-    border-color: #62c6e9;
-    color: #ffffff;
-}
-
-QPushButton#reportDialogConfirmButton, QPushButton#reportSuccessConfirmButton,
 QPushButton#informationConfirmButton {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                       stop:0 #1a88b4, stop:1 #106085);
@@ -692,21 +458,20 @@ QPushButton#informationConfirmButton {
     color: #ffffff;
 }
 
-QPushButton#reportDialogConfirmButton:hover, QPushButton#reportSuccessConfirmButton:hover,
 QPushButton#informationConfirmButton:hover {
     background-color: #20a2d3;
     border-color: #a3efff;
 }
 
-QPushButton#reportDialogCancelButton:pressed, QPushButton#reportDialogConfirmButton:pressed,
-QPushButton#reportSuccessConfirmButton:pressed, QPushButton#informationConfirmButton:pressed {
+QPushButton#informationConfirmButton:pressed {
     padding-top: 1px;
 }
 
-QFrame#mapPlaceholderFrame, QFrame#eventLogBodyFrame, QFrame#deviceStatusBodyFrame,
+QFrame#eventLogBodyFrame,
+QFrame#deviceStatusBodyFrame,
 QFrame#objectListBodyFrame {
-    background-color: #071421;
-    border: 1px solid #274760;
+    background-color: #071827;
+    border: 1px solid #2d566f;
     border-radius: 6px;
 }
 
@@ -715,15 +480,22 @@ QFrame#deviceStatusBodyFrame {
     border: 0;
 }
 
+QStackedWidget#videoAreaStackedWidget,
+QWidget#videoAreaPage1,
+QWidget#videoAreaPage2 {
+    background-color: transparent;
+    border: 0;
+}
+
 QFrame#deviceChannelCard {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #102e46, stop:1 #091d31);
-    border: 1px solid #315f7e;
+                                      stop:0 #123750, stop:1 #0a2135);
+    border: 1px solid #39708e;
     border-radius: 5px;
 }
 
 QFrame#deviceChannelCard[healthState="confirmed"] {
-    border-color: #3c7191;
+    border-color: #4385a6;
 }
 
 QFrame#deviceChannelCard[healthState="failed"] {
@@ -731,14 +503,16 @@ QFrame#deviceChannelCard[healthState="failed"] {
 }
 
 QLabel#deviceChannelTitleLabel {
-    color: #4cd5ff;
-    font-size: 12px;
-    font-weight: 900;
+    color: #55dcff;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
+    font-size: 13px;
+    font-weight: 700;
+    padding-left: 1px;
 }
 
 QFrame#deviceStatusRow {
-    background-color: #081a2b;
-    border: 1px solid #2d536e;
+    background-color: #081d30;
+    border: 1px solid #315e79;
     border-radius: 4px;
     min-height: 28px;
 }
@@ -755,10 +529,12 @@ QFrame#deviceStatusSeparator {
 QLabel#deviceStateSegment {
     background-color: #061321;
     border: 1px solid #2a4b64;
+    border-radius: 3px;
     color: #7390a1;
-    font-size: 10px;
-    font-weight: 900;
-    padding: 2px 3px;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 4px;
 }
 
 QLabel#deviceStateSegment[stateKind="safe"][active="true"],
@@ -795,34 +571,39 @@ QLabel#deviceStateSegment[stateKind="on"][active="false"] {
     color: #683035;
 }
 
-QTableView#objectListTable, QTableView#eventLogTable {
+QTableView#objectListTable,
+QTableView#eventLogTable {
     background-color: transparent;
     border: 0;
     color: #d9e8ee;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 12px;
     gridline-color: #1d4454;
     outline: 0;
     alternate-background-color: #091923;
 }
 
-QTableView#objectListTable::item, QTableView#eventLogTable::item {
+QTableView#objectListTable::item,
+QTableView#eventLogTable::item {
     border-bottom: 1px solid #1d4454;
     padding: 3px 4px;
 }
 
-QTableView#objectListTable::item:selected, QTableView#eventLogTable::item:selected {
+QTableView#objectListTable::item:selected,
+QTableView#eventLogTable::item:selected {
     background-color: #145674;
     color: #f5fdff;
 }
 
-QTableView#objectListTable QHeaderView::section, QTableView#eventLogTable QHeaderView::section {
+QTableView#objectListTable QHeaderView::section,
+QTableView#eventLogTable QHeaderView::section {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                       stop:0 #163950, stop:0.22 #102e43, stop:1 #0a2032);
     border: 0;
     border-bottom: 1px solid #3aa4cf;
     color: #e2f1f6;
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 700;
     padding: 4px 4px;
 }
 
@@ -847,12 +628,6 @@ DigitalTwinMapWidget#digitalTwinMapWidget {
     border-radius: 4px;
 }
 
-QLabel#mapPlaceholderLabel {
-    color: #4f7e91;
-    font-size: 22px;
-    font-weight: 900;
-}
-
 ClickableVideoWidget {
     background-color: #000000;
     border: 1px solid #294754;
@@ -866,19 +641,20 @@ ClickableVideoWidget[loading="true"] {
 QLabel#videoChannelLabel {
     background-color: #061d2e;
     border: 1px solid #45bde2;
-    border-top-color: #72dcff;
+    border-left: 3px solid #55dcff;
     border-radius: 0;
-    color: #bfeeff;
+    color: #dff6ff;
+    font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 12px;
-    font-weight: 900;
-    padding: 4px 9px;
+    font-weight: 700;
+    padding: 3px 10px;
 }
 
 QLabel#videoChannelLabel[expanded="true"] {
-    border-width: 2px;
+    border-left-width: 4px;
     border-radius: 0;
-    font-size: 18px;
-    padding: 7px 14px;
+    font-size: 16px;
+    padding: 6px 14px;
 }
 
 QFrame#videoTileFrame {
@@ -904,154 +680,38 @@ QWidget#videoLoadingSpinner {
 QLabel#videoLoadingLabel {
     color: #b9dfec;
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: 0px;
 }
 
-QLabel#legendLabel {
-    color: #f0f8fb;
-    font-weight: 700;
-}
-
-QStatusBar, QMenuBar {
+QStatusBar,
+QMenuBar {
     background-color: #03070d;
     color: #9eb7c7;
 }
 
-QScrollBar:vertical, QScrollBar:horizontal {
+QScrollBar:vertical,
+QScrollBar:horizontal {
     background-color: #030a10;
     border: 0;
     width: 10px;
     height: 10px;
 }
 
-QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
     background-color: #356e91;
     border: 1px solid #519abe;
     border-radius: 5px;
 }
 
-QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
     background-color: #49add7;
 }
 
-QScrollBar::add-line, QScrollBar::sub-line {
+QScrollBar::add-line,
+QScrollBar::sub-line {
     width: 0;
     height: 0;
-}
-
-QWidget#areaSelectionDialog {
-    background-color: rgba(1, 10, 18, 205);
-}
-
-QFrame#areaSelectionPanel {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                      stop:0 #123652, stop:0.52 #0c2941, stop:1 #071827);
-    border: 1px solid #58c9ef;
-    border-top-color: #91e7ff;
-    border-radius: 8px;
-}
-
-QLabel#areaSelectionTitle {
-    color: #f4fbff;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 21px;
-    font-weight: 900;
-    padding-left: 9px;
-    border-left: 3px solid #55d7ff;
-}
-
-QLabel#areaSelectionDescription {
-    color: #a9c7d6;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 13px;
-    font-weight: 700;
-}
-
-QPushButton#areaSelectionCloseButton {
-    min-width: 40px;
-    max-width: 40px;
-    min-height: 38px;
-    max-height: 38px;
-    color: #d8f3ff;
-    background-color: #0b2940;
-    border: 1px solid #3f7697;
-    border-radius: 5px;
-    font-size: 22px;
-    font-weight: 600;
-}
-
-QPushButton#areaSelectionCloseButton:hover {
-    color: #ffffff;
-    background-color: #174c6b;
-    border-color: #72dcff;
-}
-
-QListWidget#areaSelectionList {
-    color: #d9edf6;
-    background-color: #071827;
-    border: 1px solid #315f7e;
-    border-radius: 5px;
-    outline: 0;
-    padding: 8px;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 13px;
-    font-weight: 800;
-}
-
-QListWidget#areaSelectionList::item {
-    color: #b9d5e2;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #12354b, stop:1 #0a2032);
-    border: 1px solid #3a6a84;
-    border-radius: 3px;
-    margin: 4px;
-}
-
-QListWidget#areaSelectionList::item:hover {
-    color: #ffffff;
-    background-color: #174965;
-    border-color: #70cce9;
-}
-
-QListWidget#areaSelectionList::item:selected {
-    color: #ffffff;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #2385ae, stop:1 #155474);
-    border: 1px solid #9beaff;
-}
-
-QPushButton#areaSelectionCancelButton,
-QPushButton#areaSelectionConfirmButton {
-    min-width: 108px;
-    min-height: 40px;
-    border-radius: 5px;
-    font-family: "Segoe UI", "Malgun Gothic";
-    font-size: 14px;
-    font-weight: 800;
-}
-
-QPushButton#areaSelectionCancelButton {
-    color: #cbdde6;
-    background-color: #0b2032;
-    border: 1px solid #365f79;
-}
-
-QPushButton#areaSelectionCancelButton:hover {
-    color: #ffffff;
-    background-color: #123c56;
-    border-color: #579fc0;
-}
-
-QPushButton#areaSelectionConfirmButton {
-    color: #ffffff;
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #269ac4, stop:1 #176a91);
-    border: 1px solid #6ed9f7;
-}
-
-QPushButton#areaSelectionConfirmButton:hover {
-    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #36b2dc, stop:1 #1c7da5);
-    border-color: #d5f7ff;
 }

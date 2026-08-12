@@ -1,0 +1,15 @@
+.pragma library
+
+var background = "#061726"
+var surface = "#0b263b"
+var surfaceRaised = "#123a55"
+var border = "#397391"
+var borderStrong = "#59d9ff"
+var text = "#f5f9ff"
+var textMuted = "#abc1d2"
+var fontFamily = "Noto Sans KR"
+var cyan = "#55dcff"
+var cyanDark = "#18516d"
+var safe = "#38e86a"
+var warning = "#ffd21f"
+var danger = "#ff2f3d"

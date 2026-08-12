@@ -11,6 +11,9 @@
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QQmlEngine>
+#include <QQuickItem>
+#include <QQuickWidget>
 #include <QResizeEvent>
 #include <QShortcut>
 #include <QShowEvent>
@@ -18,8 +21,10 @@
 #include <QStackedWidget>
 #include <QStyle>
 #include <QTimer>
+#include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QVariant>
 #include <QVector>
 #include <QWidget>
 #include <algorithm>
@@ -35,10 +40,7 @@
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
 #include "ui/VideoRiskBorderFrame.h"
-#include "ui/dialogs/AreaSelectionDialog.h"
 #include "ui/dialogs/MapSettingsDialog.h"
-#include "ui/dialogs/ReportConfirmationDialog.h"
-#include "ui/dialogs/ReportSuccessDialog.h"
 #include "ui/panels/DashboardPanelCoordinator.h"
 #include "ui/panels/DashboardPanelFactory.h"
 #include "ui/panels/DeviceStatusPanel.h"
@@ -84,6 +86,10 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     videoPreprocessingSettingsByChannel_.fill(videoConfig_.receiver.preprocessing, streamConfigs_.size());
     latestVideoRiskLevels_.fill(DigitalTwinRiskLevel::Normal, streamConfigs_.size());
     setupDashboardLayout();
+    setupQuickTopBar();
+    setupQuickDashboardChrome();
+    setupQuickPanelHeaders();
+    setupQuickDialogOverlay();
     setupTopBarStatuses();
     setupClock();
     setupWindowShortcuts();
@@ -121,11 +127,6 @@ void MainWindow::toggleFullScreen() {
  * @brief 채널별 신고 버튼과 재사용 가능한 확인 다이얼로그를 연결합니다.
  */
 void MainWindow::setupReportActions() {
-    reportConfirmationDialog_ = new ReportConfirmationDialog(this);
-    reportSuccessDialog_ = new ReportSuccessDialog(this);
-
-    connect(reportConfirmationDialog_, &ReportConfirmationDialog::reportConfirmed, this, &MainWindow::sendReport);
-
     if (reportGateway_) {
         connect(reportGateway_.get(), &ReportGateway::reportSucceeded, this, [this](int channelNumber, const QString&) {
             reportInProgress_ = false;
@@ -134,16 +135,6 @@ void MainWindow::setupReportActions() {
         });
         connect(reportGateway_.get(), &ReportGateway::reportFailed, this, &MainWindow::handleReportFailure);
     }
-
-    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
-        ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
-
-    for (int channelIndex = 0; channelIndex < static_cast<int>(reportButtons.size()); ++channelIndex) {
-        reportButtons[static_cast<std::size_t>(channelIndex)]->setFocusPolicy(Qt::NoFocus);
-        connect(reportButtons[static_cast<std::size_t>(channelIndex)], &QPushButton::clicked, this,
-                [this, channelIndex]() { openReportConfirmationDialog(reportChannelNumberForSlot(channelIndex)); });
-    }
-    updateReportButtons();
 }
 
 /**
@@ -194,12 +185,8 @@ void MainWindow::handleReportFailure(int channelNumber, const QString& error) {
  * @param enabled 버튼 활성 여부
  */
 void MainWindow::setReportButtonsEnabled(bool enabled) {
-    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
-        ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
-    for (QPushButton* button : reportButtons) {
-        if (button) {
-            button->setEnabled(enabled);
-        }
+    if (quickCctvToolbar_ && quickCctvToolbar_->rootObject()) {
+        quickCctvToolbar_->rootObject()->setProperty("reportEnabled", enabled);
     }
 }
 
@@ -209,23 +196,6 @@ void MainWindow::setReportButtonsEnabled(bool enabled) {
  * @return          사용자 표시용 1 기반 채널 번호
  */
 int MainWindow::reportChannelNumberForSlot(int slotIndex) const { return slotIndex + 1; }
-
-/** @brief 현재 표시 구역에 맞춰 신고 버튼의 채널 문구와 도움말을 갱신합니다. */
-void MainWindow::updateReportButtons() {
-    const std::array<QPushButton*, videoChannelsPerArea> reportButtons = {
-        ui_->reportChannelButton1, ui_->reportChannelButton2, ui_->reportChannelButton3, ui_->reportChannelButton4};
-
-    for (int slotIndex = 0; slotIndex < static_cast<int>(reportButtons.size()); ++slotIndex) {
-        QPushButton* button = reportButtons[static_cast<std::size_t>(slotIndex)];
-        if (!button) {
-            continue;
-        }
-        const int channelNumber = reportChannelNumberForSlot(slotIndex);
-        const QString channelText = QStringLiteral("CH %1").arg(channelNumber, 2, 10, QLatin1Char('0'));
-        button->setText(channelText);
-        button->setToolTip(QStringLiteral("%1 신고").arg(channelText));
-    }
-}
 
 /**
  * @brief               신고 시점의 채널 위험 단계를 사용자 표시 문자열로
@@ -253,14 +223,10 @@ QString MainWindow::reportRiskLevel(int channelNumber) const {
  * @param channelNumber 사용자에게 표시할 1부터 4까지의 채널 번호
  */
 void MainWindow::openReportConfirmationDialog(int channelNumber) {
-    if (!reportConfirmationDialog_) {
-        return;
-    }
-
-    reportConfirmationDialog_->setChannelNumber(channelNumber);
-    reportConfirmationDialog_->open();
-    reportConfirmationDialog_->raise();
-    reportConfirmationDialog_->activateWindow();
+    pendingReportChannelNumber_ = qBound(1, channelNumber, videoChannelsPerArea);
+    quickDialogMode_ = QuickDialogMode::ReportConfirmation;
+    showQuickDialog(QStringLiteral("confirmation"), QStringLiteral("신고 확인"),
+                    QStringLiteral("%1 채널을 신고하겠습니까?").arg(pendingReportChannelNumber_));
 }
 
 /**
@@ -268,14 +234,10 @@ void MainWindow::openReportConfirmationDialog(int channelNumber) {
  * @param channelNumber 사용자에게 표시할 1부터 4까지의 채널 번호
  */
 void MainWindow::openReportSuccessDialog(int channelNumber) {
-    if (!reportSuccessDialog_) {
-        return;
-    }
-
-    reportSuccessDialog_->setChannelNumber(channelNumber);
-    reportSuccessDialog_->open();
-    reportSuccessDialog_->raise();
-    reportSuccessDialog_->activateWindow();
+    pendingReportChannelNumber_ = qBound(1, channelNumber, videoChannelsPerArea);
+    quickDialogMode_ = QuickDialogMode::ReportSuccess;
+    showQuickDialog(QStringLiteral("success"), QStringLiteral("신고 완료"),
+                    QStringLiteral("%1 채널을 안전 센터에 신고하였습니다!").arg(pendingReportChannelNumber_));
 }
 
 /**
@@ -283,32 +245,9 @@ void MainWindow::openReportSuccessDialog(int channelNumber) {
  */
 void MainWindow::setupDashboardLayout() {
     DashboardLayout::apply(this, ui_.get());
-    ui_->titleLabel->setTextFormat(Qt::RichText);
-    ui_->titleLabel->setText(
-        QStringLiteral("<span style=\"color:#a8d4ff;\">Wise AI</span>"
-                       "<span style=\"color:#ffffff;\"> 기반 주차장 디지털 트윈 "
-                       "관제 시스템</span>"));
-
-    const QPixmap settingsIcon(QStringLiteral(":/icons/config_icon.png"));
-    ui_->settingsLabel->setText({});
-    ui_->settingsLabel->setPixmap(settingsIcon.scaled(QSize(29, 29), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    ui_->settingsLabel->setAlignment(Qt::AlignCenter);
-    ui_->settingsLabel->setFixedSize(65, 49);
-    ui_->settingsLabel->setFocusPolicy(Qt::NoFocus);
-    ui_->settingsLabel->installEventFilter(this);
-    ui_->settingsLabel->setToolTip(QStringLiteral("설정"));
-
-    const QPixmap reportIcon(QStringLiteral(":/icons/report_icon.png"));
-    if (!reportIcon.isNull()) {
-        ui_->reportActionIconLabel->setPixmap(
-            reportIcon.scaled(QSize(23, 23), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else {
-        qWarning() << "[MainWindow] Failed to load report icon resource";
-    }
-    ui_->reportActionIconLabel->setContentsMargins(0, 3, 0, 0);
-    ui_->reportActionIconLabel->setAlignment(Qt::AlignCenter);
 
     mapSettingsDialog_ = new MapSettingsDialog(this);
+    mapSettingsDialog_->installEventFilter(this);
     connect(mapSettingsDialog_, &MapSettingsDialog::settingsApplied, this,
             [this](const DigitalTwinMapDisplaySettings& settings, bool videoRiskBordersEnabled, bool faceBlurEnabled,
                    bool licensePlateBlurEnabled, int channelIndex,
@@ -349,19 +288,157 @@ void MainWindow::setupDashboardLayout() {
 }
 
 /**
+ * @brief 기존 QWidget 화면 안에 Qt Quick 상단 표시줄을 배치합니다.
+ *
+ * @details 영상 출력과 대시보드 패널은 기존 QWidget 구현을 유지하고 상단 표시줄만
+ * Qt Design Studio에서 편집 가능한 QML 컴포넌트로 분리합니다.
+ */
+void MainWindow::setupQuickTopBar() {
+    if (!ui_->topBarFrame || !ui_->topBarLayout) {
+        return;
+    }
+
+    quickTopBar_ = createQuickView(QStringLiteral("TopBar.qml"), ui_->topBarFrame);
+    if (!quickTopBar_) {
+        return;
+    }
+
+    ui_->topBarLayout->setContentsMargins(0, 0, 0, 0);
+    ui_->topBarLayout->setSpacing(0);
+    ui_->topBarLayout->insertWidget(0, quickTopBar_, 1);
+
+    QObject* rootObject = quickTopBar_->rootObject();
+    connect(rootObject, SIGNAL(areaRequested()), this, SLOT(openVideoAreaSelectionDialog()));
+    connect(rootObject, SIGNAL(settingsRequested()), this, SLOT(openMapSettingsDialog()));
+}
+
+/** @brief CCTV 조작부와 상태 범례를 공통 Qt Quick 테마로 교체합니다. */
+void MainWindow::setupQuickDashboardChrome() {
+    if (ui_->cctvHeaderLayout) {
+        quickCctvToolbar_ = createQuickView(QStringLiteral("CctvToolbar.qml"), ui_->cctvCard);
+        if (quickCctvToolbar_) {
+            quickCctvToolbar_->setCursor(Qt::ArrowCursor);
+            quickCctvToolbar_->setFixedHeight(qRound(quickCctvToolbar_->rootObject()->implicitHeight()));
+            ui_->cctvHeaderLayout->insertWidget(0, quickCctvToolbar_, 1);
+            connect(quickCctvToolbar_->rootObject(), SIGNAL(reportRequested(int)), this,
+                    SLOT(openReportConfirmationDialog(int)));
+        }
+    }
+
+    if (ui_->legendLayout) {
+        quickLegend_ = createQuickView(QStringLiteral("StatusLegend.qml"), ui_->legendFrame);
+        if (quickLegend_) {
+            ui_->legendLayout->setContentsMargins(0, 0, 0, 0);
+            ui_->legendLayout->insertWidget(0, quickLegend_, 1);
+        }
+    }
+}
+
+/**
+ * @brief 맵과 하단 패널의 제목 줄을 공통 Qt Quick 헤더로 올립니다.
+ *
+ * @details 장비 제어/상태 카드는 제목 없이 채널 카드만 보여주므로 대상에서 제외합니다.
+ */
+void MainWindow::setupQuickPanelHeaders() {
+    addQuickPanelHeader(ui_->mapCardLayout, QStringLiteral("디지털 트윈 2D 맵"));
+    addQuickPanelHeader(ui_->objectListLayout, QStringLiteral("실시간 객체 목록"));
+    addQuickPanelHeader(ui_->eventLogLayout, QStringLiteral("이벤트 로그"));
+}
+
+/**
+ * @brief        카드 레이아웃 맨 위에 공통 Qt Quick 제목 줄을 추가합니다.
+ * @param layout 제목을 올릴 카드 레이아웃
+ * @param title  표시할 제목 문구
+ */
+void MainWindow::addQuickPanelHeader(QBoxLayout* layout, const QString& title) {
+    if (!layout) {
+        return;
+    }
+
+    QQuickWidget* header = createQuickView(QStringLiteral("PanelHeader.qml"), layout->parentWidget());
+    if (!header) {
+        return;
+    }
+
+    QQuickItem* rootObject = header->rootObject();
+    rootObject->setProperty("titleText", title);
+    header->setFixedHeight(qRound(rootObject->implicitHeight()));
+    layout->insertWidget(0, header);
+}
+
+/**
+ * @brief 구역 선택과 신고 안내가 공유하는 단일 Qt Quick 오버레이를 준비합니다.
+ *
+ * @details MapSettingsDialog와 같은 이유로 자식 위젯이 아니라 반투명 최상위 창으로 띄웁니다.
+ * 화면을 덮는 자식 위젯이 생기면 나머지 QQuickWidget 합성이 중단됩니다.
+ */
+void MainWindow::setupQuickDialogOverlay() {
+    if (!ui_->centralwidget) {
+        return;
+    }
+
+    quickDialogOverlay_ =
+        createQuickView(QStringLiteral("OverlayDialog.qml"), this, Qt::Dialog | Qt::FramelessWindowHint);
+    if (!quickDialogOverlay_) {
+        return;
+    }
+
+    quickDialogOverlay_->setWindowModality(Qt::WindowModal);
+    quickDialogOverlay_->setClearColor(QColor(QStringLiteral("#123a55")));
+    quickDialogOverlay_->hide();
+    connect(quickDialogOverlay_->rootObject(), SIGNAL(accepted(int)), this, SLOT(handleQuickDialogAccepted(int)));
+    connect(quickDialogOverlay_->rootObject(), SIGNAL(rejected()), this, SLOT(closeQuickDialog()));
+}
+
+/**
+ * @brief         공용 QML 엔진 위에 투명 배경 QQuickWidget을 만듭니다.
+ * @param qmlFile qrc:/qml 아래의 QML 파일 이름
+ * @param parent  QQuickWidget의 부모 위젯
+ * @return        루트 객체 로딩까지 성공하면 QQuickWidget, 실패하면 nullptr
+ */
+QQuickWidget* MainWindow::createQuickView(const QString& qmlFile, QWidget* parent, Qt::WindowFlags windowFlags) {
+    if (!quickEngine_) {
+        quickEngine_ = new QQmlEngine(this);
+    }
+
+    auto* view = new QQuickWidget(quickEngine_, parent);
+    // 플래그는 반드시 setSource 이전에 지정합니다. 이후에 바꾸면 네이티브 창이 다시 만들어지면서
+    // 이미 올라간 scene graph가 화면에 나오지 않습니다.
+    if (windowFlags != Qt::WindowFlags()) {
+        view->setWindowFlags(windowFlags);
+    }
+    view->setObjectName(QStringLiteral("quick") + qmlFile.section(QLatin1Char('.'), 0, 0));
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    view->setClearColor(Qt::transparent);
+    if (windowFlags == Qt::WindowFlags()) {
+        // 자식으로 올릴 때만 필요합니다. 두 속성이 함께 있어야 카드 QSS 배경이 QML 뒤로 비칩니다.
+        // 최상위 창에 걸면 이 환경에서는 아무것도 그려지지 않습니다.
+        view->setAttribute(Qt::WA_TranslucentBackground);
+        view->setAttribute(Qt::WA_AlwaysStackOnTop);
+    }
+    view->setFocusPolicy(Qt::NoFocus);
+    view->setSource(QUrl(QStringLiteral("qrc:/qml/") + qmlFile));
+
+    if (!view->rootObject()) {
+        qWarning() << "[MainWindow] Failed to load QML view" << qmlFile << view->errors();
+        delete view;
+        return nullptr;
+    }
+
+    return view;
+}
+
+/**
  * @brief         우측 상단 설정 버튼의 마우스 클릭을 팝업 열기로 변환합니다.
  * @param watched 이벤트를 받은 객체
  * @param event   전달된 Qt 이벤트
  * @return        설정 열기 입력을 처리했으면 true
  */
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == ui_->settingsLabel && event) {
-        if (event->type() == QEvent::MouseButtonRelease) {
-            const auto* mouseEvent = static_cast<QMouseEvent*>(event);
-            if (mouseEvent->button() == Qt::LeftButton) {
-                openMapSettingsDialog();
-                return true;
-            }
+    if (watched == mapSettingsDialog_ && event && event->type() == QEvent::Hide) {
+        unsetCursor();
+        if (quickTopBar_) {
+            quickTopBar_->setCursor(Qt::ArrowCursor);
         }
     }
 
@@ -412,7 +489,8 @@ void MainWindow::setupClock() {
  * @brief 현재 로컬 날짜와 시각을 상단 표시줄에 반영합니다.
  */
 void MainWindow::updateCurrentDateTime() {
-    ui_->dateLabel->setText(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    const QString dateTime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    setQuickTopBarProperty("dateTimeText", dateTime);
 }
 
 /**
@@ -420,9 +498,8 @@ void MainWindow::updateCurrentDateTime() {
  * @param connected  MQTT broker와 정상적으로 연결되었다면 true
  */
 void MainWindow::updateSystemStatus(bool connected) {
-    setTopBarStatus(ui_->systemStatusLabel, QStringLiteral("통신 상태"),
-                    connected ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"),
-                    connected ? normalStatusColor : disconnectedStatusColor);
+    setQuickTopBarProperty("systemStatusText", connected ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"));
+    setQuickTopBarProperty("systemStatusColor", connected ? normalStatusColor : disconnectedStatusColor);
 }
 
 /**
@@ -452,28 +529,15 @@ void MainWindow::updateStreamConnectionStatus() {
 
     allStreamsReady = hasEnabledStream && allStreamsReady;
 
-    setTopBarStatus(ui_->connectionStatusLabel, QStringLiteral("CCTV 상태"),
-                    allStreamsReady ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"),
-                    allStreamsReady ? normalStatusColor : disconnectedStatusColor);
+    setQuickTopBarProperty("cctvStatusText", allStreamsReady ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"));
+    setQuickTopBarProperty("cctvStatusColor", allStreamsReady ? normalStatusColor : disconnectedStatusColor);
 }
 
-/**
- * @brief         상단 상태 QLabel에서 제목과 상태 문구를 서로 다른 색으로
- * 표시합니다.
- * @param label   갱신할 상단 상태 QLabel
- * @param title   항상 기본 글자색으로 표시할 상태 제목
- * @param status  상태 점을 포함한 상태 문구
- * @param color   상태 문구에 적용할 RGB 색상 문자열
- */
-void MainWindow::setTopBarStatus(QLabel* label, const QString& title, const QString& status, const QString& color) {
-    if (!label) {
-        return;
+/** @brief Qt Quick 상단 표시줄의 루트 속성을 안전하게 갱신합니다. */
+void MainWindow::setQuickTopBarProperty(const char* name, const QVariant& value) {
+    if (quickTopBar_ && quickTopBar_->rootObject()) {
+        quickTopBar_->rootObject()->setProperty(name, value);
     }
-
-    label->setTextFormat(Qt::RichText);
-    label->setText(QStringLiteral("<span style=\"color:#d5dfec;font-weight:800;\">%1</span>"
-                                  "&nbsp;&nbsp;<span style=\"color:%2;font-weight:800;\">%3</span>")
-                       .arg(title, color, status));
 }
 
 /**
@@ -485,8 +549,6 @@ void MainWindow::setupDashboardPanels() {
         qWarning() << "[MainWindow] Dashboard panel factory is not configured";
         return;
     }
-
-    ui_->deviceStatusTitleLabel->setVisible(false);
 
     DashboardPanelHosts hosts;
     hosts.deviceStatusHost = ui_->deviceStatusBodyFrame;
@@ -589,8 +651,8 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     if (mapSettingsDialog_ && mapSettingsDialog_->isVisible()) {
         mapSettingsDialog_->setGeometry(rect());
     }
-    if (areaSelectionDialog_ && areaSelectionDialog_->isVisible()) {
-        areaSelectionDialog_->setGeometry(rect());
+    if (quickDialogOverlay_ && quickDialogOverlay_->isVisible()) {
+        quickDialogOverlay_->setGeometry(quickDialogHostGeometry());
     }
 }
 
@@ -713,38 +775,79 @@ void MainWindow::setupVideoViewEvents() {
     }
 }
 
-/** @brief 설정된 CCTV 구역을 상단 선택 버튼과 페이지 스택에 연결합니다. */
+/** @brief 설정된 CCTV 구역을 상단 표시줄과 페이지 스택에 연결합니다. */
 void MainWindow::setupVideoAreaSelector() {
-    if (!ui_->videoAreaButton || !ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
+    if (!ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
         return;
     }
 
-    QStringList areaNames;
+    setQuickTopBarProperty("areaText", videoConfig_.areas[currentVideoAreaIndex_].name);
+    ui_->videoAreaStackedWidget->setCurrentIndex(currentVideoAreaIndex_);
+}
+
+/** @brief 현재 구역을 선택 상태로 표시한 뒤 구역 선택 다이얼로그를 엽니다. */
+void MainWindow::openVideoAreaSelectionDialog() {
+    QVariantList areaNames;
     areaNames.reserve(videoConfig_.areas.size());
     for (const VideoAreaConfig& area : videoConfig_.areas) {
         areaNames.append(area.name);
     }
 
-    ui_->videoAreaButton->setText(videoConfig_.areas[currentVideoAreaIndex_].name);
-    ui_->videoAreaButton->setToolTip(QStringLiteral("표시할 CCTV 구역 선택"));
-    ui_->videoAreaStackedWidget->setCurrentIndex(currentVideoAreaIndex_);
-
-    areaSelectionDialog_ = new AreaSelectionDialog(this);
-    areaSelectionDialog_->setAreas(areaNames, currentVideoAreaIndex_);
-    connect(ui_->videoAreaButton, &QPushButton::clicked, this, &MainWindow::openVideoAreaSelectionDialog);
-    connect(areaSelectionDialog_, &AreaSelectionDialog::areaSelected, this, &MainWindow::switchVideoArea);
+    quickDialogMode_ = QuickDialogMode::AreaSelection;
+    setQuickDialogProperty("choices", areaNames);
+    setQuickDialogProperty("selectedIndex", currentVideoAreaIndex_);
+    showQuickDialog(QStringLiteral("area"), QStringLiteral("모니터링 구역 선택"),
+                    QStringLiteral("화면에 출력할 주차 구역을 선택하세요."));
 }
 
-/** @brief 현재 구역을 선택 상태로 표시한 뒤 구역 선택 다이얼로그를 엽니다. */
-void MainWindow::openVideoAreaSelectionDialog() {
-    if (!areaSelectionDialog_) {
+/** @brief Qt Quick 오버레이의 확인 동작을 현재 모드에 따라 처리합니다. */
+void MainWindow::handleQuickDialogAccepted(int selectedIndex) {
+    const QuickDialogMode mode = quickDialogMode_;
+    closeQuickDialog();
+
+    if (mode == QuickDialogMode::AreaSelection) {
+        switchVideoArea(selectedIndex);
+    } else if (mode == QuickDialogMode::ReportConfirmation) {
+        sendReport(pendingReportChannelNumber_);
+    }
+}
+
+/** @brief 현재 Qt Quick 오버레이를 닫고 대기 모드를 초기화합니다. */
+void MainWindow::closeQuickDialog() {
+    if (quickDialogOverlay_) {
+        quickDialogOverlay_->hide();
+    }
+    quickDialogMode_ = QuickDialogMode::None;
+}
+
+/** @brief Qt Quick 오버레이의 속성을 루트 객체가 있을 때만 갱신합니다. */
+void MainWindow::setQuickDialogProperty(const char* name, const QVariant& value) {
+    if (quickDialogOverlay_ && quickDialogOverlay_->rootObject()) {
+        quickDialogOverlay_->rootObject()->setProperty(name, value);
+    }
+}
+
+/** @brief 지정한 문구와 모드로 Qt Quick 오버레이를 표시합니다. */
+void MainWindow::showQuickDialog(const QString& mode, const QString& title, const QString& message) {
+    if (!quickDialogOverlay_ || !quickDialogOverlay_->rootObject()) {
         return;
     }
 
-    areaSelectionDialog_->setCurrentAreaIndex(currentVideoAreaIndex_);
-    areaSelectionDialog_->setGeometry(rect());
-    areaSelectionDialog_->show();
-    areaSelectionDialog_->raise();
+    setQuickDialogProperty("mode", mode);
+    setQuickDialogProperty("titleText", title);
+    setQuickDialogProperty("messageText", message);
+    quickDialogOverlay_->setGeometry(quickDialogHostGeometry());
+    quickDialogOverlay_->show();
+    quickDialogOverlay_->raise();
+}
+
+/** @brief QML이 알려준 패널 크기로 오버레이 창을 메인 윈도우 중앙에 맞춥니다. */
+QRect MainWindow::quickDialogHostGeometry() const {
+    const QQuickItem* rootObject = quickDialogOverlay_->rootObject();
+    const QSize panelSize(qRound(rootObject->implicitWidth()), qRound(rootObject->implicitHeight()));
+    const QWidget* host = ui_->centralwidget;
+    const QPoint hostCenter = host->mapToGlobal(host->rect().center());
+    return QRect(hostCenter - QPoint(panelSize.width() / 2, panelSize.height() / 2), panelSize);
 }
 
 /**
@@ -801,14 +904,13 @@ void MainWindow::switchVideoArea(int areaIndex) {
 
     currentVideoAreaIndex_ = areaIndex;
     ui_->videoAreaStackedWidget->setCurrentIndex(areaIndex);
-    ui_->videoAreaButton->setText(videoConfig_.areas[currentVideoAreaIndex_].name);
+    setQuickTopBarProperty("areaText", videoConfig_.areas[currentVideoAreaIndex_].name);
     if (deviceStatusPanel_) {
         deviceStatusPanel_->setAreaIndex(areaIndex);
     }
     if (!isChannelVisible(selectedPreprocessingChannelIndex_)) {
         selectedPreprocessingChannelIndex_ = channelsForArea(areaIndex).value(0, 0);
     }
-    updateReportButtons();
     updateVideoRiskBorders(latestVideoRiskLevels_);
     updateStreamConnectionStatus();
 

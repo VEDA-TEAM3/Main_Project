@@ -1,6 +1,7 @@
 #include "ui/DigitalTwinMapWidget.h"
 
 #include <QDebug>
+#include <QFont>
 #include <QFrame>
 #include <QGraphicsPathItem>
 #include <QGraphicsPixmapItem>
@@ -614,7 +615,13 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
     visualItem.trail->setVisible(displaySettings_.showMovementTrails);
 
     visualItem.label = scene_.addSimpleText(object.objectId);
-    visualItem.label->setScale(0.9);
+    // 뷰가 fitInView로 비정수 배율을 쓰기 때문에 라벨을 장면과 함께 확대하면 객체가 움직일 때마다
+    // 글리프가 다른 픽셀에 스냅되어 흔들려 보입니다. 화면 좌표계에 고정해 크기를 일정하게 둡니다.
+    visualItem.label->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    QFont labelFont = visualItem.label->font();
+    labelFont.setPixelSize(11);
+    labelFont.setWeight(QFont::DemiBold);
+    visualItem.label->setFont(labelFont);
     visualItem.label->setZValue(5.0);
 
     demoItems_.append(visualItem);

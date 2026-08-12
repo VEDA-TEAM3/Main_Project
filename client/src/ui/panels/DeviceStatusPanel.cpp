@@ -1,10 +1,13 @@
 #include "ui/panels/DeviceStatusPanel.h"
 
+#include <QEasingCurve>
 #include <QFrame>
+#include <QGraphicsOpacityEffect>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
+#include <QPropertyAnimation>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -12,6 +15,7 @@
 namespace {
 constexpr int visibleChannelCount = 4;
 constexpr int deviceStatusIconSize = 22;
+constexpr int stateFadeDurationMsec = 180;
 
 bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
     return left.channelIndex == right.channelIndex && left.outputs.ledRed == right.outputs.ledRed &&
@@ -248,6 +252,17 @@ QLabel* DeviceStatusPanel::createStatusSegment(const StatusSegmentSpec& spec) {
     segment->setProperty("stateKind", spec.stateKind);
     segment->setProperty("active", false);
 
+    auto* opacityEffect = new QGraphicsOpacityEffect(segment);
+    opacityEffect->setOpacity(1.0);
+    segment->setGraphicsEffect(opacityEffect);
+
+    auto* fadeAnimation = new QPropertyAnimation(opacityEffect, "opacity", segment);
+    fadeAnimation->setObjectName(QStringLiteral("stateFadeAnimation"));
+    fadeAnimation->setDuration(stateFadeDurationMsec);
+    fadeAnimation->setStartValue(0.55);
+    fadeAnimation->setEndValue(1.0);
+    fadeAnimation->setEasingCurve(QEasingCurve::OutCubic);
+
     return segment;
 }
 
@@ -308,4 +323,9 @@ void DeviceStatusPanel::setSegmentActive(QLabel* label, bool active) {
     label->setProperty("active", active);
     label->style()->unpolish(label);
     label->style()->polish(label);
+
+    if (auto* animation = label->findChild<QPropertyAnimation*>(QStringLiteral("stateFadeAnimation"))) {
+        animation->stop();
+        animation->start();
+    }
 }
