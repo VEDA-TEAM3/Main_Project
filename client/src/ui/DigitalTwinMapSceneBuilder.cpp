@@ -3,7 +3,11 @@
 #include <QBrush>
 #include <QColor>
 #include <QFont>
+// addPath/addSimpleText가 돌려주는 아이템을 직접 다루므로 완전한 타입이 필요하다.
+// PCH가 켜져 있으면 없어도 통과하지만 QTCCTV_ENABLE_PCH=OFF에서는 컴파일되지 않는다
+#include <QGraphicsPathItem>
 #include <QGraphicsScene>
+#include <QGraphicsSimpleTextItem>
 #include <QPainterPath>
 #include <QPen>
 #include <QPointF>

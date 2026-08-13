@@ -113,12 +113,13 @@ multicast, TCP를 사용한다. `udpTimeoutUs`는 일반적인 “RTSP 접속 ti
 | 설정 | 현재값 | 정의 | 현재 설정 이유 |
 | --- | ---: | --- | --- |
 | `decoderMode` | `auto` | 디코더 선택 모드 | 설치 환경에서 사용 가능한 디코더로 동작하게 한다. 아래 구현 주의사항 참고. |
+| `processingWidth` / `processingHeight` | 1280 x 720 | 시스템 메모리로 내려받기 전에 GPU에서 줄일 해상도 | 블러가 CPU 접근을 요구해 생기는 왕복 전송량과 CPU 픽셀 수를 함께 줄인다. 둘 다 `0`이면 원본 유지. **`d3d11` 디코더 경로에서만 적용된다.** |
 | `decodeQueueMaximumBuffers` | 8 | 디코딩 전 queue의 최대 buffer 수 | 순간 디코딩 흔들림을 흡수하되 무제한 누적을 막는다. |
 | `decodeQueueMaximumTimeMs` | 100 ms | 디코딩 전 queue의 최대 시간 | buffer 8개보다 먼저 도달할 수 있는 실질 지연 상한이다. |
 | `alignmentDelayMs` | 100 ms | 영상과 늦게 도착하는 AI/MQTT metadata를 맞추기 위한 의도적 영상 대기 | 블러 위치가 영상보다 뒤처지는 현상을 줄이기 위한 현장 보정값이다. |
 | `alignmentQueueMaximumTimeMs` | 450 ms | alignment queue가 보유할 수 있는 최대 영상 시간 | 100 ms 지연선을 만들 여유와 일시 변동분을 확보한다. 평시에는 도달하지 않는 천장이다. |
-| `renderQueueMaximumBuffers` | 3 | 렌더 전 queue의 최대 frame 수 | 순간 처리 지연을 흡수하는 유일한 지점이다. 1로 두면 흡수량이 0이라 짧은 지연도 곧바로 드롭이 된다. |
-| `renderQueueMaximumTimeMs` | 200 ms | 렌더 전 queue의 시간 한도 | frame 3개보다 먼저 도달할 수 있는 안전 상한이다. |
+| `renderQueueMaximumBuffers` | 8 | 렌더 전 queue의 최대 frame 수 | 순간 처리 지연을 흡수하는 유일한 지점이다. 1로 두면 흡수량이 0이라 짧은 지연도 곧바로 드롭이 된다. 평시에 비어 있어 깊이를 늘려도 지연이 늘지 않는다. |
+| `renderQueueMaximumTimeMs` | 200 ms | 렌더 전 queue의 시간 한도 | frame 8개보다 먼저 도달할 수 있는 안전 상한이다. |
 
 GStreamer queue는 `max-size-buffers`, `max-size-bytes`, `max-size-time` 중 **먼저 도달한 제한**을
 사용한다. 이 프로젝트는 bytes 제한을 끄고 buffer/time 제한만 사용한다.
@@ -127,7 +128,7 @@ GStreamer queue는 `max-size-buffers`, `max-size-bytes`, `max-size-time` 중 **�
   순서를 보존한다.
 - `alignmentqueue`는 `min-threshold-time=100 ms`로 최소 대기량을 만들고,
   `max-size-time=450 ms`, `leaky=downstream`으로 오래된 frame부터 버린다.
-- `renderqueue`는 `max-size-buffers=3`, `leaky=downstream`이므로 렌더가 계속 밀리면 오래된 frame을
+- `renderqueue`는 `max-size-buffers=8`, `leaky=downstream`이므로 렌더가 계속 밀리면 오래된 frame을
   버리고 최신 frame을 유지한다.
 
 `alignmentQueueMaximumTimeMs`는 항상 `alignmentDelayMs` 이상이어야 하며, 설정 로더가 이 관계를
@@ -144,11 +145,11 @@ data in the queue to allow reading"이다. 임계값 아래로 내려가면 출�
 **흡수와 드롭은 `renderqueue` 한 곳에서만 일어난다.** sink가 `sync=false`로 도착 즉시 렌더하므로 평시에
 이 queue는 비어 있다. 따라서 깊이를 늘려도 **정상 구간 지연이 늘지 않는다.** 블러나 D3D11 업로드가 한
 frame 늦어지는 순간에만 채워져, 이미 디코딩·색변환까지 마친 frame을 버리는 대신 흡수한다. 지속적인
-과부하에서만 최대 3 frame 분량이 쌓인다.
+과부하에서만 최대 8 frame 분량이 쌓인다(720p NV12 기준 약 11 MB).
 
 예전에는 `renderQueueMaximumBuffers=1`이라 흡수량이 0이었다. 그 상태에서는 과부하 시
 `alignmentqueue`가 frame 3개를 붙잡고 있는 동안 `renderqueue`가 갓 디코딩한 frame을 버리는 모순이
-생겼다. 3으로 올리면 `renderqueue`가 backpressure 대신 흡수·leak을 담당하므로 `alignmentqueue`의
+생겼다. 8로 올리면 `renderqueue`가 backpressure 대신 흡수·leak을 담당하므로 `alignmentqueue`의
 450 ms 천장까지 밀릴 일이 없어지고, 드롭 지점이 하나로 단일화된다.
 
 `sync=false`에서는 sink의 `render-delay`가 동작하지 않으므로, 표시 지연을 만드는 수단은
@@ -165,6 +166,12 @@ frame 늦어지는 순간에만 채워져, 이미 디코딩·색변환까지 마
 
 즉 현재 일반적인 설치에서는 `auto`가 소프트웨어 디코딩을 선택한다. 디코더를 비교 시험하려면
 `QTCCTV_DECODER_MODE=d3d11` 또는 `software`를 명시하고, 한 번에 다른 설정은 바꾸지 않는다.
+
+**이 선택이 `processingWidth`/`processingHeight`에 그대로 영향을 준다.** 축소는 `d3d11scale`로 하므로
+소프트웨어 경로에서는 값이 있어도 **적용되지 않는다.** 설정을 켰는데 부하가 그대로면 로그의
+`[GstRtspReceiver] ... processing=1280x720` 줄과 실제 디코더를 함께 확인한다. 축소 효과까지 받으려면
+`QTCCTV_DECODER_MODE=d3d11`로 하드웨어 디코딩을 명시해야 한다. 소프트웨어 경로에서는 CPU가 이미
+디코딩을 하고 있어 GPU→CPU 전송 자체가 없으므로, 축소로 얻을 것도 그만큼 적다.
 
 ### 3.4 H.264 복구 설정
 
@@ -241,6 +248,17 @@ GStreamer 기준으로 `videobalance brightness=0`, `contrast=1`, `gamma gamma=1
 전처리는 NV12 raw frame 전체를 순회할 수 있으므로 해상도와 채널 수에 비례해 CPU/GPU memory
 bandwidth를 사용한다. 지연이 중요하면 먼저 중립값 또는 전처리 OFF 상태와 비교한다.
 
+**중립값에서는 두 요소가 스스로 passthrough로 빠진다(실측).** 공식 문서에는 없는 동작이라
+`GST_DEBUG=basetransform:5`로 직접 확인했다.
+
+| 값 | 로그 |
+| --- | --- |
+| 중립 (0 / 1.0 / 1.0) | `<balance> element is in passthrough`, `passthrough: reusing input buffer` (`gammafilter`도 동일) |
+| 변경 (0.2 / 1.2) | `<balance> set passthrough 0` |
+
+따라서 "전처리를 안 쓰는데 파이프라인에 요소가 남아 있어 손해"라는 걱정은 하지 않아도 된다.
+중립값이면 buffer를 그대로 통과시키므로 요소를 빼는 최적화는 필요 없다.
+
 ## 5. MQTT 블러와 영상 시간 동기화
 
 블러는 단순히 “가장 최근 MQTT 좌표”를 현재 영상에 덮지 않는다. 영상 frame의 시각과 MQTT metadata
@@ -297,6 +315,10 @@ passthrough가 아니면 `GstBaseTransform`이 매 frame 버퍼를 쓰기 가능
 이 전환은 블러 대상 설정이 바뀔 때와 pipeline을 새로 만들 때 적용된다. metadata가 일시적으로 없는
 구간까지 frame 단위로 전환하지는 않는다. passthrough 변경은 pipeline 협상을 건드리므로 frame마다
 토글하면 안 된다.
+
+`BlurProcessor::apply()`도 두 대상이 모두 꺼져 있으면 **맨 앞에서 반환한다.** passthrough 전환이
+적용되기 전 몇 frame과, 다른 경로로 `apply()`가 불리는 경우까지 덮기 위한 두 번째 방어선이다.
+이 조기 반환 덕에 시각 변환과 이력 조회(뮤텍스)까지 가지 않는다.
 
 ## 6. 설정값이 함께 만드는 지연
 
@@ -442,9 +464,10 @@ profile4 설정에서 다시 확인해야 한다.
 ## 11. 현재 설정에서 특히 주의할 점
 
 1. `app_config.json`과 `app_config.example.json`의 영상 수신 값은 현재 동일하다(`latencyMs=250`,
-   `alignmentDelayMs=100`, `renderQueueMaximumBuffers=3`). 한쪽만 바꾸면 새 환경이 다른 지연 특성으로
-   시작하므로 항상 같이 고친다.
-2. `decoderMode=auto`는 현재 구현에서 software decoder 우선이다.
+   `alignmentDelayMs=100`, `renderQueueMaximumBuffers=8`, `processingWidth/Height=1280x720`). 한쪽만
+   바꾸면 새 환경이 다른 지연 특성으로 시작하므로 항상 같이 고친다.
+2. `decoderMode=auto`는 현재 구현에서 software decoder 우선이다. **이 경우 `processingWidth/Height`
+   축소는 적용되지 않는다**(`d3d11scale` 전용).
 3. `preprocessing.enabled=true`이지만 값이 중립이면 passthrough이므로 실제 보정 비용은 생략된다.
 4. `alignmentDelayMs`는 의도적으로 설정한 영상-MQTT 정렬 지연이므로 RTSP latency를 조정할 때 함께
    없애거나 같은 값으로 취급하면 안 된다.
@@ -506,13 +529,24 @@ UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 별도로 검토
 - **표면 분리**: 영상은 `ClickableVideoWidget`이 `WA_NativeWindow`로 만든 네이티브 HWND에
   `d3d11videosink`가 직접 그린다. QML은 최상위 창의 합성 표면에 그려진다. 서로 다른 HWND다.
 - **스레드 분리**: 디코딩·블러·present가 모두 채널별 `QThread`와 GStreamer 스트리밍 스레드에서 돈다.
-  `BlurProcessor`는 채널마다 별도 인스턴스이고, mutex는 좌표 조회 구간만 잡으며 `applyBoxBlur`는 락
-  밖에서 실행된다. GUI 스레드가 막혀도 frame은 계속 흐른다.
+  `BlurProcessor`는 채널마다 별도 인스턴스이고, mutex는 좌표 조회 구간만 잡으며 실제 블러 연산
+  (`applyNv12Blur`)은 락 밖에서 실행된다. GUI 스레드가 막혀도 frame은 계속 흐른다.
 - **상시 부하 없음**: `qml/`에 항상 도는 `Timer`나 애니메이션이 없다.
 
 다만 z-order는 주의해야 한다. 네이티브 자식 HWND는 Qt가 합성하는 모든 내용 위에 그려지므로
 **영상 타일 위에 QML 오버레이를 올리면 보이지 않는다.** `WA_AlwaysStackOnTop`으로도 이길 수 없다.
 채널 라벨을 네이티브 위젯으로 만들고 `SetWindowPos(HWND_TOP)`으로 올리는 것이 그 우회다.
+
+### 검토했지만 하지 않은 최적화 (다시 열지 않기 위한 기록)
+
+블러 부하를 줄이는 과정에서 후보로 올렸다가 **크기를 재보고 접은 것들**이다. 다시 제안되면 아래
+숫자부터 반박해야 한다.
+
+| 후보 | 접은 이유 |
+| --- | --- |
+| `videobalance`/`gamma`를 중립일 때 파이프라인에서 제거 | 두 요소가 이미 스스로 passthrough로 빠진다(4장 실측 표). 얻을 것이 없다. |
+| `BlurProcessor`의 뮤텍스를 불변 스냅샷으로 교체 | 실제 블로킹이 sub-µs다. 쓰기는 대부분 벡터 끝 append(O(1))이고, 최악인 중간 삽입도 32 B x 최대 300개 = 약 10 KB memmove다. 읽기는 이진 탐색(비교 8회) + 작은 벡터 하나. 반면 copy-on-write로 바꾸면 metadata 메시지마다 이력 전체를 복사해야 해서 **없애려는 비용보다 새로 드는 비용이 크다.** |
+| 블러 metadata 전달에서 GUI 스레드 홉 제거 | 블러는 도착 순서가 아니라 timestamp로 매칭한다. 영상은 jitterbuffer 250 ms + `alignmentDelayMs` 100 ms 뒤에 나오므로 metadata에 **약 350 ms 여유**가 있는데, GUI 홉 지연은 통상 한 렌더 주기(33 ms)다. GUI가 350 ms 이상 멈추는 상황에서만 의미가 있고, 그 정도면 블러가 아니라 다른 것이 먼저 문제다. |
 
 ### 확실하지 않아 제외한 것
 

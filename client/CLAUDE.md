@@ -132,13 +132,21 @@ CMake는 로컬 파일이 있으면 그것을, 없으면 example을 빌드 디�
 
 `StreamSessionManager`가 채널별 `StreamReceiver`(`GstRtspReceiver`)를 생성해 각각 전용 `QThread`에서
 실행하고, 출력은 네이티브 `WId`로 GStreamer sink에 바로 연결합니다(`ClickableVideoWidget`).
-`BlurProcessor`/`BlurVideoFilter`는 `VideoUtcClockMapper`로 RTSP 지연(기본 2500ms)을 보정해 blur 메타데이터의
-UTC `ts`를 실제 표시 프레임에 맞춘 뒤 sink 직전에 box blur를 적용합니다.
+`BlurProcessor`/`BlurVideoFilter`는 `VideoUtcClockMapper`로 RTSP 지연(`blur.syncOffsetMs`, 기본 300ms)을 보정해
+blur 메타데이터의 UTC `ts`를 실제 표시 프레임에 맞춘 뒤 sink 직전에 box blur를 적용합니다.
 새 수신 방식은 `StreamReceiver` + `StreamReceiverFactory` 구현으로 확장합니다.
+
+**영상 포맷은 파이프라인 전체가 NV12입니다.** 블러가 CPU에서 돌기 때문에 프레임은 시스템 메모리로 한 번
+내려왔다가 sink에서 다시 올라가는데, 예전처럼 BGRA로 바꾸면 픽셀당 4바이트 풀프레임 변환과 2.7배 큰 왕복
+전송을 매 프레임 물어야 합니다. `qtblur`는 휘도·색차 평면을 각각 처리하고, `videobalance`/`gamma`/
+`d3d11videosink`가 모두 NV12를 받으므로 d3d11 경로에서는 `videoconvert`가 passthrough로 빠집니다.
+**블러 코드를 고칠 때 BGRA로 되돌리지 마세요.** 자세한 근거와 실측치는 [VIDEO_SETTINGS.md](VIDEO_SETTINGS.md)에 있습니다.
 
 ### 디지털 트윈 맵
 
 `DigitalTwinMapWidget`(QGraphicsView)이 risk 프레임을 world 좌표 → 화면 좌표로 변환해 렌더링합니다.
+객체는 구역 셀 안의 **정사각형 영역(scene 158x158)**에만 그려지고 `digitalTwin.world.zones`의 월드 상자가
+여기에 늘려 맞춰집니다. 그래서 **월드 상자도 정사각형이어야** 가로·세로 배율이 같아집니다(README 참고).
 world 좌표는 Y가 위쪽 양수이므로 화면 매핑 시 Y를 뒤집습니다(`invertY`). 보정된 `VEDA_MAP_*` 경계가 없으면
 수신 좌표에서 자동으로 경계를 확장하지만, 정확한 채널 사분면 배치에는 고정 경계가 필요합니다.
 실 데이터가 처음 들어오면 내장 데모(`DigitalTwinSimulationWorker`)가 중지되고, 5초간 프레임이 없는 채널은 제거됩니다.

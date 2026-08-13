@@ -34,6 +34,8 @@ namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maxTrailSceneLength = 240.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
+/// 객체 영역과 구역 테두리 사이 여백(scene 단위). 아이콘이 테두리를 넘지 않게 둔다
+constexpr double objectAreaMargin = 18.0;
 
 QString centralEventKey(const CentralEventData& event) {
     const QString identity = event.eventId.isEmpty() ? event.eventType : event.eventId;
@@ -815,7 +817,12 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
  */
 void DigitalTwinMapWidget::updateObjectAreaRect() {
     for (qsizetype zoneIndex = 0; zoneIndex < objectAreaRects_.size(); ++zoneIndex) {
-        objectAreaRects_[zoneIndex] = mapLayout_.zoneRects[zoneIndex].adjusted(18.0, 18.0, -18.0, -18.0);
+        const QRectF cell = mapLayout_.zoneRects[zoneIndex];
+        // 정사각형으로 잡는다. 월드 상자를 이 영역에 늘려 맞추므로 영역이 직사각형이면
+        // 가로·세로 배율이 달라져 실제로 정사각형인 구역이 화면에서 찌그러진다
+        const double side = qMin(cell.width(), cell.height()) - objectAreaMargin * 2.0;
+        objectAreaRects_[zoneIndex] =
+            QRectF(cell.center().x() - side * 0.5, cell.center().y() - side * 0.5, side, side);
     }
 }
 
