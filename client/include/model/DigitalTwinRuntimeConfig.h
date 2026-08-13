@@ -35,6 +35,15 @@ struct DigitalTwinWorldConfig {
         const double halfWidth = bounds.width() * 0.5;
         return QRectF(bounds.left() + boundedIndex * halfWidth, bounds.top(), halfWidth, bounds.height());
     }
+
+    /**
+     * @brief  zoneId를 못 받았을 때 x 좌표로 구역을 가르는 기준값입니다.
+     * @return 두 구역 상자 사이의 중간 x
+     *
+     * @details bounds의 중심을 쓰면 두 구역이 도면 한쪽에 몰려 있을 때 경계가 엉뚱한 곳에 생긴다.
+     *          zones가 없으면 두 상자가 bounds를 반 가른 결과라 이 값이 그대로 중심이 된다.
+     */
+    double zoneSplitX() const { return (zoneBounds(0).right() + zoneBounds(1).left()) * 0.5; }
 };
 
 /// 탑뷰 맵에 그리는 객체 아이콘의 한 변 길이(scene 단위). 맵 자체는 1000x520이다

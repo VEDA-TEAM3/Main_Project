@@ -843,7 +843,7 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
 
     // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치는 그 구역의
     // 월드 상자로 정규화한다
-    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), worldBounds.center().x());
+    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), liveConfig_.world.zoneSplitX());
     const QRectF zoneBounds = liveConfig_.world.zoneBounds(zoneIndex);
     const double normalizedX = qBound(0.0, (worldPosition.x() - zoneBounds.left()) / zoneBounds.width(), 1.0);
     double normalizedY = qBound(0.0, (worldPosition.y() - zoneBounds.top()) / zoneBounds.height(), 1.0);
