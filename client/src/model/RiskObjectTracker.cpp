@@ -273,7 +273,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         logFrameDiagnostics(frame, rawPositions, medianPositions, arrivalTimeMsec);
     }
 
-    const qint64 objectRetentionMsec = config_.missingGraceMsec;
+    const qint64 objectRetentionMsec = config_.missingGraceMsec + qMax<qint64>(0, config_.fadeOutMsec);
     for (auto iterator = lastSeenArrivalTimesMsec_.begin(); iterator != lastSeenArrivalTimesMsec_.end();) {
         if (arrivalTimeMsec - iterator.value() <= objectRetentionMsec) {
             ++iterator;
@@ -443,6 +443,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
                      true);
     }
 
+    // Grace가 끝나도 곧바로 지우지 않는다. fade-out이 끝나야 상태를 버려야 같은 gid가
+    // 짧은 공백 뒤에 돌아왔을 때 opacity 0에서 다시 시작하지 않는다
+    const qint64 objectRetentionMsec = config_.missingGraceMsec + qMax<qint64>(0, config_.fadeOutMsec);
     QVector<qint64> expiredObjectIds;
     for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
         if (includedObjectIds.contains(iterator.key())) {
@@ -454,7 +457,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
         if (missingAgeMsec < 0) {
             continue;
         }
-        if (missingAgeMsec > config_.missingGraceMsec) {
+        if (missingAgeMsec > objectRetentionMsec) {
             expiredObjectIds.append(iterator.key());
             if (diagnostics_.level >= 2) {
                 qDebug().noquote()
@@ -975,6 +978,10 @@ QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const Q
  * @param missingAgeMsec   마지막 로컬 수신 이후 누락 시간
  * @param localTimeMsec    현재 로컬 렌더 시각
  * @return                 0.0~1.0 범위의 표시 투명도
+ *
+ * @details 누락 구간은 두 단계다. missingGraceMsec까지는 opacity를 그대로 유지하고,
+ *          그 뒤부터 fadeOutMsec 동안 1.0에서 0.0까지 단조 감소시킨다. 값은 gid별로
+ *          남겨 두므로 fade-out 도중 같은 gid가 돌아오면 그 자리에서 다시 밝아진다.
  */
 qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec) {
     const bool knownObject = renderedOpacities_.contains(objectId);
@@ -986,10 +993,16 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
         opacity = config_.fadeInMsec <= 0
                       ? 1.0
                       : qMin(1.0, opacity + static_cast<qreal>(knownObject ? elapsedMsec : 0) / config_.fadeInMsec);
-    } else if (missingAgeMsec >= 0) {
-        const qint64 fadeDurationMsec = qMax<qint64>(1, qMin(config_.fadeOutMsec, config_.missingGraceMsec));
-        const qreal fadeProgress = qBound(0.0, static_cast<qreal>(missingAgeMsec) / fadeDurationMsec, 1.0);
-        opacity = qMin(opacity, 1.0 - 0.45 * fadeProgress);
+    } else if (missingAgeMsec > config_.missingGraceMsec) {
+        // Grace 구간에서는 마지막 opacity를 그대로 들고 있는다. 한 프레임 누락에도 어두워지면
+        // 같은 gid가 계속 잡히는데도 깜박이는 것처럼 보인다
+        if (config_.fadeOutMsec <= 0) {
+            opacity = 0.0;
+        } else {
+            const qint64 fadeAgeMsec = missingAgeMsec - config_.missingGraceMsec;
+            const qreal fadeProgress = qBound(0.0, static_cast<qreal>(fadeAgeMsec) / config_.fadeOutMsec, 1.0);
+            opacity = qMin(opacity, 1.0 - fadeProgress);
+        }
     }
 
     renderedOpacities_.insert(objectId, opacity);
