@@ -143,6 +143,9 @@ void checkNv12RegionBlur() {
     check(chromaAt(frame, frameWidth / 4, frameHeight / 4, 1) != backgroundChroma,
           "both interleaved chroma components must be blurred");
 
+    // 외접 사각형 안쪽이지만 원 밖인 모서리. 원 판정이 뒤집히면 여기가 먼저 깨진다
+    check(lumaAt(frame, 93, 53) == backgroundLuma, "square corner outside the circle must stay untouched");
+
     // 영역 밖은 손대지 않는다
     check(lumaAt(frame, 8, 8) == outsideLumaBefore, "luma outside the region must stay untouched");
     check(chromaAt(frame, 4, 4, 0) == outsideChromaBefore, "chroma outside the region must stay untouched");

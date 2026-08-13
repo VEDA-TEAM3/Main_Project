@@ -13,18 +13,31 @@
 
 namespace {
 /**
- * @brief          픽셀이 원형 블러 영역 안에 포함되는지 확인합니다.
- * @param x        픽셀 X 좌표
- * @param y        픽셀 Y 좌표
- * @param centerX  원의 중심 X 좌표
- * @param centerY  원의 중심 Y 좌표
- * @param radius   원의 반지름
- * @return         원 안쪽이면 true
+ * @brief               한 열에서 원 안쪽으로 허용되는 세로 거리 제곱을 구합니다.
+ * @param x             픽셀 X 좌표
+ * @param centerX       원의 중심 X 좌표
+ * @param centerY       원의 중심 Y 좌표
+ * @param radius        원의 반지름
+ * @return              세로 거리 제곱의 상한. 음수면 그 열은 원 밖이다
+ *
+ * @details 열이 바뀔 때만 달라지는 항이라 안쪽 세로 루프 밖으로 뺀다. 픽셀마다 남는 계산은
+ *          세로 차이 제곱 하나와 비교 하나뿐이다.
  */
-bool isInsideCircularRegion(int x, int y, double centerX, double centerY, double radius) {
+double verticalDistanceLimit(int x, double centerX, double radius) {
     const double deltaX = static_cast<double>(x) + 0.5 - centerX;
+    return radius * radius - deltaX * deltaX;
+}
+
+/**
+ * @brief                 픽셀이 원형 블러 영역의 세로 범위 안인지 확인합니다.
+ * @param y               픽셀 Y 좌표
+ * @param centerY         원의 중심 Y 좌표
+ * @param distanceLimit   verticalDistanceLimit()이 구한 상한
+ * @return                원 안쪽이면 true
+ */
+bool isInsideVerticalRange(int y, double centerY, double distanceLimit) {
     const double deltaY = static_cast<double>(y) + 0.5 - centerY;
-    return deltaX * deltaX + deltaY * deltaY <= radius * radius;
+    return deltaY * deltaY <= distanceLimit;
 }
 
 /**
@@ -204,6 +217,12 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
     }
 
     for (int localX = 0; localX < region.width; ++localX) {
+        const double distanceLimit = verticalDistanceLimit(region.left + localX, region.centerX, region.radius);
+        if (distanceLimit < 0.0) {
+            // 이 열은 통째로 원 밖이라 세로 합을 굴릴 필요가 없다
+            continue;
+        }
+
         for (int component = 0; component < componentCount; ++component) {
             quint64 sum = 0;
             int windowEnd = std::min(radius, region.height - 1);
@@ -215,8 +234,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
                 const int windowStart = std::max(0, localY - radius);
                 windowEnd = std::min(region.height - 1, localY + radius);
                 const int count = windowEnd - windowStart + 1;
-                if (isInsideCircularRegion(region.left + localX, region.top + localY, region.centerX, region.centerY,
-                                           region.radius)) {
+                if (isInsideVerticalRange(region.top + localY, region.centerY, distanceLimit)) {
                     guint8* targetPixel =
                         pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
                     targetPixel[component] = static_cast<guint8>(sum / static_cast<quint64>(count));
@@ -364,12 +382,17 @@ void BlurProcessor::clear() {
  * @param frame NV12 영상 프레임
  */
 void BlurProcessor::apply(GstVideoFrame& frame) {
+    // 두 대상이 모두 꺼져 있으면 어차피 그릴 영역이 없다. 시각 변환과 이력 조회(락)까지
+    // 가기 전에 끊는다
+    if (!faceEnabled_.load(std::memory_order_acquire) && !licensePlateEnabled_.load(std::memory_order_acquire)) {
+        return;
+    }
+
     const std::optional<VideoUtcTimestamp> frameTimestamp = utcClockMapper_.timestampFor(frame.buffer);
     if (!frameTimestamp.has_value()) {
         return;
     }
 
-    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
     const qint64 fallbackOffset = frameTimestamp->senderClock ? 0 : config_.syncOffsetMsec;
     const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset;
     const QVector<QRectF> regions = regionsFor(targetTimestamp);
@@ -385,8 +408,14 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
         applyNv12Blur(frame, region, scratch_, config_);
     }
 
+    if (config_.debugLogIntervalMsec <= 0) {
+        return;
+    }
+
+    // 진단 로그가 꺼져 있으면 시계도 읽지 않는다. 매 프레임·채널마다 부르던 호출이다
+    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
     qint64 lastLogMsec = lastApplyLogMsec_.load(std::memory_order_relaxed);
-    if (config_.debugLogIntervalMsec > 0 && nowMsec - lastLogMsec >= config_.debugLogIntervalMsec &&
+    if (nowMsec - lastLogMsec >= config_.debugLogIntervalMsec &&
         lastApplyLogMsec_.compare_exchange_strong(lastLogMsec, nowMsec, std::memory_order_relaxed)) {
         qInfo().noquote() << QStringLiteral("[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6")
                                  .arg(channelIndex_.load(std::memory_order_relaxed))
