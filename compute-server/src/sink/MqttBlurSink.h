@@ -38,7 +38,7 @@ private:
      */
     bool isValidFrame(const veda::BlurFrame& frame) const noexcept;
 
-    /// @brief 개별 Blur 대상 하나의 유효성 검사 (클래스가 Head/LicensePlate인지, box 좌표가 정상인지)
+    /// @brief 개별 Blur 대상 하나의 유효성 검사 (Head/LicensePlate 또는 parent-derived Unknown인지, box 좌표가 정상인지)
     bool isValidBlurTarget(const veda::BlurTarget& blur) const noexcept;
 
     veda::ChannelId channelId_;  ///< 이 프로세스의 채널 (frame.ch는 반드시 이 값과 같아야 함)
