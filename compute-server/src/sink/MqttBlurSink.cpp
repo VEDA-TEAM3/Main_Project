@@ -37,7 +37,7 @@ bool MqttBlurSink::isValidFrame(const veda::BlurFrame& frame) const noexcept {
 }
 
 bool MqttBlurSink::isValidBlurTarget(const veda::BlurTarget& blur) const noexcept {
-    if (!veda::isBlurClass(blur.cls)) {
+    if (!veda::isBlurOutputClass(blur.cls)) {
         return false;
     }
 

@@ -233,7 +233,8 @@ OnvifParser::OnvifParser(double edgeEpsilon) : edgeEpsilon_(edgeEpsilon) {}
  * @details
  * - 페이로드당 <tt:Frame>이 하나라고 가정하며, 여러 개가 온다면 첫 번째만 처리함
  * - Transformation 파라미터 없이는 좌표를 신뢰할 수 없으므로 파싱을 중단하고 빈 프레임을 반환
- * - ID 없는 객체, 위치(BBox)를 알 수 없는 객체, 분류(Type)가 없는 객체는 라우팅이 불가능하므로 스킵
+ * - ID 또는 위치(BBox)가 없는 객체는 스킵
+ * - Type이 없어도 Parent가 있으면 개인정보 보호를 위해 Unknown Blur 후보로 보존
  * - 신뢰할 수 없는 데이터는 완전히 건너뛴 뒤 실제 Type 속성을 찾음
  *
  * @param   raw 파싱할 원본 메타데이터 바이트 배열이 담긴 패킷
@@ -376,6 +377,9 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
 
         const size_t typePos = obj.find("<tt:Type", searchFrom);
         if (typePos == std::string_view::npos) {
+            if (det.parentId.has_value()) {
+                result.objects.push_back(std::move(det));
+            }
             continue;
         }
 
