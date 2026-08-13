@@ -1,0 +1,11 @@
+../Core/Src/veda_rs485.c:20:9:process_rs485_line	24	static
+../Core/Src/veda_rs485.c:61:6:process_rs485_byte	24	static
+../Core/Src/veda_rs485.c:87:6:veda_rs485_line_reset	4	static
+../Core/Src/veda_rs485.c:93:6:veda_rs485_mark_rx	8	static
+../Core/Src/veda_rs485.c:98:6:veda_rs485_idle_service	8	static
+../Core/Src/veda_rs485.c:110:6:veda_rs485_rx_arm	8	static
+../Core/Src/veda_rs485.c:115:10:veda_rs485_rx_slot	4	static
+../Core/Src/veda_rs485.c:122:6:rs485_de_init	32	static
+../Core/Src/veda_rs485.c:139:6:veda_rs485_ack_offer	16	static
+../Core/Src/veda_rs485.c:149:13:rs485_send_ack	40	static
+../Core/Src/veda_rs485.c:176:6:veda_rs485_ack_service	16	static

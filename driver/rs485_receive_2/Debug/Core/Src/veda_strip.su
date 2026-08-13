@@ -1,0 +1,4 @@
+../Core/Src/veda_strip.c:12:19:strip_show	32	static
+../Core/Src/veda_strip.c:52:6:veda_strip_mark_shown	16	static
+../Core/Src/veda_strip.c:57:6:veda_strip_request	16	static
+../Core/Src/veda_strip.c:63:6:neopixel_service	16	static
