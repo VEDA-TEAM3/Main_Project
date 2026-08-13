@@ -19,6 +19,11 @@ public:
     explicit BlurProcessor(BlurProcessorConfig config);
 
     void setTargetsEnabled(bool faceEnabled, bool licensePlateEnabled);
+
+    /** @brief 블러를 적용할 대상이 하나라도 켜져 있는지 확인합니다. */
+    bool hasEnabledTargets() const {
+        return faceEnabled_.load(std::memory_order_acquire) || licensePlateEnabled_.load(std::memory_order_acquire);
+    }
     void submitFrame(BlurFrameData frame);
     void observeVideoBuffer(const GstBuffer* buffer);
     void clear();

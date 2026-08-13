@@ -43,6 +43,7 @@ private:
     bool applySourceProperties(GstElement* source);
     QString decoderChain() const;
     void applyVideoPreprocessingSettings();
+    void applyBlurPassthrough();
     void applyPresentationState();
     void checkStall();
 

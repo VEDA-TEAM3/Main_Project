@@ -896,9 +896,36 @@ const QVector<int>& MainWindow::channelsForArea(int areaIndex) const {
     return videoConfig_.areas[areaIndex].channelIndexes;
 }
 
-/** @brief 지정한 전역 채널이 현재 표시 구역에 속하는지 확인합니다. */
+/** @brief 지정한 전역 채널이 지금 화면에 실제로 그려지고 있는지 확인합니다. */
 bool MainWindow::isChannelVisible(int channelIndex) const {
+    // 확대 중에는 그 채널 하나만 화면에 있다. 나머지 타일은 hide된 상태라 디코딩할 이유가 없다
+    if (expandedWidget_) {
+        return videoWidgets_.value(channelIndex) == expandedWidget_;
+    }
+
     return channelsForArea(currentVideoAreaIndex_).contains(channelIndex);
+}
+
+/**
+ * @brief 현재 표시 상태에 맞춰 채널별 디코딩 활성 여부를 갱신합니다.
+ *
+ * @details presentation valve는 디코더 앞에 있으므로, 꺼진 채널은 디코드·블러·GPU 업로드를
+ *          통째로 건너뛴다. 표시 상태를 바꾸는 곳(구역 전환, 확대, 복구)은 모두 이 함수를 불러
+ *          한 가지 규칙(isChannelVisible)만 따르게 한다. 켜기를 먼저 돌리고 끄기를 나중에 돌려
+ *          전환 중에 아무 채널도 표시되지 않는 구간이 생기지 않게 한다.
+ */
+void MainWindow::syncStreamPresentation() {
+    if (!streamSessionManager_) {
+        return;
+    }
+
+    for (const bool active : {true, false}) {
+        for (const StreamConfig& stream : streamConfigs_) {
+            if (isChannelVisible(stream.channelIndex) == active) {
+                streamSessionManager_->setPresentationActive(stream.channelIndex, active);
+            }
+        }
+    }
 }
 
 /**
@@ -914,14 +941,8 @@ void MainWindow::switchVideoArea(int areaIndex) {
         restoreVideoGrid();
     }
 
-    const int previousAreaIndex = currentVideoAreaIndex_;
-    if (streamSessionManager_) {
-        for (int channelIndex : channelsForArea(areaIndex)) {
-            streamSessionManager_->setPresentationActive(channelIndex, true);
-        }
-    }
-
     currentVideoAreaIndex_ = areaIndex;
+    syncStreamPresentation();
     ui_->videoAreaStackedWidget->setCurrentIndex(areaIndex);
     setQuickTopBarProperty("areaText", videoConfig_.areas[currentVideoAreaIndex_].name);
     if (deviceStatusPanel_) {
@@ -936,12 +957,6 @@ void MainWindow::switchVideoArea(int areaIndex) {
     for (int channelIndex : channelsForArea(areaIndex)) {
         if (auto* videoWidget = qobject_cast<ClickableVideoWidget*>(videoWidgets_.value(channelIndex))) {
             videoWidget->refreshChannelLabel();
-        }
-    }
-
-    if (streamSessionManager_) {
-        for (int channelIndex : channelsForArea(previousAreaIndex)) {
-            streamSessionManager_->setPresentationActive(channelIndex, false);
         }
     }
 }
@@ -1011,9 +1026,7 @@ void MainWindow::setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory
         new StreamSessionManager(std::move(receiverFactory), videoConfig_.receiverStartSpacingMsec, this);
     streamSessionManager_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
     streamSessionManager_->setVideoPreprocessingSettings(videoConfig_.receiver.preprocessing);
-    for (const StreamConfig& stream : streamConfigs_) {
-        streamSessionManager_->setPresentationActive(stream.channelIndex, isChannelVisible(stream.channelIndex));
-    }
+    syncStreamPresentation();
 
     if (deviceStatusService_) {
         connect(deviceStatusService_.get(), &DeviceStatusService::blurFrameReceived, streamSessionManager_,
@@ -1154,6 +1167,7 @@ void MainWindow::expandVideo(QWidget* targetWidget) {
     targetFrame->raise();
 
     expandedWidget_ = targetWidget;
+    syncStreamPresentation();
 }
 
 /**
@@ -1201,4 +1215,5 @@ void MainWindow::restoreVideoGrid() {
     }
 
     expandedWidget_ = nullptr;
+    syncStreamPresentation();
 }

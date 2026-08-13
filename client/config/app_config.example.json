@@ -87,7 +87,7 @@
             "decodeQueueMaximumTimeMs": 100,
             "alignmentDelayMs": 100,
             "alignmentQueueMaximumTimeMs": 450,
-            "renderQueueMaximumBuffers": 1,
+            "renderQueueMaximumBuffers": 3,
             "renderQueueMaximumTimeMs": 200,
             "sinkQos": false,
             "sinkSync": false,

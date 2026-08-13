@@ -188,6 +188,7 @@ void GstRtspReceiver::setUrl(const QString& url) { url_ = url.trimmed(); }
 
 void GstRtspReceiver::setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) {
     blurProcessor_.setTargetsEnabled(faceEnabled, licensePlateEnabled);
+    applyBlurPassthrough();
 }
 
 void GstRtspReceiver::setBlurFrame(BlurFrameData frame) { blurProcessor_.submitFrame(std::move(frame)); }
@@ -312,6 +313,15 @@ void GstRtspReceiver::startPipeline() {
         return;
     }
 
+    // 두 큐의 역할이 다르므로 값을 같이 보고 조정해야 한다.
+    //
+    // alignmentqueue: min-threshold-time만큼 쌓여야 출력이 시작되는 고정 지연선이다(블러 정렬용).
+    //   임계값 아래로 내려가면 다시 멈추므로 쌓인 분량을 언더런 흡수에 쓸 수 없다. 즉 '지연'이지
+    //   '완충'이 아니다. max-size-time은 폭주를 막는 천장일 뿐이라 평시에는 걸리지 않는다.
+    // renderqueue: 실제 완충이자 프레임을 버리는 유일한 지점이다. 싱크가 sync=false로 도착 즉시
+    //   렌더하므로 평시에는 큐가 비어 있어 깊이를 늘려도 지연이 늘지 않는다. 블러나 D3D11 업로드가
+    //   한 프레임 늦어지는 순간에만 채워져, 이미 디코딩까지 마친 프레임을 버리는 대신 흡수한다.
+    //   여기를 1로 두면 흡수량이 0이라 아주 짧은 지연도 곧바로 드롭이 된다.
     const QString videoChainDesc =
         QString(
             "rtph264depay name=depay request-keyframe=true "
@@ -440,6 +450,7 @@ void GstRtspReceiver::startPipeline() {
     }
 
     applyVideoPreprocessingSettings();
+    applyBlurPassthrough();
     applyPresentationState();
 
     if (blur) {
@@ -1021,6 +1032,37 @@ void GstRtspReceiver::applyVideoPreprocessingSettings() {
                               .arg(config_.preprocessing.brightness)
                               .arg(config_.preprocessing.contrast, 0, 'f', 2)
                               .arg(config_.preprocessing.gamma, 0, 'f', 2);
+}
+
+/**
+ * @brief 블러 대상이 하나도 없으면 qtblur를 passthrough로 내립니다.
+ *
+ * @details videobalance/gamma를 중립값에서 passthrough로 내리는 것과 같은 처리다. passthrough가
+ *          아니면 GstBaseTransform이 매 프레임 버퍼를 쓰기 가능 상태로 만들어 transform_ip을
+ *          호출하고, 버퍼가 쓰기 불가능하면 프레임 전체를 복사한다(always_in_place=TRUE).
+ *          블러를 꺼 둔 채널에서는 그 비용이 전부 낭비다.
+ */
+void GstRtspReceiver::applyBlurPassthrough() {
+    if (!pipeline_) {
+        return;
+    }
+
+    GstElement* videoChain = gst_bin_get_by_name(GST_BIN(pipeline_), "videochain");
+    if (!videoChain || !GST_IS_BIN(videoChain)) {
+        if (videoChain) {
+            gst_object_unref(videoChain);
+        }
+        return;
+    }
+
+    GstElement* blur = gst_bin_get_by_name(GST_BIN(videoChain), "blur");
+    gst_object_unref(videoChain);
+    if (!blur) {
+        return;
+    }
+
+    gst_base_transform_set_passthrough(GST_BASE_TRANSFORM(blur), !blurProcessor_.hasEnabledTargets());
+    gst_object_unref(blur);
 }
 
 /**

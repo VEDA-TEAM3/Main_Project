@@ -94,6 +94,7 @@ private:
     int videoAreaIndexForChannel(int channelIndex) const;
     const QVector<int>& channelsForArea(int areaIndex) const;
     bool isChannelVisible(int channelIndex) const;
+    void syncStreamPresentation();
     void switchVideoArea(int areaIndex);
 
     void updateDashboardAdaptiveSizes();

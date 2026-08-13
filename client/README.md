@@ -184,6 +184,12 @@ AI/MQTT 처리 결과와 맞추기 위한 의도적 영상 표시 지연입니�
 프레임과 직접 동기화하지 않고 최신 `RiskFrame`을 수신 순서대로 반영하며, 객체 위치만
 `digitalTwin.positionTransitionMs` 동안 부드럽게 전환합니다.
 
+`alignmentDelayMs`는 큐의 `min-threshold-time`으로 구현한 **고정 지연선**입니다. 임계값 아래로 내려가면
+출력이 멈추므로 쌓인 분량을 지터 흡수에 쓸 수 없습니다. 지터를 흡수하고 프레임을 버리는 지점은
+`renderQueueMaximumBuffers` 하나뿐입니다. 싱크가 `sinkSync: false`로 도착 즉시 렌더하므로 평시에는 이 큐가
+비어 있어 깊이를 늘려도 지연이 늘지 않고, 블러나 GPU 업로드가 한 프레임 늦어질 때만 채워집니다. 1로 두면
+흡수량이 0이라 짧은 지연도 곧바로 드롭이 되므로 3 이상을 권장합니다.
+
 탑뷰 배치는 서버 `zoneId`가 어느 물리 CCTV 맵인지 정하고(`zoneId / 4`), 맵 안에서의 좌표는 그 구역의 월드
 상자로 정규화합니다. 구역 상자는 `digitalTwin.world.zones`에 물리 CCTV 개수만큼(현재 2개) 적습니다.
 
