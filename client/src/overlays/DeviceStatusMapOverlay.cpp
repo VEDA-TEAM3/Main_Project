@@ -9,19 +9,26 @@
 namespace {
 constexpr int channelCount = 8;
 constexpr int channelsPerZone = 4;
-constexpr int iconSize = 34;
-constexpr int centralCctvIconSize = 66;
-constexpr double iconGap = 5.0;
+constexpr int iconSize = 20;
+constexpr int centralCctvIconSize = 40;
+constexpr double iconGap = 4.0;
+/// 상태 칩 안쪽 여백. DigitalTwinMapSceneBuilder가 그리는 칩과 맞춰야 한다
+constexpr double chipPadding = 8.0;
 constexpr double centralCctvZValue = 3.0;
 constexpr double overlayZValue = 40.0;
 }  // namespace
 
 /**
- * @brief           두 지도에 CCTV와 8채널 장치 상태 아이콘을 배치합니다.
- * @param scene     장치 아이콘을 표시할 scene
- * @param zoneRects 물리 CCTV별 지도 영역
+ * @brief                  지도에 CCTV 위치와 구역별 장치 상태 아이콘을 배치합니다.
+ * @param scene            장치 아이콘을 표시할 scene
+ * @param zoneRects        물리 CCTV별 지도 영역
+ * @param zoneStatusSlots  구역별 장치 상태 칩 자리 (도면 위·아래 여백)
+ *
+ * @details 채널마다 아이콘을 뿌리면 도면 위가 아이콘으로 뒤덮여 객체와 구획선이 묻힌다.
+ *          그래서 아이콘은 구역당 한 쌍만 두고 그 구역 채널들의 상태를 집약해서 보여 준다.
  */
-void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const std::array<QRectF, 2>& zoneRects) {
+void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const std::array<QRectF, 2>& zoneRects,
+                                        const std::array<QRectF, 2>& zoneStatusSlots) {
     if (!scene) {
         return;
     }
@@ -33,36 +40,26 @@ void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const std::array<
                                       zoneRects[zoneIndex].center().y() - cctvPixmap_.height() / 2.0);
         cctvItems_[zoneIndex]->setZValue(centralCctvZValue);
         cctvItems_[zoneIndex]->setTransformationMode(Qt::SmoothTransformation);
-    }
 
-    for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
-        const int zoneIndex = channelIndex / channelsPerZone;
-        const int localChannelIndex = channelIndex % channelsPerZone;
-        const QRectF& zoneRect = zoneRects[zoneIndex];
-        const std::array<QPointF, channelsPerZone> anchors = {
-            QPointF(zoneRect.center().x(), zoneRect.top() + 30.0),
-            QPointF(zoneRect.right() - 52.0, zoneRect.center().y()),
-            QPointF(zoneRect.center().x(), zoneRect.bottom() - 30.0),
-            QPointF(zoneRect.left() + 52.0, zoneRect.center().y()),
-        };
-        const QPointF anchor = anchors[localChannelIndex];
-        const double pairWidth = iconSize * 2.0 + iconGap;
-        const double left = anchor.x() - pairWidth / 2.0;
-        const double top = anchor.y() - iconSize / 2.0;
+        // 칩 오른쪽에 LED, 통합 알림 순으로 붙인다. 왼쪽 여백은 도면이 그린 구역 이름표 자리다
+        const QRectF& slot = zoneStatusSlots[zoneIndex];
+        const double top = slot.center().y() - iconSize / 2.0;
+        const double sensorLeft = slot.right() - chipPadding - iconSize;
+        const double ledLeft = sensorLeft - iconGap - iconSize;
 
-        ChannelVisualItems& items = channels_[channelIndex];
+        ZoneVisualItems& items = zones_[zoneIndex];
         items.led = scene->addPixmap(ledOffPixmap_);
-        items.led->setPos(left, top);
+        items.led->setPos(ledLeft, top);
         items.led->setZValue(overlayZValue);
         items.led->setTransformationMode(Qt::SmoothTransformation);
 
         items.sensor = scene->addPixmap(sensorOffPixmap_);
-        items.sensor->setPos(left + iconSize + iconGap, top);
+        items.sensor->setPos(sensorLeft, top);
         items.sensor->setZValue(overlayZValue);
         items.sensor->setTransformationMode(Qt::SmoothTransformation);
     }
 
-    updateAllChannels();
+    updateAllZones();
 }
 
 /** @brief MQTT 연결 상태를 장치 아이콘 유효성에 반영합니다. */
@@ -73,11 +70,11 @@ void DeviceStatusMapOverlay::setSignalAvailable(bool available) {
 
     signalAvailable_ = available;
     if (!available) {
-        for (ChannelVisualItems& items : channels_) {
-            items.receivedInCurrentSession = false;
+        for (ChannelStatusRecord& record : channels_) {
+            record.receivedInCurrentSession = false;
         }
     }
-    updateAllChannels();
+    updateAllZones();
 }
 
 /** @brief 수신된 0 기반 채널 상태를 해당 지도 아이콘에 반영합니다. */
@@ -87,20 +84,20 @@ void DeviceStatusMapOverlay::setChannelStatuses(const QVector<DeviceChannelStatu
             continue;
         }
 
-        ChannelVisualItems& items = channels_[status.channelIndex];
-        items.status = status;
-        items.hasStatus = true;
+        ChannelStatusRecord& record = channels_[status.channelIndex];
+        record.status = status;
+        record.hasStatus = true;
         if (signalAvailable_ && status.hasConfirmedState && status.feedbackHealth == DeviceFeedbackHealth::Confirmed) {
-            items.receivedInCurrentSession = true;
+            record.receivedInCurrentSession = true;
         }
-        updateChannel(status.channelIndex);
+        updateZone(status.channelIndex / channelsPerZone);
     }
 }
 
 /** @brief 지도 장치 아이콘 표시 설정을 적용합니다. */
 void DeviceStatusMapOverlay::setDisplaySettings(const DigitalTwinMapDisplaySettings& settings) {
     displaySettings_ = settings;
-    updateAllChannels();
+    updateAllZones();
 }
 
 /** @brief 장치 상태 아이콘 리소스를 한 번만 준비합니다. */
@@ -119,47 +116,75 @@ void DeviceStatusMapOverlay::loadPixmaps() {
     cctvPixmap_ = loadScaledPixmap(QStringLiteral(":/icons/cctv_icon.png"), centralCctvIconSize);
 }
 
-/** @brief 모든 장치 아이콘을 현재 상태로 다시 표시합니다. */
-void DeviceStatusMapOverlay::updateAllChannels() {
+/** @brief 모든 구역 아이콘을 현재 상태로 다시 표시합니다. */
+void DeviceStatusMapOverlay::updateAllZones() {
     for (QGraphicsPixmapItem* cctvItem : cctvItems_) {
         if (cctvItem) {
             cctvItem->setVisible(displaySettings_.showCctv);
         }
     }
 
-    for (int channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
-        updateChannel(channelIndex);
+    for (int zoneIndex = 0; zoneIndex < static_cast<int>(zones_.size()); ++zoneIndex) {
+        updateZone(zoneIndex);
     }
 }
 
-/** @brief 한 채널의 LED와 통합 알림 장치 아이콘을 갱신합니다. */
-void DeviceStatusMapOverlay::updateChannel(int channelIndex) {
-    if (channelIndex < 0 || channelIndex >= channelCount) {
+/**
+ * @brief            한 구역의 LED와 통합 알림 아이콘을 갱신합니다.
+ * @param zoneIndex  물리 CCTV 구역 인덱스
+ *
+ * @details 구역 안 채널 중 하나라도 켜져 있으면 켜진 것으로 본다. LED는 가장 높은 위험 단계를
+ *          따르고(빨강 > 노랑 > 초록), 통합 알림은 경광등이나 부저가 하나라도 울리면 활성이다.
+ *          유효한 피드백이 하나도 없는 구역만 꺼짐으로 표시한다.
+ */
+void DeviceStatusMapOverlay::updateZone(int zoneIndex) {
+    if (zoneIndex < 0 || zoneIndex >= static_cast<int>(zones_.size())) {
         return;
     }
 
-    ChannelVisualItems& items = channels_[channelIndex];
+    ZoneVisualItems& items = zones_[zoneIndex];
     if (!items.led || !items.sensor) {
         return;
     }
 
     items.led->setVisible(displaySettings_.showLed);
     items.sensor->setVisible(displaySettings_.showAlertDevice);
-    if (!hasValidSignal(items)) {
+
+    DeviceOutputState aggregated;
+    bool anyValid = false;
+    bool alarmActive = false;
+    for (int localChannel = 0; localChannel < channelsPerZone; ++localChannel) {
+        const int channelIndex = zoneIndex * channelsPerZone + localChannel;
+        if (channelIndex >= channelCount) {
+            break;
+        }
+
+        const ChannelStatusRecord& record = channels_[channelIndex];
+        if (!hasValidSignal(record)) {
+            continue;
+        }
+
+        anyValid = true;
+        aggregated.ledRed = aggregated.ledRed || record.status.outputs.ledRed;
+        aggregated.ledYellow = aggregated.ledYellow || record.status.outputs.ledYellow;
+        aggregated.ledGreen = aggregated.ledGreen || record.status.outputs.ledGreen;
+        alarmActive = alarmActive || record.status.outputs.beacon || record.status.outputs.buzzer;
+    }
+
+    if (!anyValid) {
         items.led->setPixmap(ledOffPixmap_);
         items.sensor->setPixmap(sensorOffPixmap_);
         return;
     }
 
-    items.led->setPixmap(ledPixmap(items.status.outputs));
-    const bool alarmActive = items.status.outputs.beacon || items.status.outputs.buzzer;
+    items.led->setPixmap(ledPixmap(aggregated));
     items.sensor->setPixmap(alarmActive ? sensorActivePixmap_ : sensorSafePixmap_);
 }
 
 /** @brief 현재 세션에서 확인된 유효한 하드웨어 피드백인지 검사합니다. */
-bool DeviceStatusMapOverlay::hasValidSignal(const ChannelVisualItems& items) const {
-    return signalAvailable_ && items.hasStatus && items.receivedInCurrentSession && items.status.hasConfirmedState &&
-           items.status.feedbackHealth == DeviceFeedbackHealth::Confirmed;
+bool DeviceStatusMapOverlay::hasValidSignal(const ChannelStatusRecord& record) const {
+    return signalAvailable_ && record.hasStatus && record.receivedInCurrentSession && record.status.hasConfirmedState &&
+           record.status.feedbackHealth == DeviceFeedbackHealth::Confirmed;
 }
 
 /** @brief LED 출력 비트에서 가장 높은 우선순위의 아이콘을 반환합니다. */

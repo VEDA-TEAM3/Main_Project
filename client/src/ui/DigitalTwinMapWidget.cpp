@@ -473,7 +473,7 @@ void DigitalTwinMapWidget::setupScene() {
     visualItemIndexes_.clear();
     mapLayout_ = sceneBuilder_->build(&scene_);
     updateObjectAreaRect();
-    deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects);
+    deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects, mapLayout_.zoneStatusSlots);
     deviceStatusMapOverlay_.setDisplaySettings(displaySettings_);
 
     if (dangerAlertOverlay_) {
