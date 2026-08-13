@@ -645,8 +645,10 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
                                   .arg(scenePosition.y(), 0, 'f', 1)
                                   .arg(objectAreaRects_[mapIndex].contains(scenePosition) ? QStringLiteral("yes")
                                                                                           : QStringLiteral("no"))
-                                  .arg(liveConfig_.world.bounds.contains(object.position) ? QStringLiteral("yes")
-                                                                                          : QStringLiteral("no"));
+                                  // 전체 상자가 아니라 그 구역의 상자와 비교해야 배율이 맞는지 보인다
+                                  .arg(liveConfig_.world.zoneBounds(mapIndex).contains(object.position)
+                                           ? QStringLiteral("yes")
+                                           : QStringLiteral("no"));
     }
 }
 
@@ -804,14 +806,12 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
                        demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
     }
 
-    // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치만 월드
-    // 좌표로 계산한다
-    const double worldCenterX = worldBounds.center().x();
-    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), worldCenterX);
-    const double halfWidth = worldBounds.width() * 0.5;
-    const double zoneMinimumX = worldBounds.left() + zoneIndex * halfWidth;
-    const double normalizedX = qBound(0.0, (worldPosition.x() - zoneMinimumX) / halfWidth, 1.0);
-    double normalizedY = qBound(0.0, (worldPosition.y() - worldBounds.top()) / worldBounds.height(), 1.0);
+    // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치는 그 구역의
+    // 월드 상자로 정규화한다
+    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), worldBounds.center().x());
+    const QRectF zoneBounds = liveConfig_.world.zoneBounds(zoneIndex);
+    const double normalizedX = qBound(0.0, (worldPosition.x() - zoneBounds.left()) / zoneBounds.width(), 1.0);
+    double normalizedY = qBound(0.0, (worldPosition.y() - zoneBounds.top()) / zoneBounds.height(), 1.0);
     if (liveConfig_.world.invertY) {
         normalizedY = 1.0 - normalizedY;
     }

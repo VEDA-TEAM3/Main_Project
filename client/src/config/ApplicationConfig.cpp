@@ -133,6 +133,64 @@ bool parseWindow(const QJsonObject& root, ApplicationWindowConfig& config, QStri
            readInt(application, QStringLiteral("windowHeight"), 600, 4320, config.height, error);
 }
 
+/**
+ * @brief         minX/minY/maxX/maxY 네 값을 월드 상자로 읽습니다.
+ * @param object  상자 값을 담은 JSON 객체
+ * @param bounds  변환된 월드 상자 (성공했을 때만 씁니다)
+ * @param error   검증 실패 원인
+ */
+bool readWorldBounds(const QJsonObject& object, QRectF& bounds, QString& error) {
+    double minX = 0.0;
+    double minY = 0.0;
+    double maxX = 0.0;
+    double maxY = 0.0;
+    if (!readDouble(object, QStringLiteral("minX"), -1000000000.0, 1000000000.0, minX, error) ||
+        !readDouble(object, QStringLiteral("minY"), -1000000000.0, 1000000000.0, minY, error) ||
+        !readDouble(object, QStringLiteral("maxX"), -1000000000.0, 1000000000.0, maxX, error) ||
+        !readDouble(object, QStringLiteral("maxY"), -1000000000.0, 1000000000.0, maxY, error) || maxX <= minX ||
+        maxY <= minY) {
+        if (error.isEmpty()) {
+            error = QStringLiteral("max must be greater than min");
+        }
+        return false;
+    }
+
+    bounds = QRectF(minX, minY, maxX - minX, maxY - minY);
+    return true;
+}
+
+/**
+ * @brief         물리 CCTV 구역별 월드 상자를 읽습니다.
+ * @param world   digitalTwin.world JSON 객체
+ * @param config  구역 상자를 채울 월드 설정
+ * @param error   검증 실패 원인
+ *
+ * @details 선택 항목이다. 없으면 DigitalTwinWorldConfig::zoneBounds가 기존처럼 bounds를
+ *          반 갈라 쓴다. 두 구역이 도면에서 멀리 떨어져 있을 때만 필요하다.
+ */
+bool readWorldZones(const QJsonObject& world, DigitalTwinWorldConfig& config, QString& error) {
+    if (!world.contains(QStringLiteral("zones"))) {
+        return true;
+    }
+
+    const qsizetype zoneCount = static_cast<qsizetype>(config.zones.size());
+    const QJsonValue zonesValue = world.value(QStringLiteral("zones"));
+    if (!zonesValue.isArray() || zonesValue.toArray().size() != zoneCount) {
+        error = QStringLiteral("digitalTwin.world.zones must contain exactly %1 boxes").arg(zoneCount);
+        return false;
+    }
+
+    const QJsonArray zoneArray = zonesValue.toArray();
+    for (qsizetype index = 0; index < zoneCount; ++index) {
+        if (!zoneArray.at(index).isObject() ||
+            !readWorldBounds(zoneArray.at(index).toObject(), config.zones[index], error)) {
+            error = QStringLiteral("digitalTwin.world.zones[%1] is invalid: %2").arg(index).arg(error);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config, QString& error) {
     if (!root.contains(QStringLiteral("digitalTwin"))) {
         return true;
@@ -215,21 +273,15 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
     config.world.automaticBoundsMinimumSamples = static_cast<qsizetype>(automaticBoundsMinimumSamples);
     config.world.automaticBoundsMaximumSamples = static_cast<qsizetype>(automaticBoundsMaximumSamples);
 
-    double minX = 0.0;
-    double minY = 0.0;
-    double maxX = 0.0;
-    double maxY = 0.0;
-    if (!readDouble(world, QStringLiteral("minX"), -1000000000.0, 1000000000.0, minX, error) ||
-        !readDouble(world, QStringLiteral("minY"), -1000000000.0, 1000000000.0, minY, error) ||
-        !readDouble(world, QStringLiteral("maxX"), -1000000000.0, 1000000000.0, maxX, error) ||
-        !readDouble(world, QStringLiteral("maxY"), -1000000000.0, 1000000000.0, maxY, error) || maxX <= minX ||
-        maxY <= minY) {
+    if (!readWorldBounds(world, config.world.bounds, error)) {
         error = QStringLiteral("digitalTwin.world bounds are invalid: %1").arg(error);
+        return false;
+    }
+    if (!readWorldZones(world, config.world, error)) {
         return false;
     }
 
     config.maximumHistorySize = static_cast<qsizetype>(maximumHistorySize);
-    config.world.bounds = QRectF(minX, minY, maxX - minX, maxY - minY);
     return true;
 }
 

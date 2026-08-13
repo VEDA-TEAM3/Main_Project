@@ -362,6 +362,33 @@ void checkPhysicalZoneSelection() {
         check(digitalTwinZoneIndex(4, worldX, 0.0) == 1, "jitter around x=0 must not move a zoned object");
     }
 }
+
+/**
+ * @brief 구역별 월드 상자가 표시 배율을 정하고, 없을 때만 반 가르기로 돌아가는지
+ * 검사합니다.
+ */
+void checkPhysicalZoneWorldBounds() {
+    DigitalTwinWorldConfig halved;
+    halved.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+    check(halved.zoneBounds(0) == QRectF(-80.0, -40.0, 80.0, 80.0), "zone 0 must fall back to the left half");
+    check(halved.zoneBounds(1) == QRectF(0.0, -40.0, 80.0, 80.0), "zone 1 must fall back to the right half");
+
+    // 100m 떨어진 15m짜리 구역 두 개는 반 가르기로 표현할 수 없다. 두 창이 붙어 있고
+    // 폭도 같아야 하므로, 한쪽을 맞추면 다른 쪽은 지도 끝에 clamp된다
+    DigitalTwinWorldConfig zoned = halved;
+    zoned.zones = {QRectF(-58.0, -14.0, 17.0, 19.0), QRectF(42.0, -14.0, 17.0, 19.0)};
+    check(zoned.zoneBounds(0) == zoned.zones[0], "configured zone 0 box must win over the half split");
+    check(zoned.zoneBounds(1) == zoned.zones[1], "configured zone 1 box must win over the half split");
+    check(zoned.zoneBounds(-1) == zoned.zones[0] && zoned.zoneBounds(9) == zoned.zones[1],
+          "zone index must be clamped instead of reading out of bounds");
+
+    // 실측 좌표가 맵을 꽉 채우는지 (반 가르기에서는 폭의 18%만 썼다)
+    const QRectF zone = zoned.zoneBounds(0);
+    const double narrowSpan = (-42.5 - -56.5) / zone.width();
+    const double wideSpan = (-42.5 - -56.5) / halved.zoneBounds(0).width();
+    check(narrowSpan > 0.75, "calibrated zone must use most of the map width");
+    check(wideSpan < 0.2, "the half split wasted the map, which is what made objects clump");
+}
 }  // namespace
 
 int main() {
@@ -375,6 +402,7 @@ int main() {
     checkGraceStartsAtTheOmittingFrame();
     checkStreamExpiryRemovesEverything();
     checkPhysicalZoneSelection();
+    checkPhysicalZoneWorldBounds();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);
