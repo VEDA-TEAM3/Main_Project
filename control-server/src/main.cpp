@@ -93,8 +93,8 @@ int main() {
         return 1;
     }
 
-    logSuccess(kIface, "관제 서버 시작 (logLevel=" + config.logLevel + ", dispatcher=" +
-                           config.hwHealthCheck.dispatcher + ", channels=" + std::to_string(config.channelCount) + ")");
+    logSuccess(kIface, "관제 서버 시작 (logLevel=" + config.logLevel +
+                           ", dispatcher=serial, channels=" + std::to_string(config.channelCount) + ")");
 
     // 3) 종료 대기
     //    예전에는 std::cin.get() 으로 기다렸는데, systemd 서비스로 띄우면 stdin 이 없어

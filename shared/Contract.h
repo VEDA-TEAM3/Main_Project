@@ -157,6 +157,9 @@ inline constexpr bool isRiskClass(ObjectClass c) { return c == ObjectClass::Huma
  */
 inline constexpr bool isBlurClass(ObjectClass c) { return c == ObjectClass::Head || c == ObjectClass::LicensePlate; }
 
+/** Parent 정보로 개인정보 대상임을 확인했지만 Type을 식별하지 못한 경우까지 Blur 출력으로 허용한다. */
+inline constexpr bool isBlurOutputClass(ObjectClass c) { return c == ObjectClass::Unknown || isBlurClass(c); }
+
 /**
  * @brief ObjectClass를 문자열로 변환
  */
@@ -348,11 +351,12 @@ struct TopViewFrame {
  * @brief   Blur 처리 대상 객체
  *
  * @note
- * - ObjectClass: [Head | LicensePlate] blur 유무를 추가할 수 있으므로 포함
+ * - ObjectClass: [Head | LicensePlate | Unknown]
+ * - Unknown은 Parent 정보는 유효하지만 Type을 식별하지 못한 개인정보 보호 fallback이다.
  */
 struct BlurTarget {
     ObjectId id = 0;
-    ObjectClass cls = ObjectClass::Unknown;  ///< Head | LicensePlate
+    ObjectClass cls = ObjectClass::Unknown;  ///< Head | LicensePlate | parent-derived Unknown
     NormRect box;                            ///< [0,1], 좌상단 원점
 };
 
@@ -378,6 +382,7 @@ struct RiskObject {
     GlobalId gid = 0;  ///< 융합 후 전역 ID
     ObjectClass cls = ObjectClass::Unknown;
     WorldPoint pos;                     ///< 월드 좌표
+    ChannelId zoneId = -1;              ///< control-server가 확정한 zone/HW 채널 ID
     RiskLevel level = RiskLevel::None;  ///< 이 객체 기준 최고 위험 레벨
     GlobalId nearest = 0;               ///< 최근접 객체의 gid (없으면 0)
     double dist = -1.0;                 ///< 최근접 거리(m) (없으면 음수)
@@ -387,7 +392,7 @@ struct RiskObject {
  * @struct  RiskFrame
  * @brief   메시지 3 : RiskFrame (control-server → client)
  * @details
- * - 통신: MQTT / TLS, topic::kRisk, QoS 1
+ * - 통신: MQTT / TLS, topic::kRisk, QoS 0
  * - 채널을 융합한 결과 (앱이 Top-View 디지털 트윈을 그리는 데 사용)
  * - 위험 객체만이 아니라 프레임의 모든 객체를 보냄
  */
@@ -492,7 +497,7 @@ inline constexpr auto kLegacyHwStatus = "veda/hw/status";
  */
 namespace qos {
 inline constexpr int kTopView = 0;   ///< TopView 스트림용 QoS
-inline constexpr int kRisk = 1;      ///< Risk 이벤트용 QoS
+inline constexpr int kRisk = 0;      ///< Risk 이벤트용 QoS
 inline constexpr int kAlive = 1;     ///< LWT 용 QoS
 inline constexpr int kHwStatus = 1;  ///< 채널 하드웨어 상태 통지용 QoS
 }  // namespace qos
@@ -597,13 +602,15 @@ inline void from_json(const nlohmann::json& j, BlurFrame& f) {
 
 inline void to_json(nlohmann::json& j, const RiskObject& o) {
     j = nlohmann::json{{"gid", o.gid},         {"cls", std::string(toString(o.cls))},
-                       {"pos", o.pos},         {"level", std::string(toString(o.level))},
+                       {"pos", o.pos},         {"zoneId", o.zoneId},
+                       {"level", std::string(toString(o.level))},
                        {"nearest", o.nearest}, {"dist", o.dist}};
 }
 inline void from_json(const nlohmann::json& j, RiskObject& o) {
     o.gid = detail::get_or<GlobalId>(j, "gid", 0);
     o.cls = objectClassFromString(detail::get_or<std::string>(j, "cls", ""));
     o.pos = detail::get_or<WorldPoint>(j, "pos", WorldPoint{});
+    o.zoneId = detail::get_or<ChannelId>(j, "zoneId", -1);
     o.level = riskLevelFromString(detail::get_or<std::string>(j, "level", ""));
     o.nearest = detail::get_or<GlobalId>(j, "nearest", 0);
     o.dist = detail::get_or<double>(j, "dist", -1.0);
@@ -815,7 +822,9 @@ inline void encodeInto(const RiskFrame& f, std::string& out) {
         detail::appendDouble(out, o.pos.x);
         out += ",\"y\":";
         detail::appendDouble(out, o.pos.y);
-        out += "},\"level\":\"";
+        out += "},\"zoneId\":";
+        detail::appendInt(out, o.zoneId);
+        out += ",\"level\":\"";
         out += toString(o.level);
         out += "\",\"nearest\":";
         detail::appendInt(out, o.nearest);

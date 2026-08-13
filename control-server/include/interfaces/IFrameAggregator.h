@@ -18,6 +18,12 @@ class IFrameAggregator {
 public:
     virtual ~IFrameAggregator() = default;
 
+    /** @brief 시간 기반 집계 작업을 시작한다. 동기식 구현은 기본 no-op을 사용한다. */
+    virtual void start() {}
+
+    /** @brief 시간 기반 집계 작업을 중지하고 대기 중인 작업을 정리한다. */
+    virtual void stop() {}
+
     /**
      * @brief 시간 윈도우 내에 모인 프레임들의 묶음
      */

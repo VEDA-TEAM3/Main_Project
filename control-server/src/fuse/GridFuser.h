@@ -2,17 +2,18 @@
 
 /**
  * @file    GridFuser.h
- * @brief   좌표 안정화를 끄면 ConcatFuser 와 결과가 동일한 드롭인 융합기. 채널 간 매칭
- *          broad-phase 를 공간 해시 그리드로 바꿔 O(N^2) -> O(N*k) 로 낮춘 구현체.
+ * @brief   현재 관측 객체의 융합 결과를 보존하면서 채널 간 매칭 broad-phase를 공간 해시
+ *          그리드로 바꿔 O(N^2) -> O(N*k)로 낮춘 구현체.
  *
  * @details
- * [ positionJitterRadius == 0 일 때 왜 ConcatFuser 와 결과가 동일한가 (drop-in) ]
+ * [ 현재 관측 객체의 결과가 ConcatFuser와 동일한 이유 ]
  * dedup 병합은 오직 dedupMergeDistance 이내의 (다른 채널 + 같은 클래스) 쌍에서만 일어난다.
  * ConcatFuser 는 전체 O(N^2) 쌍을 훑지만, 실제로 병합을 유발하는 것은 '가까운 쌍'뿐이다.
  * GridFuser 는 그 '가까운 쌍'만 그리드로 수집한 뒤, (i<j) 로 정렬해 ConcatFuser 와 완전히
  * 동일한 union-find + 채널중복 제약을 같은 순서로 적용한다 -> 같은 입력에 같은 클러스터/gid.
- * positionJitterRadius > 0 이면 클러스터와 gid 매칭은 그대로 두고 최종 위치에만 공간
- * 히스테리시스를 적용하므로 출력 좌표는 의도적으로 ConcatFuser 와 달라진다.
+ * positionJitterRadius > 0이면 최종 위치에 공간 히스테리시스를 적용한다.
+ * 또한 trackMaxDistance > 0에서 관측이 잠깐 끊기면 GridFuser만 최대 5윈도우 coast하므로
+ * 전체 출력은 ConcatFuser와 다를 수 있다.
  *
  * [ Principle #3 (할당 최소화) / #6 (캐시 지역성) ]
  * 그리드 버킷(인덱스 벡터)·후보·쌍·union-find 버퍼를 멤버로 들고 매 프레임 '해제 없이 clear()'

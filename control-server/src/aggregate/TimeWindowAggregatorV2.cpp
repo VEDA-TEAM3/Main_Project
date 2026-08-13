@@ -1,5 +1,6 @@
 #include "aggregate/TimeWindowAggregatorV2.h"
 
+#include <exception>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -33,30 +34,61 @@ TimeWindowAggregatorV2::TimeWindowAggregatorV2(std::shared_ptr<IClock> clock, ui
     activeChannels_.reserve(count);  // 이후 push_back 은 재할당하지 않는다
 }
 
+TimeWindowAggregatorV2::~TimeWindowAggregatorV2() { stop(); }
+
+void TimeWindowAggregatorV2::start() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (running_) {
+        return;
+    }
+
+    running_ = true;
+    try {
+        flushThread_ = std::thread(&TimeWindowAggregatorV2::flushLoop, this);
+    } catch (...) {
+        running_ = false;
+        throw;
+    }
+}
+
+void TimeWindowAggregatorV2::stop() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_) {
+            return;
+        }
+        running_ = false;
+    }
+    windowCv_.notify_all();
+    if (flushThread_.joinable()) {
+        flushThread_.join();
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    clearSlotsLocked();
+    windowStartTime_ = 0;
+    windowDeadline_ = {};
+}
+
 void TimeWindowAggregatorV2::setCallback(AggregationCallback callback) {
     std::lock_guard<std::mutex> lock(mutex_);
     callback_ = std::move(callback);
 }
 
 void TimeWindowAggregatorV2::fillFlushBufferLocked(FrameBufferPool::Buffer& out) {
-    // resize 는 정상 운용(모든 채널 생존)에서 매 윈도우 같은 값이라 사실상 no-op 이고,
-    // 생성 시 reserve(channelCount) 를 해 두었으므로 외곽 벡터 재할당도 없다.
     out.resize(activeChannels_.size());
 
-    std::size_t i = 0;
+    std::size_t outputIndex = 0;
     for (const veda::ChannelId ch : activeChannels_) {
-        auto& slot = slots_[static_cast<std::size_t>(ch)];
-        auto& dst = out[i++];
-
-        dst.v = slot.v;
-        dst.ts = slot.ts;
-        dst.ch = slot.ch;
-        // swap: 복사가 아니라 버퍼 교환. 슬롯은 dst 가 갖고 있던 (비었지만 capacity 는 살아 있는)
-        // 버퍼를 넘겨받아 다음 윈도우에서 재사용한다 -> 양쪽 다 해제가 일어나지 않는다.
-        dst.objects.swap(slot.objects);
+        const auto index = static_cast<std::size_t>(ch);
+        auto& slot = slots_[index];
+        auto& destination = out[outputIndex++];
+        destination.v = slot.v;
+        destination.ts = slot.ts;
+        destination.ch = slot.ch;
+        destination.objects.swap(slot.objects);
         slot.objects.clear();
-
-        occupied_[static_cast<std::size_t>(ch)] = 0;
+        occupied_[index] = 0;
     }
     activeChannels_.clear();
 }
@@ -103,7 +135,7 @@ void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
             windowStartTime_ = now;
         }
 
-        if (now - windowStartTime_ >= static_cast<veda::TimestampMs>(windowSizeMs_)) {
+        if (!running_ && now - windowStartTime_ >= static_cast<veda::TimestampMs>(windowSizeMs_)) {
             if (!activeChannels_.empty()) {
                 if (callback_) {
                     flushed = flushPool_.acquire();
@@ -123,11 +155,17 @@ void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
         slot.v = frame.v;
         slot.ts = frame.ts;
         slot.ch = frame.ch;
-        // assign 은 목적지 capacity 가 충분하면 재할당하지 않는다 -> warmup 이후 무할당
+        // CCTV timestamp보다 도착 순서를 우선한다. 같은 채널의 마지막 도착 스냅샷이
+        // 이전 것을 대체한다.
         slot.objects.assign(frame.objects.begin(), frame.objects.end());
         if (!occupied_[idx]) {
+            const bool startsWindow = activeChannels_.empty();
             occupied_[idx] = 1;
             activeChannels_.push_back(frame.ch);
+            if (startsWindow && running_) {
+                windowDeadline_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(windowSizeMs_);
+                windowCv_.notify_one();
+            }
         }
     }  // <- mutex_ 해제 (콜백은 아직 호출 전)
     const auto lockEnd = std::chrono::steady_clock::now();
@@ -159,6 +197,61 @@ void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
     }
     if (!report.empty()) {
         logSuccess(kIface, report);
+    }
+}
+
+void TimeWindowAggregatorV2::flushLoop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (running_) {
+        windowCv_.wait(lock, [this] { return !running_ || !activeChannels_.empty(); });
+        if (!running_) {
+            return;
+        }
+
+        const auto deadline = windowDeadline_;
+        if (windowCv_.wait_until(lock, deadline, [this, deadline] {
+                return !running_ || activeChannels_.empty() || windowDeadline_ != deadline;
+            })) {
+            continue;
+        }
+
+        FrameBufferPool::Buffer flushed;
+        AggregationCallback callbackCopy;
+        std::size_t missedChannelCount = 0;
+        if (callback_) {
+            flushed = flushPool_.acquire();
+            fillFlushBufferLocked(flushed);
+            callbackCopy = callback_;
+        } else {
+            missedChannelCount = activeChannels_.size();
+            clearSlotsLocked();
+        }
+        windowStartTime_ = clock_->now();
+        windowDeadline_ = {};
+
+        lock.unlock();
+        if (callbackCopy) {
+            const std::size_t flushedCount = flushed.size();
+            try {
+                callbackCopy(flushed);
+            } catch (const std::exception& error) {
+                logError(kIface, "타이머 윈도우 콜백 실패: " + std::string(error.what()));
+            } catch (...) {
+                logError(kIface, "타이머 윈도우 콜백 실패: 알 수 없는 예외");
+            }
+            flushPool_.release(std::move(flushed));
+            {
+                std::lock_guard<std::mutex> metricsLock(metricsMutex_);
+                ++metrics_.windowCount;
+            }
+            if (isLogEnabled(LogLevel::Debug)) {
+                logDebug(kIface, "타이머 윈도우 마감, " + std::to_string(flushedCount) + "채널 집계 완료");
+            }
+        } else if (missedChannelCount > 0) {
+            logError(kIface,
+                     "타이머 윈도우 마감했지만 콜백 미등록 - " + std::to_string(missedChannelCount) + "채널 데이터 유실");
+        }
+        lock.lock();
     }
 }
 

@@ -124,9 +124,15 @@ void Controller::onHardwareStatus(veda::ChannelId channel, bool alive, const HwI
 
 Controller::~Controller() { stop(); }
 
-void Controller::start() { receiver_->start(); }
+void Controller::start() {
+    aggregator_->start();
+    receiver_->start();
+}
 
-void Controller::stop() { receiver_->stop(); }
+void Controller::stop() {
+    receiver_->stop();
+    aggregator_->stop();
+}
 
 void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) {
     if (frames.empty()) {
