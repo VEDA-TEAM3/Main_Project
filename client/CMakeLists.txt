@@ -56,6 +56,7 @@ qt_add_executable(Qtcctvclient
     src/ui/DigitalTwinMapSceneBuilder.cpp
     include/ui/DigitalTwinObjectStyleProvider.h
     src/ui/DigitalTwinObjectStyleProvider.cpp
+    include/ui/DigitalTwinZoneIndex.h
     include/ui/DigitalTwinObjectTableModel.h
     src/ui/DigitalTwinObjectTableModel.cpp
     include/ui/EventLogTableModel.h

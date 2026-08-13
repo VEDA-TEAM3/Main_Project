@@ -27,12 +27,13 @@
 #include "overlays/DangerAlertOverlay.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
 #include "ui/DigitalTwinObjectStyleProvider.h"
-#include "ui/DigitalTwinZoneIndex.h"
 
 namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maxTrailSceneLength = 240.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
+constexpr int digitalTwinChannelCount = 8;
+constexpr int channelsPerZone = 4;
 
 QString centralEventKey(const CentralEventData& event) {
     const QString identity = event.eventId.isEmpty() ? event.eventType : event.eventId;
@@ -586,7 +587,7 @@ void DigitalTwinMapWidget::showRiskPulse(const DigitalTwinRiskEvent& event) {
         return;
     }
 
-    const int zoneIndex = event.channelIndex / digitalTwinChannelsPerZone;
+    const int zoneIndex = event.channelIndex / channelsPerZone;
     if (zoneIndex < 0 || zoneIndex >= static_cast<int>(overlayManagers_.size())) {
         return;
     }
@@ -631,8 +632,7 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
 
     if (liveMode_ && liveConfig_.debugDetail) {
         const QPointF scenePosition = scenePointForObject(object.position, object.channelIndex);
-        const int mapIndex =
-            digitalTwinZoneIndex(object.channelIndex, object.position.x(), liveConfig_.world.bounds.center().x());
+        const int mapIndex = object.position.x() <= liveConfig_.world.bounds.center().x() ? 0 : 1;
         qDebug().noquote() << QStringLiteral(
                                   "[TV SCENE] CREATE gid=%1 world=(%2,%3) zoneId=%4 "
                                   "map=%5 scene=(%6,%7) inside=%8 worldInside=%9")
@@ -684,10 +684,7 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);
 
-    // 좌표가 그대로인 프레임까지 쌓으면(수신이 잠시 멈춘 구간) 96칸 경로 버퍼가 같은
-    // 점으로 채워져 실제 이동 경로가 밀려 나간다
-    if (visualItem->object.observed &&
-        (visualItem->recentPositions.isEmpty() || visualItem->recentPositions.constLast() != scenePosition)) {
+    if (visualItem->object.observed) {
         visualItem->recentPositions.append(scenePosition);
         trimTrailPositions(&visualItem->recentPositions);
     }
@@ -798,16 +795,16 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
     const QRectF worldBounds = liveConfig_.world.bounds;
     const bool validBounds = worldBounds.width() > 0.0 && worldBounds.height() > 0.0;
     if (!liveMode_ || !validBounds) {
-        const int demoZoneIndex = channelIndex >= digitalTwinChannelsPerZone ? 1 : 0;
+        const int demoZoneIndex = channelIndex >= channelsPerZone ? 1 : 0;
         const QRectF& demoArea = objectAreaRects_[demoZoneIndex];
         return QPointF(demoArea.left() + qBound(0.0, worldPosition.x(), 1.0) * demoArea.width(),
                        demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
     }
 
-    // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치만 월드
-    // 좌표로 계산한다
+    // zoneId is a hardware/direction identifier. Live map placement is derived
+    // only from RiskObject.pos.
     const double worldCenterX = worldBounds.center().x();
-    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), worldCenterX);
+    const int zoneIndex = worldPosition.x() <= worldCenterX ? 0 : 1;
     const double halfWidth = worldBounds.width() * 0.5;
     const double zoneMinimumX = worldBounds.left() + zoneIndex * halfWidth;
     const double normalizedX = qBound(0.0, (worldPosition.x() - zoneMinimumX) / halfWidth, 1.0);

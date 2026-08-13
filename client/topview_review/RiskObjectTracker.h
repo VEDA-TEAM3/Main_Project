@@ -82,9 +82,7 @@ private:
     std::optional<RiskFrameData> lastAcceptedInputFrame_;
     QHash<qint64, RiskObjectData> retainedObjects_;
     QHash<qint64, QVector<QPointF>> worldPositionHistories_;
-    /// gid별 '더 새로운 프레임이 이 gid를 빠뜨린 시각'. 프레임이 오지 않는 동안에는
-    /// 채워지지 않으므로 스트림 정지와 객체 누락이 구분된다
-    QHash<qint64, qint64> missingSinceMsec_;
+    QHash<qint64, qint64> lastSeenArrivalTimesMsec_;
     QSet<qint64> missingObjectIds_;
     QHash<qint64, qreal> renderedOpacities_;
     QHash<qint64, qint64> opacityUpdateTimesMsec_;

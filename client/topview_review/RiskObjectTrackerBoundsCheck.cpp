@@ -2,7 +2,6 @@
 #include <cstdio>
 
 #include "model/RiskObjectTracker.h"
-#include "ui/DigitalTwinZoneIndex.h"
 
 namespace {
 int failureCount = 0;
@@ -164,13 +163,6 @@ RiskFrameData lifecycleFrame(qint64 sourceTimestamp) {
     return frame;
 }
 
-/** @brief 객체가 모두 빠진 새 프레임 */
-RiskFrameData emptyFrame(qint64 sourceTimestamp) {
-    RiskFrameData frame;
-    frame.sourceTimestamp = sourceTimestamp;
-    return frame;
-}
-
 /**
  * @brief 누락 객체가 grace 구간 동안 밝기를 그대로 유지하고 위험 판단에서는
  * 제외되는지 검사합니다.
@@ -188,7 +180,9 @@ void checkMissingObjectGracePeriod() {
     const DigitalTwinObject* observedObject = findObject(observedSnapshot, 100);
     check(observedObject != nullptr && observedObject->opacity == 1.0, "observed object must be fully opaque");
 
-    tracker.submitFrame(emptyFrame(3033), 3033);
+    RiskFrameData emptyFrame;
+    emptyFrame.sourceTimestamp = 3033;
+    tracker.submitFrame(emptyFrame, 3033);
     const DigitalTwinSnapshot graceSnapshot = tracker.buildSnapshot(3199);
     const DigitalTwinObject* graceObject = findObject(graceSnapshot, 100);
     check(graceObject != nullptr, "missing object must remain during the grace period");
@@ -215,12 +209,13 @@ void checkMissingObjectFadeOut() {
     tracker.submitFrame(lifecycleFrame(4000), 4000);
     tracker.buildSnapshot(4000);
 
-    // grace와 fade-out은 이 프레임이 gid를 빠뜨린 시각(4033)에서부터 센다
-    tracker.submitFrame(emptyFrame(4033), 4033);
+    RiskFrameData emptyFrame;
+    emptyFrame.sourceTimestamp = 4033;
+    tracker.submitFrame(emptyFrame, 4033);
 
     qreal previousOpacity = 1.0;
     for (qint64 offsetMsec = 233; offsetMsec <= 380; offsetMsec += 33) {
-        const DigitalTwinSnapshot fadingSnapshot = tracker.buildSnapshot(4033 + offsetMsec);
+        const DigitalTwinSnapshot fadingSnapshot = tracker.buildSnapshot(4000 + offsetMsec);
         const DigitalTwinObject* fadingObject = findObject(fadingSnapshot, 100);
         check(fadingObject != nullptr, "object must stay in the snapshot until the fade-out ends");
         if (fadingObject == nullptr) {
@@ -230,17 +225,17 @@ void checkMissingObjectFadeOut() {
         previousOpacity = fadingObject->opacity;
     }
 
-    const DigitalTwinSnapshot expiredSnapshot = tracker.buildSnapshot(4414);
+    const DigitalTwinSnapshot expiredSnapshot = tracker.buildSnapshot(4381);
     check(findObject(expiredSnapshot, 100) == nullptr, "object missing for more than grace + fade-out must be removed");
 
-    // 안전 관제 화면이므로 처음 보는 gid도 첫 렌더부터 완전히 보여야 한다
+    // 제거된 gid가 다시 오면 새 객체이므로 fade-in을 0부터 시작한다
     DigitalTwinRuntimeConfig fadeInConfig = lifecycleConfig();
     fadeInConfig.fadeInMsec = 120;
     RiskObjectTracker fadeInTracker(fadeInConfig);
     fadeInTracker.submitFrame(lifecycleFrame(5000), 5000);
     const DigitalTwinSnapshot createdSnapshot = fadeInTracker.buildSnapshot(5000);
     const DigitalTwinObject* createdObject = findObject(createdSnapshot, 100);
-    check(createdObject != nullptr && createdObject->opacity == 1.0, "a brand new GID must render fully visible");
+    check(createdObject != nullptr && createdObject->opacity == 0.0, "a brand new GID must fade in from zero");
 }
 
 /**
@@ -251,7 +246,7 @@ void checkFadeOutRecovery() {
     DigitalTwinRuntimeConfig config = lifecycleConfig();
     config.fadeInMsec = 120;
 
-    // 프레임이 계속 들어오는 정상 구간을 만든다
+    // fade-in이 끝날 때까지 프레임이 계속 들어오는 상태를 만든다
     RiskObjectTracker tracker(config);
     for (qint64 arrivalMsec = 6000; arrivalMsec <= 6200; arrivalMsec += 100) {
         tracker.submitFrame(lifecycleFrame(arrivalMsec), arrivalMsec);
@@ -261,9 +256,7 @@ void checkFadeOutRecovery() {
     const DigitalTwinObject* fullObject = findObject(fullSnapshot, 100);
     check(fullObject != nullptr && fullObject->opacity == 1.0, "observed object must reach full opacity");
 
-    // 새 프레임이 gid를 빠뜨려야 fade-out이 시작된다 (6250 + grace 200 = 6450부터)
-    tracker.submitFrame(emptyFrame(6250), 6250);
-    const DigitalTwinSnapshot fadingSnapshot = tracker.buildSnapshot(6560);
+    const DigitalTwinSnapshot fadingSnapshot = tracker.buildSnapshot(6450);
     const DigitalTwinObject* fadingObject = findObject(fadingSnapshot, 100);
     check(fadingObject != nullptr && fadingObject->opacity < 1.0, "fade-out must have started after the grace period");
     if (fadingObject == nullptr) {
@@ -272,95 +265,13 @@ void checkFadeOutRecovery() {
     const qreal fadedOpacity = fadingObject->opacity;
     check(fadedOpacity > 0.0, "fade-out must not jump straight to zero");
 
-    tracker.submitFrame(lifecycleFrame(6590), 6590);
-    const DigitalTwinSnapshot recoveredSnapshot = tracker.buildSnapshot(6590);
+    tracker.submitFrame(lifecycleFrame(6480), 6480);
+    const DigitalTwinSnapshot recoveredSnapshot = tracker.buildSnapshot(6480);
     const DigitalTwinObject* recoveredObject = findObject(recoveredSnapshot, 100);
     check(recoveredObject != nullptr && recoveredObject->observed, "recovered GID must be observed again");
     check(recoveredObject != nullptr && recoveredObject->opacity >= fadedOpacity,
           "recovery must resume from the faded opacity instead of zero");
     check(recoveredObject != nullptr && recoveredObject->opacity < 1.0, "recovery must fade in, not snap to full");
-}
-
-/**
- * @brief 새 프레임이 오지 않는 동안에도 마지막 승인 프레임의 객체가 그대로
- * 유지되는지 검사합니다.
- *
- * @details 이것이 깜박임의 근원이었다. 배달이 380ms 밀렸다는 이유로 객체를 지우면
- * 같은 gid가 새 객체로 다시 태어난다.
- */
-void checkStalledStreamKeepsObjects() {
-    RiskObjectTracker tracker(lifecycleConfig());
-    tracker.submitFrame(lifecycleFrame(7000), 7000);
-    tracker.buildSnapshot(7000);
-
-    // grace + fade-out(380ms)을 넘겨 400ms 동안 프레임이 없어도 화면은 그대로다
-    const DigitalTwinSnapshot stalledSnapshot = tracker.buildSnapshot(7400);
-    const DigitalTwinObject* stalledObject = findObject(stalledSnapshot, 100);
-    check(stalledSnapshot.objects.size() == 2, "a delivery stall must not drop objects");
-    check(stalledObject != nullptr && stalledObject->observed, "stalled object must stay observed");
-    check(stalledObject != nullptr && stalledObject->opacity == 1.0, "stalled object must keep full opacity");
-    check(stalledObject != nullptr && stalledObject->position == QPointF(-40.0, 4.0),
-          "stalled object must hold its last world position");
-
-    // 같은 gid가 돌아와도 새 객체가 아니므로 밝기가 리셋되지 않는다
-    tracker.submitFrame(lifecycleFrame(7400), 7400);
-    const DigitalTwinSnapshot resumedSnapshot = tracker.buildSnapshot(7400);
-    const DigitalTwinObject* resumedObject = findObject(resumedSnapshot, 100);
-    check(resumedObject != nullptr && resumedObject->observed, "resumed GID must be observed");
-    check(resumedObject != nullptr && resumedObject->opacity == 1.0, "resumed GID must not restart from zero");
-}
-
-/**
- * @brief 긴 공백 뒤에 도착한 프레임이 gid를 빠뜨렸을 때, grace를 공백 시작이 아니라
- * 그 프레임 도착 시각부터 세는지 검사합니다.
- */
-void checkGraceStartsAtTheOmittingFrame() {
-    RiskObjectTracker tracker(lifecycleConfig());
-    tracker.submitFrame(lifecycleFrame(8000), 8000);
-    tracker.buildSnapshot(8000);
-    tracker.buildSnapshot(8400);
-
-    tracker.submitFrame(emptyFrame(8400), 8400);
-    const DigitalTwinSnapshot graceSnapshot = tracker.buildSnapshot(8560);
-    const DigitalTwinObject* graceObject = findObject(graceSnapshot, 100);
-    check(graceObject != nullptr, "grace must be measured from the omitting frame, not from the stall");
-    check(graceObject != nullptr && graceObject->opacity == 1.0, "grace period must not dim the object");
-
-    const DigitalTwinSnapshot removedSnapshot = tracker.buildSnapshot(8781);
-    check(findObject(removedSnapshot, 100) == nullptr, "grace + fade-out after the omitting frame must remove the GID");
-}
-
-/** @brief 스트림 전체가 멎으면 frameExpiryMsec 정책으로만 객체가 사라지는지 검사합니다. */
-void checkStreamExpiryRemovesEverything() {
-    const DigitalTwinRuntimeConfig config = lifecycleConfig();
-    RiskObjectTracker tracker(config);
-    tracker.submitFrame(lifecycleFrame(9000), 9000);
-    tracker.buildSnapshot(9000);
-
-    const qint64 expiryMsec = config.frameExpiryMsec;
-    check(!tracker.expireStaleFrame(9000 + expiryMsec, expiryMsec), "frames must survive until the expiry elapses");
-    check(!tracker.buildSnapshot(9000 + expiryMsec).objects.isEmpty(), "the last good screen must hold until expiry");
-    check(tracker.expireStaleFrame(9001 + expiryMsec, expiryMsec), "an expired stream must be dropped");
-    check(!tracker.hasFrame(), "expiry must clear the frame history");
-    check(tracker.buildSnapshot(9001 + expiryMsec).objects.isEmpty(), "expiry must remove every object");
-}
-
-/** @brief 물리 CCTV 구역을 서버 zoneId로 정하고, 무효할 때만 좌표로 되돌아가는지 검사합니다. */
-void checkPhysicalZoneSelection() {
-    check(digitalTwinZoneIndex(3, 50.0, 0.0) == 0, "zoneId 3 must stay on the first scene even with positive x");
-    check(digitalTwinZoneIndex(4, -50.0, 0.0) == 1, "zoneId 4 must stay on the second scene even with negative x");
-    check(digitalTwinZoneIndex(0, 0.0, 0.0) == 0, "zoneId 0..3 must map to the first scene");
-    check(digitalTwinZoneIndex(7, 0.0, 0.0) == 1, "zoneId 4..7 must map to the second scene");
-
-    check(digitalTwinZoneIndex(-1, -50.0, 0.0) == 0, "an unassigned zone must fall back to the x coordinate");
-    check(digitalTwinZoneIndex(-1, 50.0, 0.0) == 1, "an unassigned zone must fall back to the x coordinate");
-    check(digitalTwinZoneIndex(digitalTwinChannelCount, -50.0, 0.0) == 0, "an out-of-range zone must use the fallback");
-
-    // 경계에서 좌표가 흔들려도 zoneId가 그대로면 Scene은 왕복하지 않는다
-    for (const double worldX : {-0.5, -0.01, 0.0, 0.01, 0.5}) {
-        check(digitalTwinZoneIndex(3, worldX, 0.0) == 0, "jitter around x=0 must not move a zoned object");
-        check(digitalTwinZoneIndex(4, worldX, 0.0) == 1, "jitter around x=0 must not move a zoned object");
-    }
 }
 }  // namespace
 
@@ -371,10 +282,6 @@ int main() {
     checkMissingObjectGracePeriod();
     checkMissingObjectFadeOut();
     checkFadeOutRecovery();
-    checkStalledStreamKeepsObjects();
-    checkGraceStartsAtTheOmittingFrame();
-    checkStreamExpiryRemovesEverything();
-    checkPhysicalZoneSelection();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

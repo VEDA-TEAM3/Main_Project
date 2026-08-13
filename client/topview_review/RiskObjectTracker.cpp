@@ -176,7 +176,7 @@ void RiskObjectTracker::reset() {
     history_.clear();
     lastAcceptedInputFrame_.reset();
     retainedObjects_.clear();
-    missingSinceMsec_.clear();
+    lastSeenArrivalTimesMsec_.clear();
     missingObjectIds_.clear();
     renderedOpacities_.clear();
     opacityUpdateTimesMsec_.clear();
@@ -273,61 +273,43 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         logFrameDiagnostics(frame, rawPositions, medianPositions, arrivalTimeMsec);
     }
 
-    QSet<qint64> frameObjectIds;
-    frameObjectIds.reserve(frame.objects.size());
-    for (const RiskObjectData& object : frame.objects) {
-        frameObjectIds.insert(object.globalId);
-
-        const bool knownObject = retainedObjects_.contains(object.globalId);
-        const bool restoredObject = missingObjectIds_.remove(object.globalId);
-        const qint64 missingSinceMsec = missingSinceMsec_.take(object.globalId);
-        if (diagnostics_.level >= 2 && !knownObject) {
-            qDebug().noquote() << QStringLiteral("[TV LIFE] CREATE gid=%1").arg(object.globalId);
-        } else if (diagnostics_.level >= 2 && restoredObject) {
-            qDebug().noquote() << QStringLiteral("[TV LIFE] RESTORE gid=%1 elapsed=%2ms")
-                                      .arg(object.globalId)
-                                      .arg(missingSinceMsec > 0 ? arrivalTimeMsec - missingSinceMsec : 0);
-        }
-
-        retainedObjects_.insert(object.globalId, object);
-    }
-
-    // 누락은 벽시계가 아니라 '더 새로운 프레임이 이 gid를 빠뜨렸다'는 사실로만
-    // 판정한다. 프레임 배달이 통째로 밀린 구간에서 마지막 승인 프레임의 객체까지
-    // 누락으로 넘기면, 배달이 재개될 때 같은 gid가 새 객체로 다시 태어나 깜박인다.
-    // 스트림 전체가 멎은 경우는 expireStaleFrame(frameExpiryMsec)이 따로 처리한다
     const qint64 objectRetentionMsec = config_.missingGraceMsec + qMax<qint64>(0, config_.fadeOutMsec);
-    for (auto iterator = retainedObjects_.begin(); iterator != retainedObjects_.end();) {
-        if (frameObjectIds.contains(iterator.key())) {
+    for (auto iterator = lastSeenArrivalTimesMsec_.begin(); iterator != lastSeenArrivalTimesMsec_.end();) {
+        if (arrivalTimeMsec - iterator.value() <= objectRetentionMsec) {
             ++iterator;
             continue;
         }
 
-        const qint64 missingSinceMsec = missingSinceMsec_.value(iterator.key(), 0);
-        if (missingSinceMsec <= 0) {
-            // 이 프레임이 처음으로 빠뜨린 gid다. grace와 fade-out은 여기서부터 센다
-            missingSinceMsec_.insert(iterator.key(), arrivalTimeMsec);
-            ++iterator;
-            continue;
-        }
-        if (arrivalTimeMsec - missingSinceMsec <= objectRetentionMsec) {
-            ++iterator;
-            continue;
-        }
-
+        const qint64 globalId = iterator.key();
         if (diagnostics_.level >= 2) {
             qDebug().noquote() << QStringLiteral("[TV LIFE] REMOVE gid=%1 elapsed=%2ms")
-                                      .arg(iterator.key())
-                                      .arg(arrivalTimeMsec - missingSinceMsec);
+                                      .arg(globalId)
+                                      .arg(arrivalTimeMsec - iterator.value());
         }
 
         // 좌표 이력은 여기서 지우지 않는다. 표시가 끊긴 직후가 상류 coast가 끝나는
         // 시점이라 이상치가 가장 나오기 쉬운데, 이력을 버리면 돌아온 첫 좌표가
         // 중앙값 필터를 못 받는다. 이력은 removeInactivePositionStates가 속도 상한
         // 상태와 같은 기준으로 정리한다
-        missingObjectIds_.remove(iterator.key());
-        missingSinceMsec_.remove(iterator.key());
-        iterator = retainedObjects_.erase(iterator);
+        retainedObjects_.remove(globalId);
+        missingObjectIds_.remove(globalId);
+        iterator = lastSeenArrivalTimesMsec_.erase(iterator);
+    }
+
+    for (const RiskObjectData& object : frame.objects) {
+        const bool knownObject = retainedObjects_.contains(object.globalId);
+        const qint64 previousArrivalMsec = lastSeenArrivalTimesMsec_.value(object.globalId, arrivalTimeMsec);
+        const bool restoredObject = missingObjectIds_.remove(object.globalId);
+        if (diagnostics_.level >= 2 && !knownObject) {
+            qDebug().noquote() << QStringLiteral("[TV LIFE] CREATE gid=%1").arg(object.globalId);
+        } else if (diagnostics_.level >= 2 && restoredObject) {
+            qDebug().noquote() << QStringLiteral("[TV LIFE] RESTORE gid=%1 elapsed=%2ms")
+                                      .arg(object.globalId)
+                                      .arg(arrivalTimeMsec - previousArrivalMsec);
+        }
+
+        retainedObjects_.insert(object.globalId, object);
+        lastSeenArrivalTimesMsec_.insert(object.globalId, arrivalTimeMsec);
     }
 
     history_.append(std::move(frame));
@@ -393,11 +375,13 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     for (auto iterator = retainedObjects_.cbegin(); iterator != retainedObjects_.cend(); ++iterator) {
         sourceChannelIndexes.insert(iterator.key(), iterator.value().zoneId);
     }
-    // 최신 승인 프레임에 실려 있으면 관측 상태다. 다음 프레임이 늦는 것은 객체가
-    // 사라진 것이 아니므로 벽시계 나이로 관측 여부를 뒤집지 않는다
     for (const RiskObjectData& sourceObject : frame.objects) {
         sourceChannelIndexes.insert(sourceObject.globalId, sourceObject.zoneId);
-        observedObjectIds.insert(sourceObject.globalId);
+        const qint64 lastSeenArrivalMsec = lastSeenArrivalTimesMsec_.value(sourceObject.globalId, 0);
+        const qint64 ageMsec = lastSeenArrivalMsec > 0 ? localTimeMsec - lastSeenArrivalMsec : -1;
+        if (ageMsec >= 0 && ageMsec <= config_.missingGraceMsec) {
+            observedObjectIds.insert(sourceObject.globalId);
+        }
     }
 
     const auto appendObject = [this, localTimeMsec, &snapshot, &currentPositions, &currentChannelIndexes,
@@ -452,6 +436,9 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     };
 
     for (const RiskObjectData& sourceObject : frame.objects) {
+        if (!observedObjectIds.contains(sourceObject.globalId)) {
+            continue;
+        }
         appendObject(sourceObject, lifecycleOpacity(sourceObject.globalId, true, 0, localTimeMsec), frameSequence_,
                      true);
     }
@@ -465,10 +452,11 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
             continue;
         }
 
-        // 누락 시각이 없으면 아직 어떤 새 프레임도 이 gid를 빠뜨리지 않은 것이므로
-        // 나이는 0이다(밝기 유지)
-        const qint64 missingSinceMsec = missingSinceMsec_.value(iterator.key(), 0);
-        const qint64 missingAgeMsec = missingSinceMsec > 0 ? qMax<qint64>(0, localTimeMsec - missingSinceMsec) : 0;
+        const qint64 lastSeenArrivalMsec = lastSeenArrivalTimesMsec_.value(iterator.key(), 0);
+        const qint64 missingAgeMsec = lastSeenArrivalMsec > 0 ? localTimeMsec - lastSeenArrivalMsec : 0;
+        if (missingAgeMsec < 0) {
+            continue;
+        }
         if (missingAgeMsec > objectRetentionMsec) {
             expiredObjectIds.append(iterator.key());
             if (diagnostics_.level >= 2) {
@@ -494,7 +482,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
 
     for (qint64 globalId : std::as_const(expiredObjectIds)) {
         retainedObjects_.remove(globalId);
-        missingSinceMsec_.remove(globalId);
+        lastSeenArrivalTimesMsec_.remove(globalId);
         missingObjectIds_.remove(globalId);
     }
 
@@ -1002,12 +990,9 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
     const qint64 elapsedMsec = qBound<qint64>(0LL, localTimeMsec - previousUpdateMsec, 100LL);
 
     if (present) {
-        // 처음 보는 gid는 fade-in 없이 바로 보인다. 안전 관제 화면에서 새 객체가
-        // 장식용 fade-in 때문에 첫 프레임에 안 보이면 안 된다. fade-in은 fade-out
-        // 도중 같은 gid가 돌아왔을 때 그 밝기에서 이어 밝아지는 용도로만 남긴다
-        opacity = !knownObject || config_.fadeInMsec <= 0
+        opacity = config_.fadeInMsec <= 0
                       ? 1.0
-                      : qMin(1.0, opacity + static_cast<qreal>(elapsedMsec) / config_.fadeInMsec);
+                      : qMin(1.0, opacity + static_cast<qreal>(knownObject ? elapsedMsec : 0) / config_.fadeInMsec);
     } else if (missingAgeMsec > config_.missingGraceMsec) {
         // Grace 구간에서는 마지막 opacity를 그대로 들고 있는다. 한 프레임 누락에도 어두워지면
         // 같은 gid가 계속 잡히는데도 깜박이는 것처럼 보인다
