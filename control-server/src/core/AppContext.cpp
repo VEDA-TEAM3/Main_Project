@@ -19,6 +19,8 @@ constexpr const char* kIface = "AppContext";
 AppContext::AppContext(const AppConfig& config) : config_(config) {}
 
 std::shared_ptr<Controller> AppContext::buildController() {
+    config_.validateForStartup();
+
     auto clock = std::make_shared<SystemClock>();
     auto metric = std::make_shared<EuclideanMetric>();
 
@@ -34,10 +36,12 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto fuser =
         std::make_shared<GridFuser>(metric, config_.risk.dedupMergeDistance, config_.risk.trackMaxDistance,
                                     config_.risk.positionJitterRadius);
-    auto zoneMapper = std::make_shared<SpatialZoneMapper>(config_.zones, config_.hysteresisMargin);
+    auto zoneMapper = std::make_shared<SpatialZoneMapper>(config_.zones, config_.hysteresisMargin,
+                                                          config_.cameraCalibrations,
+                                                          config_.directionalZoneMapping);
     auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk, config_.channelCount);
 
-    // 하드웨어 디스패처는 설정으로 선택 -- 기본은 실제 STM32 UART 링크
+    // 하드웨어 디스패처는 실제 STM32 UART 링크로 고정
     auto dispatcher = std::make_shared<SerialHwEventDispatcher>(
         config_.hwHealthCheck.devicePath, config_.hwHealthCheck.heartbeatIntervalMs,
         config_.hwHealthCheck.missedBeatsForTimeout, config_.hwHealthCheck.mismatchRetryCount,
@@ -45,8 +49,7 @@ std::shared_ptr<Controller> AppContext::buildController() {
 
     logSuccess(kIface,
                "파이프라인 조립 완료 (receiver=MqttChannelReceiver, transform=AffineLocalToWorldTransform, "
-               "zoneMapper=SpatialZoneMapper, sink=MqttTransport, dispatcher=" +
-                   config_.hwHealthCheck.dispatcher + ")");
+               "zoneMapper=SpatialZoneMapper, sink=MqttTransport, dispatcher=SerialHwEventDispatcher)");
 
     return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
                                         sink, clock, config_.channelCount);

@@ -103,10 +103,10 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         return worldFrame;
     }
 
-    auto minTimestampIt = std::min_element(
+    auto maxTimestampIt = std::max_element(
         frames.begin(), frames.end(),
         [](const domain::ObservationFrame& a, const domain::ObservationFrame& b) { return a.ts < b.ts; });
-    worldFrame.timestamp = minTimestampIt->ts;
+    worldFrame.timestamp = maxTimestampIt->ts;
 
     // --- 후보 수집 (재사용 버퍼) ---
     candidates_.clear();
@@ -428,11 +428,13 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             }
         }
 
-        // 유예 중(이번 윈도우엔 못 봤지만 아직 안 끊긴)인 실체는 마지막 좌표 그대로 채워 넣음(coast)
+        // 짧은 채널 인계/수신 공백에도 UI 객체가 사라지지 않도록,
+        // 만료 전 트랙은 마지막 좌표로 유지한다.
         for (const auto& [gid, entity] : byGid_) {
             if (touchedGids.count(gid)) {
                 continue;
             }
+
             domain::WorldObject coasted;
             coasted.gid = gid;
             coasted.cls = entity.cls;

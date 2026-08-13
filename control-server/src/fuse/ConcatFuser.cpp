@@ -85,10 +85,10 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
         return worldFrame;
     }
 
-    auto minTimestampIt = std::min_element(
+    auto maxTimestampIt = std::max_element(
         frames.begin(), frames.end(),
         [](const domain::ObservationFrame& a, const domain::ObservationFrame& b) { return a.ts < b.ts; });
-    worldFrame.timestamp = minTimestampIt->ts;
+    worldFrame.timestamp = maxTimestampIt->ts;
 
     std::size_t totalObjects = 0;
     for (const auto& frame : frames) {
@@ -306,24 +306,7 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
             }
         }
 
-        // 유예 중(이번 윈도우엔 못 봤지만 아직 안 끊긴)인 실체는 마지막 좌표 그대로 채워 넣음
-        // (안 넣으면 클라이언트가 받는 RiskFrame 에서 이 실체가 잠깐씩 사라졌다 나타나
-        //  깜빡이는 것처럼 보임 -- gid 는 안 바뀌어도 화면에 나가는 프레임 자체가 감지
-        //  여부에 따라 매 윈도우 갱신되기 때문)
-        for (const auto& [gid, entity] : byGid_) {
-            if (touchedGids.count(gid)){
-                continue;
-            }
-            domain::WorldObject coasted;
-            coasted.gid = gid;
-            coasted.cls = entity.cls;
-            coasted.pos = entity.pos;
-            coasted.riskLevel = veda::RiskLevel::None;
-            coasted.nearestObj = 0;
-            coasted.nearestDist = -1.0;
-            coasted.zoneId = -1;
-            worldFrame.objects.push_back(std::move(coasted));
-        }
+        // 미관측 실체는 GID 재연결을 위해 byGid_에만 유지한다. 현재 위험/표시 프레임에는 넣지 않는다.
     }
 
     // 윈도우마다 도는 정상 경로라 Debug

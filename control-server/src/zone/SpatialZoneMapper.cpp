@@ -1,6 +1,7 @@
 #include "zone/SpatialZoneMapper.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -14,6 +15,7 @@ constexpr const char* kIface = "ZoneMapper";
 constexpr std::size_t kMinIndexedZoneCount = 64;
 constexpr std::size_t kMaxDecisionCells = 1'100'000;
 constexpr std::uint32_t kNoZoneIndex = std::numeric_limits<std::uint32_t>::max();
+constexpr double kPi = 3.14159265358979323846;
 
 bool contains(const SpatialZone& zone, const domain::WorldPoint& position) {
     return position.x >= zone.minX && position.x <= zone.maxX && position.y >= zone.minY && position.y <= zone.maxY;
@@ -28,21 +30,6 @@ bool containsExpanded(const SpatialZone& zone, const domain::WorldPoint& positio
            position.y <= zone.maxY + margin;
 }
 
-double directionScore(veda::ChannelId zoneId, const domain::WorldPoint& position) {
-    switch (zoneId) {
-        case 0:
-            return position.y;
-        case 1:
-            return position.x;
-        case 2:
-            return -position.y;
-        case 3:
-            return -position.x;
-        default:
-            return -std::numeric_limits<double>::infinity();
-    }
-}
-
 std::size_t axisBucket(const std::vector<double>& edges, double value) {
     const auto it = std::lower_bound(edges.begin(), edges.end(), value);
     const std::size_t edgeIndex = static_cast<std::size_t>(it - edges.begin());
@@ -53,25 +40,58 @@ std::size_t axisBucket(const std::vector<double>& edges, double value) {
 }
 }  // namespace
 
-SpatialZoneMapper::SpatialZoneMapper(std::vector<SpatialZone> zones, double hysteresisMargin)
+SpatialZoneMapper::SpatialZoneMapper(std::vector<SpatialZone> zones, double hysteresisMargin,
+                                           std::vector<CameraCalibration> calibrations, bool directionalMode)
     : zones_(std::move(zones)), hysteresisMargin_(hysteresisMargin) {
-    // 조립 시점 fail-fast. 음수/NaN margin은 경계 히스테리시스를 잘못 적용하거나
-    // 조용히 무력화하므로 통과시키지 않는다.
     if (!std::isfinite(hysteresisMargin_) || hysteresisMargin_ < 0.0) {
         throw std::invalid_argument("zone hysteresis margin must be finite and non-negative");
     }
 
-    directionalMode_ = zones_.size() == directionalZoneIndices_.size();
+    bool legacyFourDirection = zones_.size() == 4;
     std::array<bool, 4> seen{};
-    for (std::size_t i = 0; directionalMode_ && i < zones_.size(); ++i) {
-        const auto zoneId = zones_[i].zoneId;
-        if (zoneId < 0 || zoneId >= static_cast<veda::ChannelId>(seen.size()) ||
-            seen[static_cast<std::size_t>(zoneId)]) {
-            directionalMode_ = false;
+    for (const SpatialZone& zone : zones_) {
+        if (zone.zoneId < 0 || zone.zoneId >= 4 || seen[static_cast<std::size_t>(zone.zoneId)]) {
+            legacyFourDirection = false;
             break;
         }
-        seen[static_cast<std::size_t>(zoneId)] = true;
-        directionalZoneIndices_[static_cast<std::size_t>(zoneId)] = static_cast<std::uint32_t>(i);
+        seen[static_cast<std::size_t>(zone.zoneId)] = true;
+    }
+
+    const bool calibratedDirections = supportsDirectionalZoneMapping(zones_, calibrations);
+    coverageFilterEnabled_ = directionalMode && calibratedDirections;
+    directionalMode_ = (directionalMode || legacyFourDirection) && (calibratedDirections || legacyFourDirection);
+    if (directionalMode_) {
+        directionalZones_.resize(zones_.size());
+        for (std::size_t zoneIndex = 0; zoneIndex < zones_.size(); ++zoneIndex) {
+            double cameraX = 0.0;
+            double cameraY = 0.0;
+            double facingAngle = static_cast<double>(zones_[zoneIndex].zoneId % 4) * 90.0;
+            if (calibratedDirections) {
+                const auto calibration = std::find_if(
+                    calibrations.begin(), calibrations.end(),
+                    [this, zoneIndex](const CameraCalibration& candidate) {
+                        return candidate.channelId == zones_[zoneIndex].zoneId;
+                    });
+                cameraX = calibration->cameraPosX;
+                cameraY = calibration->cameraPosY;
+                facingAngle = calibration->facingAngleDeg;
+            }
+
+            auto camera = std::find_if(cameraSites_.begin(), cameraSites_.end(),
+                                       [cameraX, cameraY](const CameraSite& candidate) {
+                                           return candidate.x == cameraX && candidate.y == cameraY;
+                                       });
+            if (camera == cameraSites_.end()) {
+                cameraSites_.push_back(CameraSite{cameraX, cameraY, zones_[zoneIndex].zoneId});
+                camera = cameraSites_.end() - 1;
+            } else {
+                camera->lowestZoneId = std::min(camera->lowestZoneId, zones_[zoneIndex].zoneId);
+            }
+
+            const double radians = facingAngle * kPi / 180.0;
+            directionalZones_[zoneIndex] = {static_cast<std::uint32_t>(camera - cameraSites_.begin()),
+                                             std::sin(radians), std::cos(radians)};
+        }
     }
     buildDecisionIndex();
 }
@@ -129,14 +149,53 @@ void SpatialZoneMapper::buildDecisionIndex() {
     }
 }
 
+double SpatialZoneMapper::cameraDistance(std::uint32_t cameraIndex, const domain::WorldPoint& position) const {
+    const CameraSite& camera = cameraSites_[cameraIndex];
+    return std::hypot(position.x - camera.x, position.y - camera.y);
+}
+
+double SpatialZoneMapper::directionScore(std::uint32_t zoneIndex, const domain::WorldPoint& position) const {
+    const DirectionalZone& direction = directionalZones_[zoneIndex];
+    const CameraSite& camera = cameraSites_[direction.cameraIndex];
+    return (position.x - camera.x) * direction.forwardX + (position.y - camera.y) * direction.forwardY;
+}
+
+std::uint32_t SpatialZoneMapper::nearestCamera(const domain::WorldPoint& position) const {
+    std::uint32_t winner = 0;
+    for (std::uint32_t camera = 1; camera < cameraSites_.size(); ++camera) {
+        const double candidateDistance = cameraDistance(camera, position);
+        const double winnerDistance = cameraDistance(winner, position);
+        if (candidateDistance < winnerDistance ||
+            (candidateDistance == winnerDistance &&
+             cameraSites_[camera].lowestZoneId < cameraSites_[winner].lowestZoneId)) {
+            winner = camera;
+        }
+    }
+    return winner;
+}
+
+std::uint32_t SpatialZoneMapper::resolveDirectional(const domain::WorldPoint& position,
+                                                     std::uint32_t cameraIndex) const {
+    std::uint32_t winner = kNoZoneIndex;
+    for (std::uint32_t zoneIndex = 0; zoneIndex < directionalZones_.size(); ++zoneIndex) {
+        if (directionalZones_[zoneIndex].cameraIndex != cameraIndex) {
+            continue;
+        }
+        if (winner == kNoZoneIndex || directionScore(zoneIndex, position) > directionScore(winner, position) ||
+            (directionScore(zoneIndex, position) == directionScore(winner, position) &&
+             zones_[zoneIndex].zoneId < zones_[winner].zoneId)) {
+            winner = zoneIndex;
+        }
+    }
+    return winner;
+}
+
 std::uint32_t SpatialZoneMapper::resolveLinear(const domain::WorldPoint& position) const {
     if (directionalMode_) {
         if (!std::isfinite(position.x) || !std::isfinite(position.y)) {
             return kNoZoneIndex;
         }
-        const std::array<double, 4> scores = {position.y, position.x, -position.y, -position.x};
-        const auto winner = std::max_element(scores.begin(), scores.end());
-        return directionalZoneIndices_[static_cast<std::size_t>(winner - scores.begin())];
+        return resolveDirectional(position, nearestCamera(position));
     }
 
     for (std::size_t i = 0; i < zones_.size(); ++i) {
@@ -169,6 +228,14 @@ std::uint32_t SpatialZoneMapper::findPrevZoneIndex(veda::GlobalId gid) const {
 void SpatialZoneMapper::assign(domain::WorldFrame& frame) {
     const bool indexed = !winnerZoneIndices_.empty();
 
+    if (coverageFilterEnabled_) {
+        std::erase_if(frame.objects, [this](const domain::WorldObject& object) {
+            return std::none_of(zones_.begin(), zones_.end(), [&object](const SpatialZone& zone) {
+                return contains(zone, object.pos);
+            });
+        });
+    }
+
     currZones_.clear();                        // capacity 유지 -> warmup 이후 무할당
     currZones_.reserve(frame.objects.size());  // 이미 충분하면 no-op
 
@@ -185,10 +252,24 @@ void SpatialZoneMapper::assign(domain::WorldFrame& frame) {
             if (prevIndex != kNoZoneIndex && prevIndex < zones_.size()) {
                 if (directionalMode_) {
                     const std::uint32_t winnerIndex = resolveLinear(obj.pos);
-                    if (winnerIndex != kNoZoneIndex &&
-                        directionScore(zones_[prevIndex].zoneId, obj.pos) + hysteresisMargin_ >=
-                            directionScore(zones_[winnerIndex].zoneId, obj.pos)) {
-                        zoneIndex = prevIndex;
+                    if (winnerIndex != kNoZoneIndex) {
+                        const std::uint32_t previousCamera = directionalZones_[prevIndex].cameraIndex;
+                        const std::uint32_t winnerCamera = directionalZones_[winnerIndex].cameraIndex;
+                        std::uint32_t selectedCamera = winnerCamera;
+                        if (previousCamera != winnerCamera &&
+                            cameraDistance(previousCamera, obj.pos) <=
+                                cameraDistance(winnerCamera, obj.pos) + hysteresisMargin_) {
+                            selectedCamera = previousCamera;
+                        }
+
+                        const std::uint32_t selectedWinner = resolveDirectional(obj.pos, selectedCamera);
+                        if (previousCamera == selectedCamera &&
+                            directionScore(prevIndex, obj.pos) + hysteresisMargin_ >=
+                                directionScore(selectedWinner, obj.pos)) {
+                            zoneIndex = prevIndex;
+                        } else {
+                            zoneIndex = selectedWinner;
+                        }
                     }
                 } else if (containsExpanded(zones_[prevIndex], obj.pos, hysteresisMargin_)) {
                     zoneIndex = prevIndex;
@@ -208,14 +289,31 @@ void SpatialZoneMapper::assign(domain::WorldFrame& frame) {
                                  std::to_string(obj.pos.y) + ") 을 어느 zone에도 배정할 수 없음 — 미배정으로 남김");
         }
 
-        currZones_.push_back(GidZone{obj.gid, zoneIndex});
+        currZones_.push_back(GidZone{obj.gid, zoneIndex, 0});
     }
 
     // findPrevZoneIndex 가 이진 탐색을 쓰므로 gid 오름차순이어야 한다.
     // (융합 결과는 클러스터 순서라 gid 정렬을 보장하지 않는다)
     std::sort(currZones_.begin(), currZones_.end(), [](const GidZone& a, const GidZone& b) { return a.gid < b.gid; });
 
-    // swap 으로 세대 교체 -- 이번 프레임에 없던 gid 는 자동 소거된다(누수 없음).
+    // 현재 프레임에 없는 이력은 짧게 유지한다. 객체를 WorldFrame에 되살리지 않고 zone 선택
+    // 이력만 보존하므로 Risk/Qt/HW에는 오래된 좌표가 전달되지 않는다.
+    std::size_t retainedCount = 0;
+    for (GidZone previous : prevZones_) {
+        const auto observed = std::lower_bound(
+            currZones_.begin(), currZones_.end(), previous.gid,
+            [](const GidZone& entry, veda::GlobalId gid) { return entry.gid < gid; });
+        if ((observed == currZones_.end() || observed->gid != previous.gid) &&
+            previous.missedWindows < kMaxMissedWindows) {
+            ++previous.missedWindows;
+            prevZones_[retainedCount++] = previous;
+        }
+    }
+    prevZones_.resize(retainedCount);
+    currZones_.insert(currZones_.end(), prevZones_.begin(), prevZones_.end());
+    std::sort(currZones_.begin(), currZones_.end(), [](const GidZone& a, const GidZone& b) { return a.gid < b.gid; });
+
+    // swap 으로 세대 교체. 5개 윈도우를 넘긴 미관측 gid 는 자동 소거된다.
     // 두 벡터의 capacity 가 서로 오갈 뿐 해제는 일어나지 않는다.
     prevZones_.swap(currZones_);
 

@@ -47,13 +47,8 @@
  * -> byGid_ 의 각 항목은 이번 윈도우에 갱신되지 않으면 missedWindows 를 늘리고,
  *    kMaxMissedWindows(5)를 넘겨야 제거됨 -- 전역으로 한 번에 껐다 켜는 카운터가 아니라
  *    실체별로 독립적이라, 한 실체가 잠깐 안 보여도 다른 실체의 추적엔 영향이 없음
- * -- 그런데 gid 만 안정화하고 나니 다른 문제가 드러났음: 이번 윈도우에 감지 못 한 실체는
- *    worldFrame.objects 에 아예 안 들어가므로, 클라이언트(Qt)가 받는 RiskFrame 에서 그
- *    실체가 잠깐씩 사라졌다 나타나길 반복 -> 화면이 깜빡이는 것처럼 보임
- * -> 유예 기간(missedWindows <= kMaxMissedWindows) 안에서 이번 윈도우에 못 본 실체도
- *    byGid_ 에 남아있는 마지막 좌표 그대로 worldFrame.objects 에 채워 넣음("coast").
- *    새 필드 없이 기존 RiskObject 그대로 나가므로, 유예 기간 동안은 좌표가 그 자리에
- *    고정된 채로 계속 보이다가, 정말로 kMaxMissedWindows 를 넘겨야 화면에서도 사라짐
+ * -- 유예 중인 실체는 GID 재연결용 내부 상태로만 유지한다. 마지막 좌표를 현재 WorldFrame에
+ *    넣으면 ZoneMapper와 RiskPolicy가 실제 관측처럼 다시 평가해 허위 위험을 만들 수 있다.
  *
  * @note [ 클러스터 채널 중복 판정 ]
  * "한 클러스터에 같은 채널이 두 번 들어가면 안 된다"(= 한 카메라가 본 서로 다른 실체를

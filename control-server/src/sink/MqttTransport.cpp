@@ -116,6 +116,7 @@ void fillRiskFrame(const domain::WorldFrame& frame, veda::RiskFrame& out) {
         object.gid = source.gid;
         object.cls = source.cls;
         object.pos = veda::WorldPoint{source.pos.x, source.pos.y};
+        object.zoneId = source.zoneId;
         object.level = source.riskLevel;
         object.nearest = source.nearestObj;
         object.dist = source.nearestDist;
@@ -278,7 +279,9 @@ void MqttTransport::send(const domain::WorldFrame& frame) {
         // riskScratch_/riskPayloadBuf_ 는 send()(파이프라인 단일 스레드)에서만 접근하므로 락 불필요.
         fillRiskFrame(frame, riskScratch_);
         veda::encodeInto(riskScratch_, riskPayloadBuf_);
-        publish(publishTopic_, riskPayloadBuf_, veda::qos::kRisk, false);
+        if (publish(publishTopic_, riskPayloadBuf_, veda::qos::kRisk, false) && isLogEnabled(LogLevel::Debug)) {
+            logDebug(kIface, "Top-View 발행 topic=" + publishTopic_ + " frame=" + riskPayloadBuf_);
+        }
     } catch (const std::exception& error) {
         logError(kIface, std::string("WorldFrame 발행 실패: ") + error.what());
     } catch (...) {

@@ -5,7 +5,8 @@
  * @brief   시간 윈도우 기반 프레임 집계기 (저지연/무할당)
  *
  * @details
- * 정책: 채널당 이번 윈도우의 '최신 프레임 하나'만 유지하고, 윈도우가 닫히면 묶어서 콜백에 넘긴다.
+ * Policy: keep the last arriving snapshot per channel.
+ * Do not compare timestamps across CCTV devices; forward every channel received in the current window.
  *
  * 설계 원칙 3가지 (우선순위 순):
  *  1) 지연  -- 콜백(=다운스트림 파이프라인 전체)을 mutex_ 밖에서 호출한다. 락 안에서 부르면
@@ -25,10 +26,12 @@
  */
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "aggregate/FrameBufferPool.h"
@@ -54,13 +57,15 @@ public:
      * @throws std::invalid_argument channelCount 가 [1, kMaxChannelCount] 밖이거나 clock 이 null
      */
     TimeWindowAggregatorV2(std::shared_ptr<IClock> clock, uint64_t windowSizeMs, int channelCount);
-    ~TimeWindowAggregatorV2() override = default;
+    ~TimeWindowAggregatorV2() override;
 
+    void start() override;
+    void stop() override;
     void setCallback(AggregationCallback callback) override;
     void push(const veda::TopViewFrame& frame) override;
 
 private:
-    /// @brief 슬롯 -> 풀 버퍼로 swap 해 묶음을 만든다 (mutex_ 를 쥔 채 호출)
+    /// @brief Moves every slot filled in the current window into the pool buffer. Called with mutex_ held.
     void fillFlushBufferLocked(FrameBufferPool::Buffer& out);
 
     /// @brief 채워진 슬롯을 비운다. capacity 는 유지 (mutex_ 를 쥔 채 호출)
@@ -71,6 +76,9 @@ private:
      * @param   now push() 가 이미 측정해 둔 시각 -- 여기서 다시 clock 을 읽지 않는다
      */
     std::string buildMetricsReportIfDue(std::chrono::steady_clock::time_point now);
+
+    /// @brief 입력이 더 오지 않아도 첫 프레임 기준 windowSizeMs 뒤에 윈도우를 마감한다.
+    void flushLoop();
 
     static constexpr std::chrono::milliseconds kMetricsReportInterval{5000};
 
@@ -83,6 +91,7 @@ private:
     int channelCount_;
 
     std::mutex mutex_;
+    std::condition_variable windowCv_;
     AggregationCallback callback_;
 
     /// @brief 인덱스 = channelId. optional 대신 평범한 벡터 -- reset() 이 objects 버퍼를
@@ -91,6 +100,9 @@ private:
     std::vector<std::uint8_t> occupied_;         ///< 인덱스 = channelId (0/1)
     std::vector<veda::ChannelId> activeChannels_;  ///< 이번 윈도우에 채워진 채널만 (마감 시 순회 대상)
     veda::TimestampMs windowStartTime_ = 0;
+    std::chrono::steady_clock::time_point windowDeadline_{};
+    std::thread flushThread_;
+    bool running_ = false;
 
     FrameBufferPool flushPool_;
 

@@ -13,6 +13,7 @@
 #include <iostream>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -69,8 +70,9 @@ inline void from_json(const nlohmann::json& j, RiskConfig& r) {
 /**
  * @brief   월드 좌표를 하드웨어 zone 에 배정하는 zone 설정
  *
- * @details zoneId 0~3이 모두 있으면 원점 기준 방향 점수 {y, x, -y, -x}로 배정하며
- *          좌표 범위 필드는 사용하지 않는다. 그 외 구성은 기존 AABB 범위로 배정한다.
+ * @details 방향 모드는 좌표 범위 합집합을 CCTV 커버리지로 사용한다. 커버리지 안에서는 가장
+ *          가까운 물리 CCTV를 먼저 선택하고 해당 CCTV의 4개 방향 채널 중 투영 점수가 가장
+ *          높은 채널을 배정한다.
  *
  * @note    zoneId 는 하드웨어 액추에이터 채널과 동일 정수다 (zoneId == channelId, 디스패치 계약).
  *          AABB 모드에서는 겹치면 선언 순서상 먼저가 이기며, 어느 상자에도 안 들면 zoneId = -1.
@@ -122,19 +124,7 @@ struct HwHealthCheckConfig {
     uint32_t mismatchRetryCount = 2;           ///< 명령-실제상태 불일치 시 재전송 횟수
     bool mismatchEscalateAfterRetries = true;  ///< 재시도 소진 시 대시보드 fault 표시 여부
 
-    /**
-     * @brief   하드웨어 이벤트 디스패처 종류
-     * @details
-     * - "serial"  : SerialHwEventDispatcher — 실제 STM32 UART 링크 (기본값)
-     * - "console" : ConsoleDispatcher — 하드웨어 없이 콘솔로만 확인 (개발/테스트용)
-     *
-     * @note 예전에는 AppContext 가 ConsoleDispatcher 를 하드코딩해서 연결하고 있었고,
-     *       SerialHwEventDispatcher.cpp 는 CMakeLists 에도 없어 빌드조차 되지 않았음
-     *       -> LED/사이렌/부저가 전혀 동작하지 않는 상태였으므로 기본값을 serial 로 둠
-     */
-    std::string dispatcher = "serial";
-
-    /// @brief STM32 가 연결된 시리얼 장치 경로 (dispatcher == "serial" 일 때)
+    /// @brief STM32가 연결된 시리얼 장치 경로
     std::string devicePath = "/dev/serial0";
 };
 
@@ -144,13 +134,7 @@ inline void from_json(const nlohmann::json& j, HwHealthCheckConfig& h) {
     h.mismatchRetryCount = veda::detail::get_or<uint32_t>(j, "mismatchRetryCount", h.mismatchRetryCount);
     h.mismatchEscalateAfterRetries =
         veda::detail::get_or<bool>(j, "mismatchEscalateAfterRetries", h.mismatchEscalateAfterRetries);
-    h.dispatcher = veda::detail::get_or<std::string>(j, "dispatcher", h.dispatcher);
     h.devicePath = veda::detail::get_or<std::string>(j, "devicePath", h.devicePath);
-    if (h.dispatcher != "serial" && h.dispatcher != "console") {
-        std::cerr << "[Config] 경고: hwHealthCheck.dispatcher=\"" << h.dispatcher
-                  << "\" 는 알 수 없는 값입니다 (serial|console) — \"serial\"로 처리합니다.\n";
-        h.dispatcher = "serial";
-    }
 }
 
 /**
@@ -189,6 +173,67 @@ inline void from_json(const nlohmann::json& j, CameraCalibration& c) {
     c.cameraPosY = veda::detail::get_or<double>(j, "cameraPosY", 0.0);
     c.facingAngleDeg = veda::detail::get_or<double>(j, "facingAngleDeg", 0.0);
     c.lateralSign = veda::detail::get_or<int>(j, "lateralSign", -1);
+}
+
+/** 모든 zone이 물리 CCTV당 4개 방향 채널로 구성됐는지 확인한다. */
+inline bool supportsDirectionalZoneMapping(const std::vector<SpatialZone>& zones,
+                                           const std::vector<CameraCalibration>& calibrations) {
+    if (zones.empty() || zones.size() % 4 != 0) {
+        return false;
+    }
+
+    std::vector<const CameraCalibration*> matched;
+    matched.reserve(zones.size());
+    for (std::size_t zoneIndex = 0; zoneIndex < zones.size(); ++zoneIndex) {
+        const SpatialZone& zone = zones[zoneIndex];
+        const double width = zone.maxX - zone.minX;
+        const double height = zone.maxY - zone.minY;
+        if (!std::isfinite(zone.minX) || !std::isfinite(zone.maxX) || !std::isfinite(zone.minY) ||
+            !std::isfinite(zone.maxY) || !(width > 0.0) || !(height > 0.0) || std::abs(width - height) > 1e-9) {
+            return false;
+        }
+        for (std::size_t previous = 0; previous < zoneIndex; ++previous) {
+            if (zones[previous].zoneId == zone.zoneId) {
+                return false;
+            }
+        }
+
+        const CameraCalibration* calibration = nullptr;
+        for (const CameraCalibration& candidate : calibrations) {
+            if (candidate.channelId == zone.zoneId) {
+                if (calibration != nullptr) {
+                    return false;
+                }
+                calibration = &candidate;
+            }
+        }
+        if (calibration == nullptr || !std::isfinite(calibration->cameraPosX) ||
+            !std::isfinite(calibration->cameraPosY) || !std::isfinite(calibration->facingAngleDeg)) {
+            return false;
+        }
+        matched.push_back(calibration);
+    }
+
+    for (std::size_t zoneIndex = 0; zoneIndex < zones.size(); ++zoneIndex) {
+        const CameraCalibration* calibration = matched[zoneIndex];
+        std::size_t channelCount = 0;
+        for (std::size_t candidateIndex = 0; candidateIndex < matched.size(); ++candidateIndex) {
+            const CameraCalibration* candidate = matched[candidateIndex];
+            if (candidate->cameraPosX == calibration->cameraPosX &&
+                candidate->cameraPosY == calibration->cameraPosY) {
+                const SpatialZone& candidateZone = zones[candidateIndex];
+                if (candidateZone.minX != zones[zoneIndex].minX || candidateZone.maxX != zones[zoneIndex].maxX ||
+                    candidateZone.minY != zones[zoneIndex].minY || candidateZone.maxY != zones[zoneIndex].maxY) {
+                    return false;
+                }
+                ++channelCount;
+            }
+        }
+        if (channelCount != 4) {
+            return false;
+        }
+    }
+    return true;
 }
 
 struct AppConfig {
@@ -258,6 +303,9 @@ struct AppConfig {
      */
     std::vector<SpatialZone> zones;
 
+    /// 최근접 물리 CCTV 선택 후 해당 CCTV의 방향 채널을 배정한다.
+    bool directionalZoneMapping = false;
+
     /**
      * @brief   zone 경계 히스테리시스 여유 폭 (m). 0 이면 히스테리시스 비활성
      *
@@ -303,6 +351,43 @@ struct AppConfig {
 
     /// @brief MqttChannelReceiver가 최초 구독/연결에 실패했을 때 재시도하는 간격 (ms)
     uint64_t mqttReceiverRetryIntervalMs = 2000;
+
+    /** 위험 판정에 필수인 zone과 채널별 카메라 보정값이 완전한지 검사한다. */
+    void validateForStartup() const {
+        if (channelCount < 1 || zones.size() != static_cast<std::size_t>(channelCount)) {
+            throw std::invalid_argument("zones must contain exactly one entry for every channel");
+        }
+
+        std::vector<bool> zoneSeen(static_cast<std::size_t>(channelCount), false);
+        for (const SpatialZone& zone : zones) {
+            if (zone.zoneId < 0 || zone.zoneId >= channelCount || zoneSeen[static_cast<std::size_t>(zone.zoneId)]) {
+                throw std::invalid_argument("zones must contain unique IDs in [0, channelCount)");
+            }
+            zoneSeen[static_cast<std::size_t>(zone.zoneId)] = true;
+        }
+
+        std::vector<bool> calibrationSeen(static_cast<std::size_t>(channelCount), false);
+        for (const CameraCalibration& calibration : cameraCalibrations) {
+            if (calibration.channelId < 0 || calibration.channelId >= channelCount ||
+                calibrationSeen[static_cast<std::size_t>(calibration.channelId)]) {
+                throw std::invalid_argument("cameraCalibrations must contain unique IDs in [0, channelCount)");
+            }
+            if (!std::isfinite(calibration.cameraPosX) || !std::isfinite(calibration.cameraPosY) ||
+                !std::isfinite(calibration.facingAngleDeg) ||
+                (calibration.lateralSign != -1 && calibration.lateralSign != 1)) {
+                throw std::invalid_argument(
+                    "camera calibration values must be finite and lateralSign must be -1 or 1");
+            }
+            calibrationSeen[static_cast<std::size_t>(calibration.channelId)] = true;
+        }
+
+        if (std::find(calibrationSeen.begin(), calibrationSeen.end(), false) != calibrationSeen.end()) {
+            throw std::invalid_argument("cameraCalibrations must contain exactly one entry for every channel");
+        }
+        if (directionalZoneMapping && !supportsDirectionalZoneMapping(zones, cameraCalibrations)) {
+            throw std::invalid_argument("directional zone mapping requires four calibrated channels per CCTV");
+        }
+    }
 
     /**
      * @brief   외부 JSON 설정 파일에서 설정값을 읽어옵니다.
@@ -361,19 +446,27 @@ struct AppConfig {
         }
         config.demoPedestrianProxy = veda::detail::get_or<bool>(j, "demoPedestrianProxy", config.demoPedestrianProxy);
         config.zones = veda::detail::get_or<std::vector<SpatialZone>>(j, "zones", config.zones);
+        bool legacyFourDirection = config.zones.size() == 4;
+        std::vector<bool> seenLegacyIds(4, false);
+        for (const SpatialZone& zone : config.zones) {
+            if (zone.zoneId < 0 || zone.zoneId >= 4 || seenLegacyIds[static_cast<std::size_t>(zone.zoneId)]) {
+                legacyFourDirection = false;
+                break;
+            }
+            seenLegacyIds[static_cast<std::size_t>(zone.zoneId)] = true;
+        }
+        config.directionalZoneMapping =
+            veda::detail::get_or<bool>(j, "directionalZoneMapping", legacyFourDirection);
         config.hysteresisMargin = veda::detail::get_or<double>(j, "hysteresisMargin", config.hysteresisMargin);
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
         config.worldBounds = veda::detail::get_or<WorldBounds>(j, "worldBounds", config.worldBounds);
 
-        bool directionalZones = config.channelCount >= 4 && config.zones.size() == 4;
-        std::vector<bool> seenDirectionalIds(4, false);
-        for (const SpatialZone& zone : config.zones) {
-            if (zone.zoneId < 0 || zone.zoneId >= 4 || seenDirectionalIds[static_cast<std::size_t>(zone.zoneId)]) {
-                directionalZones = false;
-                break;
-            }
-            seenDirectionalIds[static_cast<std::size_t>(zone.zoneId)] = true;
+        bool directionalZones = config.directionalZoneMapping;
+        if (directionalZones && !legacyFourDirection &&
+            !supportsDirectionalZoneMapping(config.zones, config.cameraCalibrations)) {
+            std::cerr << "[Config] 경고: directionalZoneMapping에는 물리 CCTV당 동일 위치의 4개 채널과 "
+                         "채널별 캘리브레이션이 필요합니다 — 시작 검증에서 거부됩니다.\n";
         }
 
         // [zone 값 검증] zoneId == channelId 이므로 하드웨어 채널 범위를 벗어난 항목을 통과시키면
@@ -507,7 +600,7 @@ struct AppConfig {
             }
             if (!found) {
                 std::cerr << "[Config] 경고: 채널 " << ch << " 의 cameraCalibrations 항목 없음 — "
-                          << "AffineLocalToWorldTransform 사용 시 이 채널은 좌표 변환 없이 통과됨\n";
+                          << "필수 캘리브레이션 누락으로 시작 검증에서 거부됨\n";
             }
         }
 
