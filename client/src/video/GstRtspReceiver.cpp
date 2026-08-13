@@ -322,6 +322,10 @@ void GstRtspReceiver::startPipeline() {
     //   렌더하므로 평시에는 큐가 비어 있어 깊이를 늘려도 지연이 늘지 않는다. 블러나 D3D11 업로드가
     //   한 프레임 늦어지는 순간에만 채워져, 이미 디코딩까지 마친 프레임을 버리는 대신 흡수한다.
     //   여기를 1로 두면 흡수량이 0이라 아주 짧은 지연도 곧바로 드롭이 된다.
+    //
+    // 포맷은 디코더가 내는 NV12를 끝까지 유지한다. videobalance/gamma/qtblur/d3d11videosink가 모두
+    // NV12를 받으므로 videoconvert는 d3d11 경로에서 통과만 하고, BGRA로 바꿀 때 들던 픽셀당 4바이트
+    // 풀프레임 변환과 그만큼 늘어난 GPU 왕복 전송이 사라진다.
     const QString videoChainDesc =
         QString(
             "rtph264depay name=depay request-keyframe=true "
@@ -332,7 +336,7 @@ void GstRtspReceiver::startPipeline() {
             "valve name=presentationvalve drop=false drop-mode=transform-to-gap "
             "! "
             "%1 ! identity name=framewatch silent=true signal-handoffs=false ! "
-            "videoconvert ! video/x-raw,format=BGRA ! "
+            "videoconvert ! video/x-raw,format=NV12 ! "
             "queue name=alignmentqueue silent=true leaky=downstream "
             "max-size-buffers=0 max-size-bytes=0 "
             "max-size-time=%6 min-threshold-time=%7 ! "

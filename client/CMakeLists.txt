@@ -376,4 +376,33 @@ if(QTCCTV_BUILD_CHECKS)
         glib-2.0
         intl
     )
+
+    add_executable(blur_processor_nv12_check
+        tests/BlurProcessorNv12Check.cpp
+        src/video/BlurProcessor.cpp
+        src/video/VideoUtcClockMapper.cpp
+    )
+
+    target_include_directories(blur_processor_nv12_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_include_directories(blur_processor_nv12_check SYSTEM PRIVATE
+        "${GSTREAMER_ROOT}/include/gstreamer-1.0"
+        "${GSTREAMER_ROOT}/include/glib-2.0"
+        "${GSTREAMER_ROOT}/lib/glib-2.0/include"
+    )
+
+    target_link_directories(blur_processor_nv12_check PRIVATE
+        "${GSTREAMER_ROOT}/lib"
+    )
+
+    target_link_libraries(blur_processor_nv12_check PRIVATE
+        Qt6::Gui
+        gstreamer-1.0
+        gstvideo-1.0
+        gobject-2.0
+        glib-2.0
+        intl
+    )
 endif()

@@ -49,9 +49,9 @@ flowchart LR
     Parse["h264parse\nH.264 정규화"]
     DecodeQueue["decodequeue\n디코딩 전 스레드 경계"]
     Valve["presentationvalve\n숨긴 채널 차단"]
-    Decoder["avdec_h264 또는\nd3d11h264dec + d3d11download"]
+    Decoder["avdec_h264 또는\nd3d11h264dec + d3d11scale + d3d11download"]
     Watch["identity framewatch\n프레임 감시"]
-    Convert["videoconvert\nBGRA 변환"]
+    Convert["videoconvert\nNV12 유지 (d3d11 경로는 passthrough)"]
     Align["alignmentqueue\n고정 지연선"]
     RenderQueue["renderqueue\n완충 겸 유일한 드롭 지점"]
     Balance["videobalance\n밝기·대비"]
@@ -63,8 +63,8 @@ flowchart LR
     Convert --> Align --> RenderQueue --> Balance --> Gamma --> Blur --> Sink
 ```
 
-`presentationvalve`는 **디코더 앞**에 있다. 화면에 없는 채널은 이 valve에서 차단되므로 디코딩, BGRA
-변환, 블러, GPU 업로드를 통째로 건너뛰고 RTSP/RTP 수신과 depay/parse만 유지한다. 구역 전환으로 숨겨진
+`presentationvalve`는 **디코더 앞**에 있다. 화면에 없는 채널은 이 valve에서 차단되므로 디코딩, 다운로드,
+블러, GPU 업로드를 통째로 건너뛰고 RTSP/RTP 수신과 depay/parse만 유지한다. 구역 전환으로 숨겨진
 채널과 영상 확대 중 가려진 채널이 모두 대상이며, 판정은 `MainWindow::isChannelVisible()` 하나가 하고
 `MainWindow::syncStreamPresentation()`이 상태를 맞춘다. 켜기를 먼저 돌리고 끄기를 나중에 돌려 전환
 중에 아무 채널도 표시되지 않는 구간이 생기지 않게 한다.
@@ -238,7 +238,7 @@ GStreamer 기준으로 `videobalance brightness=0`, `contrast=1`, `gamma gamma=1
 `videobalance`와 `gamma` property에 적용한다. 사용 체크를 해제하면 즉시 중립값으로 돌아가고 두
 요소를 passthrough로 전환한다.
 
-전처리는 BGRA raw frame 전체를 순회할 수 있으므로 해상도와 채널 수에 비례해 CPU/GPU memory
+전처리는 NV12 raw frame 전체를 순회할 수 있으므로 해상도와 채널 수에 비례해 CPU/GPU memory
 bandwidth를 사용한다. 지연이 중요하면 먼저 중립값 또는 전처리 OFF 상태와 비교한다.
 
 ## 5. MQTT 블러와 영상 시간 동기화
@@ -255,7 +255,7 @@ flowchart TD
     Mapper --> VideoUtc["영상 frame UTC"]
     Mqtt["MQTT blur ts 이력"] --> Match["가장 가까운 timestamp 검색"]
     VideoUtc --> Offset["fallback일 때 syncOffsetMs 보정"] --> Match
-    Match --> Hold["공백이면 제한 시간 동안 직전 좌표 유지"] --> Blur["BGRA frame box blur"]
+    Match --> Hold["공백이면 제한 시간 동안 직전 좌표 유지"] --> Blur["NV12 평면별 box blur"]
 ```
 
 ### 블러 설정
@@ -307,7 +307,7 @@ passthrough가 아니면 `GstBaseTransform`이 매 frame 버퍼를 쓰기 가능
 + GOV에서 다음 decodable frame을 기다리는 시간
 + 네트워크 전송 및 rtspsrc jitterbuffer
 + decodequeue 대기와 디코딩
-+ BGRA 변환
++ 시스템 메모리 다운로드 (d3d11 경로)
 + alignmentqueue의 의도적 대기
 + 전처리와 블러 연산
 + renderqueue 및 화면 출력
@@ -422,9 +422,9 @@ profile4 설정에서 다시 확인해야 한다.
 | 짧게 끊기거나 깨짐 | packet loss, `latencyMs`, `udpBufferSizeBytes`, NVR bitrate/GOV |
 | 블러가 사람 뒤를 따라감 | RTCP reference 사용 여부, `alignmentDelayMs`, `syncOffsetMs`, MQTT timestamp |
 | 블러가 순간 사라짐 | `matchToleranceMs`, `holdLastMetadataMs`, metadata 누락 |
-| 전처리 ON에서 지연 증가 | brightness/contrast/gamma가 중립인지, BGRA frame 처리 CPU |
+| 전처리 ON에서 지연 증가 | brightness/contrast/gamma가 중립인지, raw frame 처리 CPU |
 | 재연결이 너무 늦음 | packet/frame/stall timeout을 구분하고 transport timeout과 혼동하지 않기 |
-| CPU가 높음 | `decoderMode`, software decoder thread 수, BGRA 변환, blur 영역 크기 |
+| CPU가 높음 | `decoderMode`, software decoder thread 수, `processingWidth/Height`, blur 영역 크기 |
 
 ## 10. 변경 시 체크리스트
 
@@ -463,7 +463,7 @@ GStreamer 1.28.4에서 `gst-inspect-1.0`으로 실측한 값이다. "이 요인�
 | 2 | 지터버퍼가 기본값의 1/8이고 초과분을 버림 | `rtspsrc` 기본값 `latency=2000`, `drop-on-latency=false` → 현재 `250`/`true` | 저지연 우선으로 **유지** |
 | 3 | 렌더 queue 흡수량 0 | queue 문서의 `leaky`/`max-size-*` 의미. 이전 `max-size-buffers=1` | **수정됨** (3으로 상향) |
 | 4 | 정렬 queue가 흡수에 기여하지 않음 | queue 문서의 `min-threshold-time` 의미 | 구조상 불가피. 3장에 명시 |
-| 5 | 매 frame GPU→CPU→GPU 왕복 | `d3d11download` + `videoconvert`(BGRA) + sink 재업로드. `videoconvert n-threads` 기본값 **1** | 블러가 CPU 접근을 요구해 구조상 유지 |
+| 5 | 매 frame GPU→CPU→GPU 왕복 | `d3d11download` + sink 재업로드 | **완화됨** (NV12 유지 + 다운로드 전 축소). 블러가 CPU 접근을 요구해 왕복 자체는 유지 |
 | 6 | 블러 미사용 시에도 frame 매핑 | GstBaseTransform 문서의 `always_in_place` 복사 규칙 | **수정됨** (passthrough 적용) |
 
 ### 1번이 중요한 이유
@@ -485,10 +485,18 @@ GOV가 큰 카메라에서는 더 길어진다.
 
 ### 5번의 규모
 
-채널마다 매 frame GPU에서 내려받아 단일 코어로 NV12→BGRA로 변환하고, CPU 박스 블러를 적용한 뒤,
-sink가 다시 GPU로 올린다. 720p BGRA는 frame당 약 3.5 MB, 1080p는 약 8.3 MB다. 이 왕복은 CPU 블러가
-raw frame 접근을 요구하기 때문에 생기며, pipeline caps에 `video/x-raw,format=BGRA`가 고정돼 있어
-블러를 꺼도 사라지지 않는다. 부하가 문제가 되면 `videoconvert n-threads` 상향을 먼저 시험한다.
+채널마다 매 frame GPU에서 내려받아 CPU 박스 블러를 적용한 뒤 sink가 다시 GPU로 올린다. 이 왕복은
+CPU 블러가 raw frame 접근을 요구하기 때문에 생기므로 **블러를 꺼도 사라지지 않는다.** 다만 왕복하는
+양은 두 가지로 줄여 두었다.
+
+- **포맷**: pipeline caps가 `NV12`다. 디코더 출력 그대로라 `videoconvert`가 d3d11 경로에서
+  passthrough로 빠진다(`basetransform` 로그의 "element is in passthrough"로 확인). 이전 `BGRA`
+  고정은 픽셀당 4바이트 풀프레임 변환과 2.7배 큰 전송을 매 frame 강제했다.
+- **해상도**: `processingWidth`/`processingHeight`가 설정돼 있으면 `d3d11scale`이 **다운로드 전에**
+  GPU에서 줄인다.
+
+frame당 전송량은 1080p 기준 BGRA 8.29 MB → NV12 3.11 MB → NV12 720p 1.38 MB로 바뀐다.
+`videobalance`/`gamma`/블러가 훑는 바이트도 같은 비율로 줄어든다.
 
 ### QML 전환은 영상 경로와 무관하다 (검토 완료)
 

@@ -24,7 +24,7 @@ G_DEFINE_TYPE(GstQtBlurFilter, gst_qt_blur_filter, GST_TYPE_VIDEO_FILTER)
 /**
  * @brief       GStreamer가 제공한 쓰기 가능한 프레임에 블러를 적용합니다.
  * @param filter 블러 필터 인스턴스
- * @param frame  쓰기 가능한 BGRA 영상 프레임
+ * @param frame  쓰기 가능한 NV12 영상 프레임
  * @return      다음 요소로 프레임을 전달하기 위한 흐름 상태
  */
 GstFlowReturn transformFrameInPlace(GstVideoFilter* filter, GstVideoFrame* frame) {
@@ -45,7 +45,8 @@ void gst_qt_blur_filter_class_init(GstQtBlurFilterClass* klass) {
     auto* elementClass = GST_ELEMENT_CLASS(klass);
     auto* videoFilterClass = GST_VIDEO_FILTER_CLASS(klass);
 
-    GstCaps* caps = gst_caps_from_string("video/x-raw,format=(string)BGRA");
+    // 디코더가 내는 NV12를 그대로 받는다. BGRA로 바꾸면 그 변환 비용을 매 프레임 물어야 한다
+    GstCaps* caps = gst_caps_from_string("video/x-raw,format=(string)NV12");
     GstPadTemplate* sinkTemplate = gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_ref(caps));
     GstPadTemplate* sourceTemplate = gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_ref(caps));
     gst_caps_unref(caps);
@@ -53,7 +54,7 @@ void gst_qt_blur_filter_class_init(GstQtBlurFilterClass* klass) {
     gst_element_class_add_pad_template(elementClass, sinkTemplate);
     gst_element_class_add_pad_template(elementClass, sourceTemplate);
     gst_element_class_set_static_metadata(elementClass, "Qt blur filter", "Filter/Effect/Video",
-                                          "Applies MQTT blur regions to writable BGRA frames", "Qt CCTV Client");
+                                          "Applies MQTT blur regions to writable NV12 frames", "Qt CCTV Client");
 
     videoFilterClass->transform_frame_ip = &transformFrameInPlace;
 }

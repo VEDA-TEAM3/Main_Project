@@ -88,22 +88,29 @@ QRectF interpolatedRect(const QRectF& first, const QRectF& second, double ratio)
     return QRectF(topLeft, bottomRight);
 }
 
-/**
- * @brief           BGRA 프레임의 지정 영역에 2-pass box blur를 적용합니다.
- * @param frame     수정할 영상 프레임
- * @param sourceBox 정규화된 블러 영역
- * @param scratch   재사용할 중간 버퍼
- */
-void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<guint8>& scratch,
-                  const BlurProcessorConfig& config) {
-    if (GST_VIDEO_FRAME_FORMAT(&frame) != GST_VIDEO_FORMAT_BGRA) {
-        return;
-    }
+/** @brief 평면 좌표계로 환산한 원형 블러 영역 */
+struct BlurRegionGeometry {
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+    double centerX = 0.0;
+    double centerY = 0.0;
+    double radius = 0.0;
+};
 
-    const int frameWidth = GST_VIDEO_FRAME_WIDTH(&frame);
-    const int frameHeight = GST_VIDEO_FRAME_HEIGHT(&frame);
+/**
+ * @brief             정규화 상자를 프레임 픽셀 기준 원형 영역으로 바꿉니다.
+ * @param sourceBox   정규화된 블러 영역
+ * @param frameWidth  프레임 가로 픽셀 수
+ * @param frameHeight 프레임 세로 픽셀 수
+ * @param geometry    변환된 영역
+ * @return            블러를 적용할 만한 크기면 true
+ */
+bool blurRegionGeometry(const QRectF& sourceBox, int frameWidth, int frameHeight, const BlurProcessorConfig& config,
+                        BlurRegionGeometry& geometry) {
     if (frameWidth <= 0 || frameHeight <= 0) {
-        return;
+        return false;
     }
 
     const double paddingX = sourceBox.width() * config.paddingRatio;
@@ -115,86 +122,144 @@ void applyBoxBlur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gui
     const int boxTop = normalizedFloorPixel(paddedBox.top(), frameHeight);
     const int boxRight = normalizedCeilPixel(paddedBox.right(), frameWidth);
     const int boxBottom = normalizedCeilPixel(paddedBox.bottom(), frameHeight);
-    const double centerX = static_cast<double>(boxLeft + boxRight) / 2.0;
-    const double centerY = static_cast<double>(boxTop + boxBottom) / 2.0;
-    const double circleRadius =
+    geometry.centerX = static_cast<double>(boxLeft + boxRight) / 2.0;
+    geometry.centerY = static_cast<double>(boxTop + boxBottom) / 2.0;
+    geometry.radius =
         std::hypot(static_cast<double>(boxRight - boxLeft), static_cast<double>(boxBottom - boxTop)) / 2.0;
-    const int left = boundedFloorPixel(centerX - circleRadius, frameWidth);
-    const int top = boundedFloorPixel(centerY - circleRadius, frameHeight);
-    const int right = boundedCeilPixel(centerX + circleRadius, frameWidth);
-    const int bottom = boundedCeilPixel(centerY + circleRadius, frameHeight);
-    const int regionWidth = right - left;
-    const int regionHeight = bottom - top;
-    if (regionWidth < 2 || regionHeight < 2) {
+
+    geometry.left = boundedFloorPixel(geometry.centerX - geometry.radius, frameWidth);
+    geometry.top = boundedFloorPixel(geometry.centerY - geometry.radius, frameHeight);
+    geometry.width = boundedCeilPixel(geometry.centerX + geometry.radius, frameWidth) - geometry.left;
+    geometry.height = boundedCeilPixel(geometry.centerY + geometry.radius, frameHeight) - geometry.top;
+    return geometry.width >= 2 && geometry.height >= 2;
+}
+
+/**
+ * @brief       휘도 영역에 대응하는 절반 해상도 색차 영역을 만듭니다.
+ * @param luma  휘도 평면 기준 영역
+ * @return      색차 평면(가로·세로 1/2) 기준 영역
+ */
+BlurRegionGeometry chromaRegionGeometry(const BlurRegionGeometry& luma) {
+    BlurRegionGeometry chroma;
+    chroma.left = luma.left / 2;
+    chroma.top = luma.top / 2;
+    chroma.width = (luma.left + luma.width + 1) / 2 - chroma.left;
+    chroma.height = (luma.top + luma.height + 1) / 2 - chroma.top;
+    chroma.centerX = luma.centerX / 2.0;
+    chroma.centerY = luma.centerY / 2.0;
+    chroma.radius = luma.radius / 2.0;
+    return chroma;
+}
+
+/**
+ * @brief                 평면 하나의 지정 영역에 2-pass box blur를 적용합니다.
+ * @param pixels          평면 시작 주소
+ * @param stride          평면 한 줄의 바이트 수
+ * @param pixelStride     한 픽셀(샘플)이 차지하는 바이트 수
+ * @param componentCount  픽셀 안에서 블러할 성분 개수
+ * @param region          평면 좌표 기준 원형 영역
+ * @param radius          box blur 반경(샘플)
+ * @param scratch         재사용할 중간 버퍼
+ *
+ * @details 가로 패스는 슬라이딩 합이라 반경과 무관하게 영역 면적에 선형이다. NV12는 휘도
+ *          평면(성분 1개, 간격 1바이트)과 색차 평면(U,V 2개, 간격 2바이트)을 각각 호출한다.
+ */
+void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentCount, const BlurRegionGeometry& region,
+                     int radius, std::vector<guint8>& scratch) {
+    if (!pixels || region.width < 2 || region.height < 2 || radius < 1) {
         return;
     }
 
-    auto* pixels = static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
-    const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
-    const int radius = std::clamp(std::min(regionWidth, regionHeight) / config.radiusDivisor, config.minimumRadius,
-                                  config.maximumRadius);
-    constexpr int colorChannels = 3;
-    const size_t scratchSize = static_cast<size_t>(regionWidth) * regionHeight * colorChannels;
+    const size_t scratchSize = static_cast<size_t>(region.width) * region.height * componentCount;
     if (scratch.size() < scratchSize) {
         scratch.resize(scratchSize);
     }
 
-    for (int localY = 0; localY < regionHeight; ++localY) {
-        const guint8* sourceRow = pixels + (top + localY) * stride + left * 4;
-        for (int channel = 0; channel < colorChannels; ++channel) {
+    for (int localY = 0; localY < region.height; ++localY) {
+        const guint8* sourceRow = pixels + (region.top + localY) * stride + region.left * pixelStride;
+        for (int component = 0; component < componentCount; ++component) {
             quint64 sum = 0;
-            int windowEnd = std::min(radius, regionWidth - 1);
+            int windowEnd = std::min(radius, region.width - 1);
             for (int x = 0; x <= windowEnd; ++x) {
-                sum += sourceRow[x * 4 + channel];
+                sum += sourceRow[x * pixelStride + component];
             }
 
-            for (int x = 0; x < regionWidth; ++x) {
+            for (int x = 0; x < region.width; ++x) {
                 const int windowStart = std::max(0, x - radius);
-                windowEnd = std::min(regionWidth - 1, x + radius);
+                windowEnd = std::min(region.width - 1, x + radius);
                 const int count = windowEnd - windowStart + 1;
-                scratch[(static_cast<size_t>(localY) * regionWidth + x) * colorChannels + channel] =
+                scratch[(static_cast<size_t>(localY) * region.width + x) * componentCount + component] =
                     static_cast<guint8>(sum / static_cast<quint64>(count));
 
                 const int removeX = x - radius;
                 const int addX = x + radius + 1;
                 if (removeX >= 0) {
-                    sum -= sourceRow[removeX * 4 + channel];
+                    sum -= sourceRow[removeX * pixelStride + component];
                 }
-                if (addX < regionWidth) {
-                    sum += sourceRow[addX * 4 + channel];
+                if (addX < region.width) {
+                    sum += sourceRow[addX * pixelStride + component];
                 }
             }
         }
     }
 
-    for (int localX = 0; localX < regionWidth; ++localX) {
-        for (int channel = 0; channel < colorChannels; ++channel) {
+    for (int localX = 0; localX < region.width; ++localX) {
+        for (int component = 0; component < componentCount; ++component) {
             quint64 sum = 0;
-            int windowEnd = std::min(radius, regionHeight - 1);
+            int windowEnd = std::min(radius, region.height - 1);
             for (int y = 0; y <= windowEnd; ++y) {
-                sum += scratch[(static_cast<size_t>(y) * regionWidth + localX) * colorChannels + channel];
+                sum += scratch[(static_cast<size_t>(y) * region.width + localX) * componentCount + component];
             }
 
-            for (int localY = 0; localY < regionHeight; ++localY) {
+            for (int localY = 0; localY < region.height; ++localY) {
                 const int windowStart = std::max(0, localY - radius);
-                windowEnd = std::min(regionHeight - 1, localY + radius);
+                windowEnd = std::min(region.height - 1, localY + radius);
                 const int count = windowEnd - windowStart + 1;
-                if (isInsideCircularRegion(left + localX, top + localY, centerX, centerY, circleRadius)) {
-                    guint8* targetPixel = pixels + (top + localY) * stride + (left + localX) * 4;
-                    targetPixel[channel] = static_cast<guint8>(sum / static_cast<quint64>(count));
+                if (isInsideCircularRegion(region.left + localX, region.top + localY, region.centerX, region.centerY,
+                                           region.radius)) {
+                    guint8* targetPixel =
+                        pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
+                    targetPixel[component] = static_cast<guint8>(sum / static_cast<quint64>(count));
                 }
 
                 const int removeY = localY - radius;
                 const int addY = localY + radius + 1;
                 if (removeY >= 0) {
-                    sum -= scratch[(static_cast<size_t>(removeY) * regionWidth + localX) * colorChannels + channel];
+                    sum -= scratch[(static_cast<size_t>(removeY) * region.width + localX) * componentCount + component];
                 }
-                if (addY < regionHeight) {
-                    sum += scratch[(static_cast<size_t>(addY) * regionWidth + localX) * colorChannels + channel];
+                if (addY < region.height) {
+                    sum += scratch[(static_cast<size_t>(addY) * region.width + localX) * componentCount + component];
                 }
             }
         }
     }
+}
+
+/**
+ * @brief           NV12 프레임의 지정 영역을 휘도·색차 평면 모두에 블러 처리합니다.
+ * @param frame     수정할 영상 프레임
+ * @param sourceBox 정규화된 블러 영역
+ * @param scratch   재사용할 중간 버퍼
+ *
+ * @details 디코더가 내는 NV12를 그대로 처리해 BGRA 변환을 없앤다. 같은 영역이라도 다루는
+ *          바이트가 4바이트/픽셀에서 1.5바이트/픽셀로 줄어 연산량도 함께 줄어든다.
+ */
+void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<guint8>& scratch,
+                   const BlurProcessorConfig& config) {
+    BlurRegionGeometry luma;
+    if (!blurRegionGeometry(sourceBox, GST_VIDEO_FRAME_WIDTH(&frame), GST_VIDEO_FRAME_HEIGHT(&frame), config, luma)) {
+        return;
+    }
+
+    const int lumaRadius = std::clamp(std::min(luma.width, luma.height) / config.radiusDivisor, config.minimumRadius,
+                                      config.maximumRadius);
+    blurPlaneRegion(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)),
+                    GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0), 1, 1, luma, lumaRadius, scratch);
+
+    // 색차는 U와 V가 번갈아 놓인 절반 해상도 평면이라 반경도 절반으로 본다
+    blurPlaneRegion(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 1)),
+                    GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1), 2, 2, chromaRegionGeometry(luma),
+                    std::max(1, lumaRadius / 2), scratch);
 }
 }  // namespace
 
@@ -296,7 +361,7 @@ void BlurProcessor::clear() {
 
 /**
  * @brief       GStreamer가 제공한 쓰기 가능한 영상 프레임에 현재 시각과 가장 가까운 블러 좌표를 적용합니다.
- * @param frame BGRA 영상 프레임
+ * @param frame NV12 영상 프레임
  */
 void BlurProcessor::apply(GstVideoFrame& frame) {
     const std::optional<VideoUtcTimestamp> frameTimestamp = utcClockMapper_.timestampFor(frame.buffer);
@@ -312,12 +377,12 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
         return;
     }
 
-    if (GST_VIDEO_FRAME_FORMAT(&frame) != GST_VIDEO_FORMAT_BGRA) {
+    if (GST_VIDEO_FRAME_FORMAT(&frame) != GST_VIDEO_FORMAT_NV12) {
         return;
     }
 
     for (const QRectF& region : regions) {
-        applyBoxBlur(frame, region, scratch_, config_);
+        applyNv12Blur(frame, region, scratch_, config_);
     }
 
     qint64 lastLogMsec = lastApplyLogMsec_.load(std::memory_order_relaxed);
