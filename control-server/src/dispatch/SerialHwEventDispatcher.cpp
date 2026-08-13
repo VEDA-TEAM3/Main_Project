@@ -5,7 +5,43 @@
 #include <unistd.h>
 
 #include <cstring>
+<<<<<<< HEAD
 #include <iostream>
+=======
+#include <string>
+#include <vector>
+
+#include "Logger.h"
+#include "dispatch/SerialEventEncoding.h"
+
+namespace {
+constexpr const char* kIface = "HwDispatcher";
+
+/**
+ * @brief   veda_uplink_packet_t 의 개별 LED 상태를 RiskLevel 로 디코드
+ * @details driver_protocol.h 의 veda_uplink_packet_t 에는 risk_level 필드가 없고,
+ *          STM32 가 실제로 켜고 있는 led_red/led_yellow/led_green 불리언만 올라온다
+ *          (하행 veda_risk_event_t.risk_level 과 대칭이 아님).
+ *          신호등 관례: led_red -> Danger, led_yellow -> Warning, 그 외 -> None.
+ *          두 LED 가 동시에 켜진 경우(전이 중 순간 등) 더 위험한 쪽을 우선한다.
+ */
+veda::RiskLevel decodeRiskLevel(const veda_uplink_packet_t& pkt) {
+    if (pkt.led_red)
+        return veda::RiskLevel::Danger;
+    if (pkt.led_yellow)
+        return veda::RiskLevel::Warning;
+    return veda::RiskLevel::None;
+}
+
+/// @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
+HwIndicatorState decodeIndicators(const veda_uplink_packet_t& pkt) {
+    return HwIndicatorState{static_cast<bool>(pkt.siren_on), static_cast<bool>(pkt.buzzer_on),
+                            static_cast<bool>(pkt.led_red), static_cast<bool>(pkt.led_yellow),
+                            static_cast<bool>(pkt.led_green)};
+}
+
+}  // namespace
+>>>>>>> 194f11d (feat:[TP-217] dispatch 메뉴얼 및 보안 감사 작성 보안 패치 권고 작성)
 
 SerialHwEventDispatcher::SerialHwEventDispatcher(std::string devicePath, uint32_t heartbeatIntervalMs,
                                                  uint32_t missedBeatsForTimeout)
@@ -32,11 +68,6 @@ SerialHwEventDispatcher::~SerialHwEventDispatcher() {
     }
 }
 
-/**
- * @details 포트를 못 열어도 예외를 던지지 않는다(AppConfig::load와 동일한 원칙).
- *          fd_ == -1로 남기고, dispatch()/readerLoop()가 이를 감지해 조용히 스킵한다.
- *          TODO: 재연결 로직은 없음 — 지금은 서버 재시작으로만 복구 가능
- */
 void SerialHwEventDispatcher::openPort() {
     fd_ = open(devicePath_.c_str(), O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
@@ -70,11 +101,6 @@ void SerialHwEventDispatcher::openPort() {
     std::cout << "[SerialHwEventDispatcher] " << devicePath_ << " 연결됨 (115200 8N1)\n";
 }
 
-/**
- * @details ConsoleDispatcher와 동일하게 이전에 실제로 전송 성공한 값과 비교해 변경분만 보낸다.
- *          IHwEventDispatcher.h의 @note대로, 비교 기준은 "마지막 전송 성공 값"이어야 유실 시
- *          재전송 누락이 안 생긴다 — write()가 실패하면 lastSentLevel_을 갱신하지 않는다.
- */
 void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     if (fd_ < 0) {
         return;
@@ -113,12 +139,15 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     }
 }
 
+<<<<<<< HEAD
 /**
  * @details readerLoop()는 콜백 등록 여부와 무관하게 생성 시점부터 계속 heartbeat를 수신해
  *          aliveState_를 갱신해왔다. 여기서 콜백을 뒤늦게 등록하면, 등록 이전에 이미 파악된
  *          채널별 상태는 다음 전환(alive↔dead)이 생길 때까지 통지되지 않으므로,
  *          등록 즉시 현재 aliveState_ 스냅샷을 한 번 통지해 그 공백을 없앤다.
  */
+=======
+>>>>>>> 194f11d (feat:[TP-217] dispatch 메뉴얼 및 보안 감사 작성 보안 패치 권고 작성)
 void SerialHwEventDispatcher::setStatusCallback(StatusCallback callback) {
     std::lock_guard<std::mutex> lock(heartbeatMutex_);
     statusCallback_ = std::move(callback);
@@ -130,11 +159,6 @@ void SerialHwEventDispatcher::setStatusCallback(StatusCallback callback) {
     }
 }
 
-/**
- * @details STM32 rx_task와 대칭인 상행 프레임 동기화 상태머신.
- *          START_BYTE를 찾을 때까지 앞의 쓰레기 바이트는 건너뛰고, payload(16B)+checksum+END_BYTE가
- *          모두 맞아야 유효한 프레임으로 처리한다. 체크섬/END가 어긋나면 조용히 버리고 재동기화.
- */
 void SerialHwEventDispatcher::readerLoop() {
     enum State { WAIT_START, READ_PAYLOAD, READ_CHECKSUM, WAIT_END };
     State state = WAIT_START;
@@ -195,7 +219,128 @@ void SerialHwEventDispatcher::handleUplinkFrame(const veda_uplink_packet_t& pkt)
     // dispatch()가 마지막으로 보낸 값과 이 ACK의 siren/buzzer/led 값을 비교해야 함.
 }
 
+<<<<<<< HEAD
 void SerialHwEventDispatcher::markAlive(veda::ChannelId ch) {
+=======
+void SerialHwEventDispatcher::checkChannelMismatch(const veda_uplink_packet_t& pkt) {
+    const auto ch = static_cast<veda::ChannelId>(pkt.channel_id);
+    const veda::RiskLevel reportedLevel = decodeRiskLevel(pkt);
+
+    std::lock_guard<std::mutex> lock(sendStateMutex_);
+
+    // ============================================================================
+    // ⚠  하중을 견디는 가정 (LOAD-BEARING ASSUMPTION): zoneId == channelId
+    // ----------------------------------------------------------------------------
+    // 이 불일치/fault 로직은 "우리가 보낸 명령"과 "STM32 가 보고한 실제 상태"를 비교한다:
+    //   - 하행(dispatch):  lastSentLevel_[zone.zoneId]      // zoneId 를 키로 저장
+    //   - 상행(여기):      lastSentLevel_.find(pkt.channel_id) // channel_id 를 키로 조회
+    // 이 비교는 두 키가 같은 정수라는 사실(현재 zone 과 채널이 1:1, zoneId == channelId)에
+    // 전적으로 의존한다.
+    //
+    // 만약 향후 ZoneId 와 ChannelId 를 분리하면(예: 한 zone 이 여러 채널을 구동), 두 정수 타입이
+    // 여전히 int 라 컴파일은 통과하지만, 여기서 '엉뚱한 채널끼리' 레벨을 비교하게 된다. 그 결과
+    // 명령-상태 불일치 감지 / 재전송 / fault 에스컬레이션이 조용히 오작동하고, 실제 하드웨어가
+    // 틀린 상태인데도 서버는 정상으로 착각한다(= silent hardware failure).
+    // 분리하려면 반드시 send 측 상태(lastSentLevel_ / mismatchRetryAttempts_ / faultState_)를
+    // zoneId 가 아니라 '번역된 ChannelId' 로 다시 키잉할 것. 절대 타입만 무심코 갈라놓지 말 것.
+    // ============================================================================
+    auto sentIt = lastSentLevel_.find(ch);
+    if (sentIt == lastSentLevel_.end()) {
+        return;  // 이 채널에 아직 명령을 보낸 적 없음 -> 비교 기준이 없으므로 스킵
+    }
+
+    if (sentIt->second == reportedLevel) {
+        mismatchRetryAttempts_.erase(ch);
+        clearFault(ch);
+        return;
+    }
+
+    const uint32_t attempts = ++mismatchRetryAttempts_[ch];
+
+    logError(kIface, "채널 " + std::to_string(ch) +
+                         " 명령-상태 불일치: 기대=" + std::string(veda::toString(sentIt->second)) +
+                         " 실제=" + std::string(veda::toString(reportedLevel)) + " (재시도 " +
+                         std::to_string(attempts) + "/" + std::to_string(mismatchRetryCount_) + ")");
+
+    if (attempts <= mismatchRetryCount_) {
+        resendLastCommand(ch, sentIt->second);
+        return;
+    }
+
+    if (mismatchEscalateAfterRetries_) {
+        raiseFault(ch);
+    }
+}
+
+void SerialHwEventDispatcher::resendLastCommand(veda::ChannelId ch, veda::RiskLevel level) {
+    if (fd_ < 0) {
+        return;
+    }
+
+    veda_risk_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.channel_id = static_cast<uint8_t>(ch);
+    ev.risk_level = static_cast<uint8_t>(level);
+    const auto timestampMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    veda_write_i64_le(&ev.timestamp_ms, timestampMs);
+    veda_write_u16_le(&ev.dist_mm, VEDA_DIST_MM_NONE);
+
+    veda_downlink_frame_t frame;
+    frame.start_byte = VEDA_START_BYTE;
+    frame.payload = ev;
+    frame.checksum = veda_downlink_checksum(&ev);
+    frame.end_byte = VEDA_END_BYTE;
+
+    ssize_t written = write(fd_, &frame, sizeof(frame));
+    if (written != static_cast<ssize_t>(sizeof(frame))) {
+        logError(kIface, "재전송 실패: 채널 " + std::to_string(ch) + " (" + strerror(errno) + ")");
+        return;
+    }
+
+    logSuccess(kIface, "채널 " + std::to_string(ch) + " 명령 재전송 (" + std::string(veda::toString(level)) + ")");
+}
+
+void SerialHwEventDispatcher::raiseFault(veda::ChannelId ch) {
+    auto it = faultState_.find(ch);
+    const bool wasFaulted = (it != faultState_.end()) && it->second;
+    faultState_[ch] = true;
+
+    if (!wasFaulted) {
+        logError(kIface, "채널 " + std::to_string(ch) + " 재시도 소진 -> fault 에스컬레이션");
+        if (faultCallback_) {
+            faultCallback_(ch, true);
+        }
+    }
+}
+
+void SerialHwEventDispatcher::clearFault(veda::ChannelId ch) {
+    auto it = faultState_.find(ch);
+    const bool wasFaulted = (it != faultState_.end()) && it->second;
+    faultState_[ch] = false;
+
+    if (wasFaulted) {
+        logSuccess(kIface, "채널 " + std::to_string(ch) + " fault 해소");
+        if (faultCallback_) {
+            faultCallback_(ch, false);
+        }
+    }
+}
+
+void SerialHwEventDispatcher::setFaultCallback(FaultCallback callback) {
+    std::lock_guard<std::mutex> lock(sendStateMutex_);
+    faultCallback_ = std::move(callback);
+
+    if (faultCallback_) {
+        for (const auto& [ch, faulted] : faultState_) {
+            faultCallback_(ch, faulted);
+        }
+    }
+}
+
+void SerialHwEventDispatcher::reportAlive(veda::ChannelId ch, bool alive) {
+>>>>>>> 194f11d (feat:[TP-217] dispatch 메뉴얼 및 보안 감사 작성 보안 패치 권고 작성)
     std::lock_guard<std::mutex> lock(heartbeatMutex_);
     lastHeartbeatAt_[ch] = std::chrono::steady_clock::now();
 
@@ -208,6 +353,7 @@ void SerialHwEventDispatcher::markAlive(veda::ChannelId ch) {
     }
 }
 
+<<<<<<< HEAD
 /**
  * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
  *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
@@ -215,6 +361,15 @@ void SerialHwEventDispatcher::markAlive(veda::ChannelId ch) {
 void SerialHwEventDispatcher::watchdogLoop() {
     const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
                                                            static_cast<uint64_t>(missedBeatsForTimeout_));
+=======
+void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndicatorState& indicators) {
+    std::lock_guard<std::mutex> lock(heartbeatMutex_);
+    ReportedState& state = reportedState_[ch];
+    if (state.indicators == indicators) {
+        return;
+    }
+    state.indicators = indicators;
+>>>>>>> 194f11d (feat:[TP-217] dispatch 메뉴얼 및 보안 감사 작성 보안 패치 권고 작성)
 
     while (running_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(heartbeatIntervalMs_));
@@ -238,12 +393,6 @@ void SerialHwEventDispatcher::watchdogLoop() {
     }
 }
 
-/**
- * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
- *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
- * @note    타임아웃 채널을 락 안에서 모아두고 락을 푼 뒤에 reportAlive()를 호출한다.
- *          reportAlive()가 같은 heartbeatMutex_(비재귀)를 다시 잠그므로 이 순서를 지켜야 한다.
- */
 void SerialHwEventDispatcher::watchdogLoop() {
     const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
                                                            static_cast<uint64_t>(missedBeatsForTimeout_));
