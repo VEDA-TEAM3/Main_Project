@@ -12,7 +12,17 @@ C_SRCS += \
 ../Core/Src/stm32f4xx_it.c \
 ../Core/Src/syscalls.c \
 ../Core/Src/sysmem.c \
+<<<<<<< HEAD
 ../Core/Src/system_stm32f4xx.c 
+=======
+../Core/Src/system_stm32f4xx.c \
+../Core/Src/veda_channel.c \
+../Core/Src/veda_debug.c \
+../Core/Src/veda_isr.c \
+../Core/Src/veda_rs485.c \
+../Core/Src/veda_strip.c \
+../Core/Src/veda_supervisor.c 
+>>>>>>> 3b4d3e6 (refactor[TP-91]LED 버그 수정)
 
 OBJS += \
 ./Core/Src/freertos.o \
@@ -22,7 +32,17 @@ OBJS += \
 ./Core/Src/stm32f4xx_it.o \
 ./Core/Src/syscalls.o \
 ./Core/Src/sysmem.o \
+<<<<<<< HEAD
 ./Core/Src/system_stm32f4xx.o 
+=======
+./Core/Src/system_stm32f4xx.o \
+./Core/Src/veda_channel.o \
+./Core/Src/veda_debug.o \
+./Core/Src/veda_isr.o \
+./Core/Src/veda_rs485.o \
+./Core/Src/veda_strip.o \
+./Core/Src/veda_supervisor.o 
+>>>>>>> 3b4d3e6 (refactor[TP-91]LED 버그 수정)
 
 C_DEPS += \
 ./Core/Src/freertos.d \
@@ -32,7 +52,17 @@ C_DEPS += \
 ./Core/Src/stm32f4xx_it.d \
 ./Core/Src/syscalls.d \
 ./Core/Src/sysmem.d \
+<<<<<<< HEAD
 ./Core/Src/system_stm32f4xx.d 
+=======
+./Core/Src/system_stm32f4xx.d \
+./Core/Src/veda_channel.d \
+./Core/Src/veda_debug.d \
+./Core/Src/veda_isr.d \
+./Core/Src/veda_rs485.d \
+./Core/Src/veda_strip.d \
+./Core/Src/veda_supervisor.d 
+>>>>>>> 3b4d3e6 (refactor[TP-91]LED 버그 수정)
 
 
 # Each subdirectory must supply rules for building sources it contributes
@@ -42,7 +72,11 @@ Core/Src/%.o Core/Src/%.su Core/Src/%.cyclo: ../Core/Src/%.c Core/Src/subdir.mk
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
+<<<<<<< HEAD
 	-$(RM) ./Core/Src/freertos.cyclo ./Core/Src/freertos.d ./Core/Src/freertos.o ./Core/Src/freertos.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/neopixel.cyclo ./Core/Src/neopixel.d ./Core/Src/neopixel.o ./Core/Src/neopixel.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su
+=======
+	-$(RM) ./Core/Src/freertos.cyclo ./Core/Src/freertos.d ./Core/Src/freertos.o ./Core/Src/freertos.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/neopixel.cyclo ./Core/Src/neopixel.d ./Core/Src/neopixel.o ./Core/Src/neopixel.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su ./Core/Src/veda_channel.cyclo ./Core/Src/veda_channel.d ./Core/Src/veda_channel.o ./Core/Src/veda_channel.su ./Core/Src/veda_debug.cyclo ./Core/Src/veda_debug.d ./Core/Src/veda_debug.o ./Core/Src/veda_debug.su ./Core/Src/veda_isr.cyclo ./Core/Src/veda_isr.d ./Core/Src/veda_isr.o ./Core/Src/veda_isr.su ./Core/Src/veda_rs485.cyclo ./Core/Src/veda_rs485.d ./Core/Src/veda_rs485.o ./Core/Src/veda_rs485.su ./Core/Src/veda_strip.cyclo ./Core/Src/veda_strip.d ./Core/Src/veda_strip.o ./Core/Src/veda_strip.su ./Core/Src/veda_supervisor.cyclo ./Core/Src/veda_supervisor.d ./Core/Src/veda_supervisor.o ./Core/Src/veda_supervisor.su
+>>>>>>> 3b4d3e6 (refactor[TP-91]LED 버그 수정)
 
 .PHONY: clean-Core-2f-Src
 

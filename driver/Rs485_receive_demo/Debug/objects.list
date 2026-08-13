@@ -6,6 +6,15 @@
 "./Core/Src/syscalls.o"
 "./Core/Src/sysmem.o"
 "./Core/Src/system_stm32f4xx.o"
+<<<<<<< HEAD
+=======
+"./Core/Src/veda_channel.o"
+"./Core/Src/veda_debug.o"
+"./Core/Src/veda_isr.o"
+"./Core/Src/veda_rs485.o"
+"./Core/Src/veda_strip.o"
+"./Core/Src/veda_supervisor.o"
+>>>>>>> 3b4d3e6 (refactor[TP-91]LED 버그 수정)
 "./Core/Startup/startup_stm32f401retx.o"
 "./Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.o"
 "./Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.o"

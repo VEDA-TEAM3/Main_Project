@@ -1,0 +1,4 @@
+../Core/Src/veda_supervisor.c:13:13:veda_supervisor_blink_id	2
+../Core/Src/veda_supervisor.c:27:13:veda_supervisor_banner	5
+../Core/Src/veda_supervisor.c:78:13:veda_supervisor_strip_boot	4
+../Core/Src/veda_supervisor.c:102:6:veda_supervisor_run	1
