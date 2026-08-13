@@ -64,8 +64,8 @@ qt_add_executable(Qtcctvclient
     include/ui/VideoRiskBorderFrame.h
     src/ui/VideoRiskBorderFrame.cpp
 
-    include/overlays/DangerAlertOverlay.h
-    src/overlays/DangerAlertOverlay.cpp
+    include/overlays/DangerBorderOverlay.h
+    src/overlays/DangerBorderOverlay.cpp
     include/overlays/ChannelRiskOverlay.h
     src/overlays/ChannelRiskOverlay.cpp
     include/overlays/DeviceStatusMapOverlay.h
@@ -210,7 +210,6 @@ qt_add_resources(Qtcctvclient "icon_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/buzzer_icon.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/cctv_icon.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/config_icon.png"
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/danger_alert.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/led_icon.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/led_off.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/led_safe.png"

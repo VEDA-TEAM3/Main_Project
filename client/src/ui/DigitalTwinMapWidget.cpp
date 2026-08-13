@@ -25,7 +25,7 @@
 
 #include "model/DigitalTwinSimulationWorker.h"
 #include "model/RiskObjectTracker.h"
-#include "overlays/DangerAlertOverlay.h"
+#include "overlays/DangerBorderOverlay.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
 #include "ui/DigitalTwinObjectStyleProvider.h"
 #include "ui/DigitalTwinZoneIndex.h"
@@ -223,9 +223,6 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     // 켜져도 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로 나눠 판단한다
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
 
-    dangerAlertOverlay_ = new DangerAlertOverlay(viewport());
-    dangerAlertOverlay_->updateGeometryForViewport(viewport()->size());
-
     setupScene();
     setupSimulationWorker();
     startDemo();
@@ -367,8 +364,8 @@ void DigitalTwinMapWidget::applyCentralEvent(CentralEventData event) {
 
     if (liveMode_) {
         rebuildLiveSnapshot();
-    } else if (dangerAlertOverlay_) {
-        dangerAlertOverlay_->setActive(hasActiveCentralDanger());
+    } else {
+        dangerBorderOverlay_.setActive(hasActiveCentralDanger());
     }
 }
 
@@ -404,9 +401,7 @@ void DigitalTwinMapWidget::rebuildLiveSnapshot() {
         lastLiveSnapshotPublishMsec_ = currentTimeMsec;
     }
 
-    if (dangerAlertOverlay_) {
-        dangerAlertOverlay_->setActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
-    }
+    dangerBorderOverlay_.setActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
 }
 
 int DigitalTwinMapWidget::activeSeverityForChannel(int channelIndex) const {
@@ -447,10 +442,6 @@ void DigitalTwinMapWidget::expireStaleLiveFrames() {
 void DigitalTwinMapWidget::resizeEvent(QResizeEvent* event) {
     QGraphicsView::resizeEvent(event);
     fitMapInView();
-
-    if (dangerAlertOverlay_) {
-        dangerAlertOverlay_->updateGeometryForViewport(viewport()->size());
-    }
 }
 
 /**
@@ -461,6 +452,7 @@ void DigitalTwinMapWidget::setupScene() {
     for (ChannelRiskOverlay& channelRiskOverlay : channelRiskOverlays_) {
         channelRiskOverlay.clear();
     }
+    dangerBorderOverlay_.clear();
     scene_.clear();
     demoItems_.clear();
     visualItemIndexes_.clear();
@@ -471,10 +463,7 @@ void DigitalTwinMapWidget::setupScene() {
     updateObjectAreaRect();
     deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects, mapLayout_.zoneStatusSlots);
     deviceStatusMapOverlay_.setDisplaySettings(displaySettings_);
-
-    if (dangerAlertOverlay_) {
-        dangerAlertOverlay_->setActive(false);
-    }
+    dangerBorderOverlay_.attach(&scene_, mapLayout_.sceneRect);
 }
 
 /**
@@ -503,9 +492,7 @@ void DigitalTwinMapWidget::setupSimulationWorker() {
  * @param snapshot  객체와 객체 쌍 위험 상태를 함께 담은 최신 스냅샷
  */
 void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& snapshot) {
-    if (dangerAlertOverlay_) {
-        dangerAlertOverlay_->setActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
-    }
+    dangerBorderOverlay_.setActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
 
     applyObjectUpdates(snapshot.objects);
     publishChannelRiskLevels(snapshot);

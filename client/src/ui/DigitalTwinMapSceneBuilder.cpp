@@ -368,33 +368,6 @@ void addColumnGridMarkers(QGraphicsScene* scene) {
     }
 }
 
-/** @brief 도면 기호 범례를 좌상단 여백에 그립니다. */
-void addLegend(QGraphicsScene* scene) {
-    const QRectF box(wallLeft, topStripCenterY - 15.0, 152.0, 30.0);
-    QColor plate(QStringLiteral("#061726"));
-    plate.setAlpha(215);
-    scene->addRect(box, QPen(colorReserved, 1.0), QBrush(plate))->setZValue(5.0);
-
-    struct LegendEntry {
-        QColor color;
-        QString text;
-    };
-    const std::array<LegendEntry, 3> entries = {{
-        {colorStall, QStringLiteral("일반")},
-        {colorAccessibleGlyph, QStringLiteral("장애인")},
-        {colorCore, QStringLiteral("코어")},
-    }};
-
-    double x = box.left() + 10.0;
-    for (const LegendEntry& entry : entries) {
-        scene->addRect(QRectF(x, box.center().y() - 4.0, 8.0, 8.0), QPen(entry.color, 1.0), Qt::NoBrush)
-            ->setZValue(5.1);
-        addCenteredLabel(scene, entry.text, sceneFont(6.0), colorTextDim, 0.8, QPointF(x + 26.0, box.center().y()),
-                         5.1);
-        x += 47.0;
-    }
-}
-
 /** @brief 활성 CCTV 구역의 커버리지 경계와 채널 경계를 그립니다. */
 void addActiveZone(QGraphicsScene* scene, const QRectF& cell) {
     QPainterPath borderPath;
@@ -488,7 +461,6 @@ DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scen
     addShell(scene);
     addParkingField(scene);
     addColumnGridMarkers(scene);
-    addLegend(scene);
 
     const int activeZoneCount = static_cast<int>(layout.zoneRects.size());
     for (int cellIndex = 0; cellIndex < coverageCellCount; ++cellIndex) {

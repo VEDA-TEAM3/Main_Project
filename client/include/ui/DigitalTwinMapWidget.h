@@ -16,13 +16,13 @@
 #include "model/DigitalTwinTypes.h"
 #include "model/MqttRealtimeData.h"
 #include "overlays/ChannelRiskOverlay.h"
+#include "overlays/DangerBorderOverlay.h"
 #include "overlays/DeviceStatusMapOverlay.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
 
 class DigitalTwinSimulationWorker;
 class DigitalTwinObjectStyleProvider;
 class RiskObjectTracker;
-class DangerAlertOverlay;
 class QGraphicsPathItem;
 class QGraphicsPixmapItem;
 class QGraphicsSimpleTextItem;
@@ -98,7 +98,7 @@ private:
     DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
-    DangerAlertOverlay* dangerAlertOverlay_ = nullptr;
+    DangerBorderOverlay dangerBorderOverlay_;
     std::shared_ptr<DigitalTwinMapSceneBuilder> sceneBuilder_;
     std::shared_ptr<DigitalTwinObjectStyleProvider> objectStyleProvider_;
     std::shared_ptr<DigitalTwinSimulationWorker> simulationWorker_;
