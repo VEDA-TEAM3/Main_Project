@@ -13,12 +13,16 @@
 
 namespace {
 
-/// @brief AppConfig 의 문자열 정책을 pipeline 열거형으로 변환
+/// @brief AppConfig의 문자열 정책을 pipeline 열거형으로 변환
 RiskEdgePolicy toRiskEdgePolicy(const std::string& value) {
-    if (value == "keep")
+    if (value == "keep") {
         return RiskEdgePolicy::Keep;
-    if (value == "dropAnyEdge")
+    }
+
+    if (value == "dropAnyEdge") {
         return RiskEdgePolicy::DropAnyEdge;
+    }
+
     return RiskEdgePolicy::DropBottomTruncated;
 }
 
@@ -42,7 +46,8 @@ AppContext::AppContext(const AppConfig& config) {
 
     auto parser = std::make_shared<OnvifParser>(config.edgeEpsilon);
     auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
-                                                                     config.imageMapOffsetX, config.imageMapOffsetY);
+                                                                     config.imageMapOffsetX, config.imageMapOffsetY,
+                                                                     config.blurBoxScale);
     auto sanitizer = std::make_shared<ContainmentSanitizer>(config.sanitizerIouThresh, config.sanitizerContainThresh);
     auto router = std::make_shared<ParentBasedRouter>();
     auto ground = std::make_shared<BottomCenterExtractor>();

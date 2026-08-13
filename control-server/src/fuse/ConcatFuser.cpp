@@ -1,6 +1,7 @@
 #include "fuse/ConcatFuser.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -32,8 +33,9 @@ public:
     explicit DisjointSet(const std::vector<Candidate>& candidates)
         : parent_(candidates.size()), mask_(candidates.size(), 0) {
         std::iota(parent_.begin(), parent_.end(), 0);
-        for (size_t i = 0; i < candidates.size(); ++i)
+        for (size_t i = 0; i < candidates.size(); ++i) {
             mask_[i] = channelBit(candidates[i].ch);
+        }
     }
 
     size_t find(size_t x) {
@@ -48,8 +50,9 @@ public:
     bool sharesChannel(size_t rootA, size_t rootB) const { return (mask_[rootA] & mask_[rootB]) != 0; }
 
     void unite(size_t rootA, size_t rootB) {
-        if (rootA == rootB)
+        if (rootA == rootB) {
             return;
+        }
         parent_[rootA] = rootB;
         mask_[rootB] |= mask_[rootA];
     }
@@ -57,8 +60,9 @@ public:
 private:
     /// @brief 채널 비트. 64채널을 넘으면 마스크로 표현할 수 없으므로 0을 돌려 병합을 막음
     static std::uint64_t channelBit(veda::ChannelId ch) {
-        if (ch < 0 || ch >= 64)
+        if (ch < 0 || ch >= 64) {
             return 0;
+        }
         return std::uint64_t{1} << ch;
     }
 
@@ -107,24 +111,33 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
     DisjointSet ds(candidates);
     for (size_t i = 0; i < candidates.size(); ++i) {
         for (size_t j = i + 1; j < candidates.size(); ++j) {
-            if (candidates[i].ch == candidates[j].ch)
+            if (candidates[i].ch == candidates[j].ch) {
                 continue;
-            if (candidates[i].cls != candidates[j].cls)
+            }
+            if (candidates[i].cls != candidates[j].cls) {
                 continue;
+            }
+            if (!std::isfinite(candidates[i].pos.x) || !std::isfinite(candidates[i].pos.y) ||
+                !std::isfinite(candidates[j].pos.x) || !std::isfinite(candidates[j].pos.y)) {
+                continue;
+            }
 
             double dist = metric_->calculate(candidates[i].pos, candidates[j].pos);
-            if (dist > dedupMergeDistance_)
+            if (dist > dedupMergeDistance_) {
                 continue;
+            }
 
             const size_t rootI = ds.find(i);
             const size_t rootJ = ds.find(j);
-            if (rootI == rootJ)
+            if (rootI == rootJ) {
                 continue;
+            }
 
             // 두 클러스터가 이미 같은 채널을 품고 있으면 합치지 않음
             // (합치면 한 카메라가 본 서로 다른 실체가 하나로 뭉개짐)
-            if (ds.sharesChannel(rootI, rootJ))
+            if (ds.sharesChannel(rootI, rootJ)) {
                 continue;
+            }
 
             ds.unite(rootI, rootJ);
         }
@@ -140,8 +153,9 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
     fusedObjects.reserve(clusters.size());
     fusedSourceIds.reserve(clusters.size());
     for (const auto& members : clusters) {
-        if (members.empty())
+        if (members.empty()) {
             continue;
+        }
 
         domain::WorldObject wObj;
         wObj.cls = candidates[members.front()].cls;
@@ -179,19 +193,24 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
         // 하나로 "직전 프레임"이 아니라 "그 실체를 마지막으로 본 상태"에 바로 도달함
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
             for (const auto& sourceId : fusedSourceIds[c]) {
-                if (sourceId.second == 0)  // ObjectId 미제공
+                if (sourceId.second == 0) { // ObjectId 미제공
                     continue;
+                }
                 auto idxIt = idIndex_.find(sourceId);
-                if (idxIt == idIndex_.end())
+                if (idxIt == idIndex_.end()) {
                     continue;
+                }
                 const veda::GlobalId gid = idxIt->second;
-                if (claimedGids.count(gid))  // 이번 윈도우에 다른 클러스터가 이미 씀
+                if (claimedGids.count(gid)) { // 이번 윈도우에 다른 클러스터가 이미 씀
                     continue;
+                }
                 auto trackIt = byGid_.find(gid);
-                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls)
+                if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls) {
                     continue;
-                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.pos) > trackMaxDistance_)
+                }
+                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.pos) > trackMaxDistance_) {
                     continue;
+                }
                 fusedObjects[c].gid = gid;
                 curMatched[c] = true;
                 claimedGids.insert(gid);
@@ -211,14 +230,17 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
         };
         std::vector<MatchCandidate> matchCandidates;
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
-            if (curMatched[c])
+            if (curMatched[c]) {
                 continue;
+            }
             for (const auto& [gid, tracked] : byGid_) {
-                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls)
+                if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls) {
                     continue;
+                }
                 const double dist = metric_->calculate(fusedObjects[c].pos, tracked.pos);
-                if (dist > trackMaxDistance_)
+                if (dist > trackMaxDistance_) {
                     continue;
+                }
                 matchCandidates.push_back({dist, c, gid});
             }
         }
@@ -226,8 +248,9 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
                   [](const MatchCandidate& a, const MatchCandidate& b) { return a.dist < b.dist; });
 
         for (const auto& match : matchCandidates) {
-            if (curMatched[match.curIdx] || claimedGids.count(match.gid))
+            if (curMatched[match.curIdx] || claimedGids.count(match.gid)) {
                 continue;
+            }
             fusedObjects[match.curIdx].gid = match.gid;
             curMatched[match.curIdx] = true;
             claimedGids.insert(match.gid);
@@ -236,8 +259,9 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
 
     worldFrame.objects.reserve(fusedObjects.size());
     for (auto& wObj : fusedObjects) {
-        if (wObj.gid == 0)
+        if (wObj.gid == 0) {
             wObj.gid = nextGlobalId_.fetch_add(1, std::memory_order_relaxed);
+        }
         worldFrame.objects.push_back(std::move(wObj));
     }
     const std::size_t detectedCount = worldFrame.objects.size();
@@ -253,8 +277,9 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
             entity.missedWindows = 0;
             touchedGids.insert(object.gid);
             for (const auto& sourceId : fusedSourceIds[i]) {
-                if (sourceId.second != 0)
+                if (sourceId.second != 0) {
                     idIndex_[sourceId] = object.gid;
+                }
             }
         }
 
@@ -274,10 +299,11 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
 
         // idIndex_ 에서 만료된 gid 를 가리키는 항목 정리
         for (auto it = idIndex_.begin(); it != idIndex_.end();) {
-            if (byGid_.find(it->second) == byGid_.end())
+            if (byGid_.find(it->second) == byGid_.end()) {
                 it = idIndex_.erase(it);
-            else
+            } else {
                 ++it;
+            }
         }
 
         // 유예 중(이번 윈도우엔 못 봤지만 아직 안 끊긴)인 실체는 마지막 좌표 그대로 채워 넣음
@@ -285,8 +311,9 @@ domain::WorldFrame ConcatFuser::fuse(const std::vector<domain::ObservationFrame>
         //  깜빡이는 것처럼 보임 -- gid 는 안 바뀌어도 화면에 나가는 프레임 자체가 감지
         //  여부에 따라 매 윈도우 갱신되기 때문)
         for (const auto& [gid, entity] : byGid_) {
-            if (touchedGids.count(gid))
+            if (touchedGids.count(gid)){
                 continue;
+            }
             domain::WorldObject coasted;
             coasted.gid = gid;
             coasted.cls = entity.cls;

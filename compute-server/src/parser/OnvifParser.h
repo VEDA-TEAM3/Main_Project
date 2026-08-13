@@ -18,9 +18,7 @@ public:
      * @param   edgeEpsilon bbox가 프레임 경계에 닿았다고 볼 정규화 좌표 오차율
      *                      (AppConfig::edgeEpsilon)
      *
-     * @note    경계 판정은 이 파서에서만 수행함. 매퍼(AffineImageCoordinateMapper)는
-     *          blur 경로 전용이 되면서 경계 판정 책임을 내려놓았으므로, 예전처럼
-     *          두 곳에 kEdgeEpsilon 이 중복 정의되어 값이 갈라질 여지가 없음
+     * @note    경계 판정은 이 파서에서만 수행함
      */
     explicit OnvifParser(double edgeEpsilon = 0.002);
 
@@ -35,4 +33,14 @@ public:
 
 private:
     double edgeEpsilon_;
+
+    /**
+     * @brief <tt:Frame>을 못 찾은 누적 횟수 (rate-limit 및 진단용)
+     *
+     * @details
+     * 이 실패는 한 프레임이 깨졌다보다 엉뚱한 스트림을 먹고 있다는 신호일 때가 많다.
+     * (예: 메타데이터가 아닌 트랙의 RTP, RTP 헤더 길이 오산으로 어긋난 페이로드)
+     * 그런 상황에서는 패킷마다 실패하므로 rate-limit 없이 찍으면 로그가 도배된다.
+     */
+    std::uint64_t noFrameTagCount_ = 0;
 };

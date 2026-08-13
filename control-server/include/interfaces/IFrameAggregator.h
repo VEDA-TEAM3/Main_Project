@@ -25,8 +25,13 @@ public:
 
     /**
      * @brief 윈도우가 닫혀 집계가 완료되었을 때 호출될 콜백 함수 타입
+     *
+     * @warning 값이 아니라 const 참조로 받는다. 집계기가 이 버퍼를 '풀에서 빌려' 넘기고
+     *          콜백이 반환하는 즉시 회수하기 때문이다 -- 그래서 윈도우마다 새 벡터를 만들지 않는다.
+     *          구현체는 이 참조를 **저장하거나 콜백 밖으로 넘기면 안 된다.** 필요하면 복사할 것.
+     *          (반환 후 버퍼는 다음 윈도우에서 덮어써진다)
      */
-    using AggregationCallback = std::function<void(AggregatedFrames)>;
+    using AggregationCallback = std::function<void(const AggregatedFrames&)>;
 
     /**
      * @brief 집계 완료 콜백 등록

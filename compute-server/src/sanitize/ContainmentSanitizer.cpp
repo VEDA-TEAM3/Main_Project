@@ -14,16 +14,11 @@ namespace {
 
 constexpr const char* kIface = "Sanitizer";
 
-/// @brief 한 프레임(단일 카메라)의 최대 객체 수 상한 
-///        drop 마스크를 스택 std::bitset 으로 두어
+/// @brief 한 프레임의 최대 객체 수 상한
+///        drop 마스크를 스택 std::bitset으로 두어
 ///        hot path에서 std::vector<bool> 힙 할당을 없애기 위한 컴파일타임 크기
 ///        compute-server는 채널당 1개 프로세스이고, 엣지 AI의 NMS 출력은 보통
-///        프레임당 50~100개로 제한되므로 충분한 여유가 있다. 넘으면 sanitize 스킵 (fail-open)
-///
-/// @warning [W1] 이 값은 OnvifParser의 동명 상수(kMaxObjectsPerFrame)와 반드시 같아야 한다.
-///          파서가 256개까지 통과시키는데 여기가 128이면 129~256 구간이 'sanitize 가 항상 생략되는
-///          사각지대'가 되어, 객체를 129개만 실어보내면 팬텀 필터를 통째로 우회할 수 있었다.
-///          두 상한을 256으로 정렬해 그 우회 경로를 제거했다. 한쪽만 바꾸면 사각지대가 되살아난다.
+///        프레임당 50 ~ 100개로 제한되므로 충분한 여유가 있다. 넘으면 sanitize 스킵 (fail-open)
 constexpr std::size_t kMaxObjectsPerFrame = 256;
 
 /**
@@ -37,7 +32,7 @@ double area(const domain::NormBox& box) {
     if (w <= 0.0 || h <= 0.0) {
         return 0.0;
     }
-        
+
     return w * h;
 }
 
@@ -55,12 +50,12 @@ double intersectionArea(const domain::NormBox& a, const domain::NormBox& b) {
     if (r <= l || bt <= t) {
         return 0.0;
     }
-        
+
     return (r - l) * (bt - t);
 }
 
 /**
- * @brief   IoU(Intersection over Union) 를 계산
+ * @brief   IoU(Intersection over Union)를 계산
  * @param   a  bbox A
  * @param   b  bbox B
  * @return  IoU 값 [0,1] (합집합 면적이 0이면 0)
@@ -71,12 +66,12 @@ double iou(const domain::NormBox& a, const domain::NormBox& b) {
     if (uni <= 0.0) {
         return 0.0;
     }
-    
+
     return inter / uni;
 }
 
 /**
- * @brief   IoMin(교집합 / 두 면적 중 작은 쪽) 을 계산
+ * @brief   IoMin(교집합 / 두 면적 중 작은 쪽)을 계산
  * @details
  * 포함 관계 판정에 사용
  * IoU와 달리 크기 차이가 큰 두 bbox에서도 작은 쪽이 큰 쪽 안에 거의 다 들어있는지를 정확히 반영
@@ -90,7 +85,7 @@ double ioMin(const domain::NormBox& a, const domain::NormBox& b) {
     if (minArea <= 0.0) {
         return 0.0;
     }
-        
+
     return inter / minArea;
 }
 
@@ -98,19 +93,9 @@ double ioMin(const domain::NormBox& a, const domain::NormBox& b) {
 
 ContainmentSanitizer::ContainmentSanitizer(double iouThresh, double containThresh)
     : iouThresh_(iouThresh), containThresh_(containThresh) {
-    // [W2] 임계값을 조립 시점에 검증한다. (설정 오류는 조용히 넘기지 않고 즉시 실패)
-    //
-    // iou()/ioMin() 은 항상 0 이상을 반환하므로, 임계값이 음수면 "0.0 > -0.1" 이 참이 되어
-    // 겹치지도 않은 객체에까지 규칙이 발동한다. -> 프레임에 Head/LicensePlate 가 하나만 있어도
-    // 모든 Human/Vehicle 이 삭제되고, 그 결과 위험 객체가 사라져 경보가 울리지 않는다.
-    // 즉 '과소 검출(위험 방향)'으로 조용히 실패하는 유일한 경로였다.
-    // 1.0 초과도 규칙이 절대 발동하지 않게 만들어 필터를 무력화하므로 함께 막는다.
-    //
-    // HomographyTransform / AffineImageCoordinateMapper 와 동일한 규약: 구조적으로 잘못된
-    // 설정은 생성자가 던지고 main 이 잡아 프로세스를 종료한다.
     if (iouThresh_ < 0.0 || iouThresh_ > 1.0) {
-        throw std::invalid_argument("sanitizerIouThresh must be within [0.0, 1.0] (got " +
-                                    std::to_string(iouThresh_) + ") - check config.json");
+        throw std::invalid_argument("sanitizerIouThresh must be within [0.0, 1.0] (got " + std::to_string(iouThresh_) +
+                                    ") - check config.json");
     }
     if (containThresh_ < 0.0 || containThresh_ > 1.0) {
         throw std::invalid_argument("sanitizerContainThresh must be within [0.0, 1.0] (got " +
@@ -121,9 +106,9 @@ ContainmentSanitizer::ContainmentSanitizer(double iouThresh, double containThres
 domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) {
     const size_t n = frame.objects.size();
 
-    // drop 마스크를 스택 bitset 으로 -> 프레임마다 std::vector<bool> 를 새로 할당하던 것을 제거
-    // (Principle #3: hot path 힙 할당 0). 극히 드물게 객체가 상한을 넘으면(비정상 폭주) sanitize 를
-    // 스킵한다: fail-open 이라 팬텀 제거만 못 할 뿐, 위험 객체를 지우지 않는 쪽이 안전 측면에서 낫다.
+    // drop 마스크를 스택 bitset으로 → 프레임마다 std::vector<bool>를 새로 할당하던 것을 제거
+    // 극히 드물게 객체가 상한을 넘으면(비정상 폭주) sanitize를
+    // 스킵한다: fail-open이라 팬텀 제거만 못 할 뿐, 위험 객체를 지우지 않는 쪽이 안전 측면에서 낫다.
     if (n > kMaxObjectsPerFrame) {
         logError(kIface, "ch=" + std::to_string(frame.channelId) + " 객체 수 " + std::to_string(n) + " > " +
                              std::to_string(kMaxObjectsPerFrame) + " - sanitize 스킵");
@@ -131,8 +116,7 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
     }
     std::bitset<kMaxObjectsPerFrame> drop;
 
-    // 1단계: 판정만 수행 (i의 판정이 다른 모든 j의 "원본" 데이터를 참조하므로,
-    // 이 단계가 끝나기 전에는 frame.objects를 절대 변형하면 안 됨)
+    // 1단계: 판정만 수행
     for (size_t i = 0; i < n; ++i) {
         const auto& x = frame.objects[i];
         if (!veda::isRiskClass(x.cls)) {
@@ -143,7 +127,7 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
             if (i == j) {
                 continue;
             }
-                
+
             const auto& y = frame.objects[j];
 
             // 규칙 A
@@ -171,17 +155,17 @@ domain::ChannelFrame ContainmentSanitizer::sanitize(domain::ChannelFrame frame) 
     }
 
     // 2단계: 판정이 모두 끝난 뒤에만 frame.objects를 in-place로 압축
-    // (별도 벡터를 새로 만들지 않음 -> resize()로 줄이는 건 재할당을 유발하지 않으므로 할당 없음)
+    // (별도 벡터를 새로 만들지 않음 → resize()로 줄이는 건 재할당을 유발하지 않으므로 할당 없음)
     size_t writeIdx = 0;
     for (size_t i = 0; i < n; ++i) {
         if (drop[i]) {
             continue;
         }
-            
+
         if (writeIdx != i) {
             frame.objects[writeIdx] = std::move(frame.objects[i]);
         }
-            
+
         ++writeIdx;
     }
     frame.objects.resize(writeIdx);

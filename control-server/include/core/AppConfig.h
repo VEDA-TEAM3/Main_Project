@@ -5,6 +5,7 @@
  * @brief   관제 서버의 전체 구동 설정값을 담는 구조체
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,10 +30,32 @@ struct RiskConfig {
 
     /**
      * @brief   같은 실체를 프레임 간에 이어붙일 최대 이동 거리 (m)
-     * @details 이 거리 안에서 같은 클래스면 이전 프레임의 GlobalId 를 물려받음
-     *          0 이하면 추적을 끄고 매 프레임 새 gid 를 부여 (예전 동작)
+     *
+     * @details
+     * 이 거리 안에서 같은 클래스면 이전 프레임의 GlobalId 를 물려받는다.
+     * 0 이하면 추적을 끄고 매 프레임 새 gid 를 부여한다 (예전 동작).
+     *
+     * @warning [ windowSizeMs / 소스 프레임률과의 묵시적 결합 ]
+     * 이 값은 단독으로 정할 수 없다. 반드시 다음을 만족해야 한다:
+     *
+     *     trackMaxDistance >= v_max * max(windowSizeMs, T_src)
+     *
+     * 추적 가능한 최대 속도가 곧 (이 값 / 프레임 간격) 이기 때문이다. 위반하면 그 속도를
+     * 넘는 객체는 **매 프레임 새 gid 를 받는다** -- 컴파일 오류도 런타임 오류도 로그도 없이
+     * UI 에서 객체가 사라졌다 다시 생기는 것처럼 보인다.
+     *
+     * 현재 값 4.0m 산정 근거: windowSizeMs=220ms 기준 4.0/0.22 = 18.2m/s = 약 65km/h.
+     * windowSizeMs 를 올리면 이 값도 같이 올려야 한다.
+     * 자세한 내용은 CLAUDE.md 의 동명 불변식 항목 참고.
      */
-    double trackMaxDistance = 2.0;
+    double trackMaxDistance = 4.0;
+
+    /**
+     * @brief   같은 gid의 정지 좌표 잡음을 고정하는 공간 히스테리시스 반경(m)
+     * @details 이전 출력에서 이 반경 안의 변화는 고정하고, 반경을 넘는 실제 이동은 원시 좌표와의
+     *          최대 공간 지연이 이 값 이하가 되도록 따라감. 0 이면 비활성화
+     */
+    double positionJitterRadius = 0.15;
 };
 
 inline void from_json(const nlohmann::json& j, RiskConfig& r) {
@@ -40,20 +63,17 @@ inline void from_json(const nlohmann::json& j, RiskConfig& r) {
     r.dangerousDistance = veda::detail::get_or<double>(j, "dangerousDistance", r.dangerousDistance);
     r.dedupMergeDistance = veda::detail::get_or<double>(j, "dedupMergeDistance", r.dedupMergeDistance);
     r.trackMaxDistance = veda::detail::get_or<double>(j, "trackMaxDistance", r.trackMaxDistance);
+    r.positionJitterRadius = veda::detail::get_or<double>(j, "positionJitterRadius", r.positionJitterRadius);
 }
 
 /**
- * @brief   월드 좌표를 하드웨어 zone 에 배정하는 축 정렬 경계 상자 (AABB)
+ * @brief   월드 좌표를 하드웨어 zone 에 배정하는 zone 설정
  *
- * @details 전역 주차장 도면 위에 미리 계산된 사각형 영역. 객체의 월드 좌표 (x,y) 가
- *          [minX,maxX] × [minY,maxY] 안에 들면(경계 포함) 그 zoneId 로 배정된다.
- *          각도 기반(원점 pie-slice) 방식을 대체 — 카메라가 도면 전역에 흩어져 있어도
- *          객체의 '실제 위치'로 배정하므로 100m 떨어진 다른 교차로가 엉뚱한 zone 으로
- *          새지 않는다.
+ * @details zoneId 0~3이 모두 있으면 원점 기준 방향 점수 {y, x, -y, -x}로 배정하며
+ *          좌표 범위 필드는 사용하지 않는다. 그 외 구성은 기존 AABB 범위로 배정한다.
  *
  * @note    zoneId 는 하드웨어 액추에이터 채널과 동일 정수다 (zoneId == channelId, 디스패치 계약).
- *          zones 는 서로 겹치지 않는 것을 전제로 하며, 겹치면 선언 순서상 먼저가 이긴다
- *          (SpatialZoneMapper = first-match wins). 어느 상자에도 안 들면 zoneId = -1.
+ *          AABB 모드에서는 겹치면 선언 순서상 먼저가 이기며, 어느 상자에도 안 들면 zoneId = -1.
  */
 struct SpatialZone {
     veda::ChannelId zoneId = -1;
@@ -173,8 +193,39 @@ inline void from_json(const nlohmann::json& j, CameraCalibration& c) {
 
 struct AppConfig {
     // [파이프라인 설정]
-    uint64_t windowSizeMs = 100;  ///< 프레임 집계 시간 윈도우 (ms)
-    int channelCount = 4;         ///< 채널(zone) 개수
+    /**
+     * @brief   프레임 집계 시간 윈도우 (ms)
+     *
+     * @details
+     * 소스 프레임 주기(T_src, compute-server 실측 4.96fps = 201.6ms)보다 **커야** 한다.
+     * 작으면 윈도우 하나에 전체 채널이 다 들어오지 못해 채널 조각화가 생긴다
+     * (100ms 에서는 윈도우당 평균 2/4 채널만 잡혔고, 위상이 프레임당 1.6ms 씩 밀리며
+     *  어느 두 채널이 잡히는지가 약 12.5초 주기로 순환했다).
+     *
+     * 200 이 아니라 220 인 이유: 200 은 T_src(201.6ms) 와 사실상 같아 드리프트에 따라
+     * 어떤 윈도우는 2프레임, 어떤 윈도우는 0프레임을 받는 최악의 경계다.
+     *
+     * @warning 이 값을 바꾸면 RiskConfig::trackMaxDistance 를 반드시 함께 재계산할 것.
+     *          추적 가능 최대 속도 = trackMaxDistance / max(windowSizeMs, T_src) 다.
+     */
+    uint64_t windowSizeMs = 220;
+    int channelCount = 4;  ///< 채널(zone) 개수
+
+    /**
+     * @brief   [데모 전용] 수신한 Human 을 Vehicle 로 치환할지 여부
+     *
+     * @details
+     * 실내 축소 데모에서 사람이 차량 대역을 대신 연기하기 위한 스위치다. 위험 판정은 차량
+     * 중심이라(ThresholdRiskPolicy 원칙 1: 차량이 없으면 전부 None) 사람만 걸어다니면
+     * 경보가 하나도 울리지 않는다. 그렇다고 판정 규칙을 데모용으로 고치면 시연한 것과
+     * 배포하는 것이 달라지므로, **핵심 로직은 그대로 두고 ingest 최외곽에서 cls 만 바꾼다.**
+     * 치환 지점은 MqttChannelReceiver::processMessage — 디코드/검증 직후, 집계기에 넣기 전이다.
+     *
+     * @warning 운영 배포에서는 반드시 false. true 면 실제 보행자가 전부 차량으로 판정되어
+     *          "사람 옆의 사람"이 차량 근접 경보를 울린다. 켜져 있으면 start() 가 에러 레벨로
+     *          경고를 남기므로 로그에서 바로 확인할 수 있다.
+     */
+    bool demoPedestrianProxy = false;
 
     /**
      * @name 로깅 (shared/Logger.h)
@@ -198,13 +249,30 @@ struct AppConfig {
 
     // [zone 배정 설정 — 전역 도면상의 공간 경계 상자]
     /**
-     * @brief   객체를 하드웨어 zone(액추에이터 채널)에 배정하는 공간 경계 상자 목록 (AABB)
+     * @brief   객체를 하드웨어 zone(액추에이터 채널)에 배정하는 zone 목록
      *
-     * @note 공간 상자는 본질적으로 현장 도면 실측값이라 의미 있는 범용 기본값이 없다.
+     * @note 4방향 구성은 zoneId 0~3을 각각 한 번씩 선언한다. 그 외 구성의 공간 상자는
+     *       본질적으로 현장 도면 실측값이라 의미 있는 범용 기본값이 없다.
      *       비워 두면 모든 객체가 zoneId=-1(미배정)로 남아 알람이 울리지 않으므로(안전한 실패),
      *       실제 배포에서는 반드시 config.json 의 "zones" 로 채울 것. SpatialZone 참고.
      */
     std::vector<SpatialZone> zones;
+
+    /**
+     * @brief   zone 경계 히스테리시스 여유 폭 (m). 0 이면 히스테리시스 비활성
+     *
+     * @details
+     * 직전 프레임의 zone 을 이 폭만큼 넓힌 상자 안에 있으면 zoneId 를 그대로 유지한다.
+     * 경계에 걸친 객체가 좌표 잡음만으로 zoneId 를 매 프레임 뒤집는 1프레임 진동을 막는데,
+     * 그 진동은 하류에서 두 채널의 알람이 번갈아 켜지는 것으로 나타난다.
+     *
+     * @warning [ zone 크기와의 결합 ] 이 값은 zone 크기에 비해 충분히 작아야 한다.
+     *          가장 작은 zone 의 절반 변보다 커지면 넓힌 상자가 이웃 zone 을 통째로 덮어
+     *          객체가 처음 배정된 zone 에서 영영 못 빠져나온다 (경보가 엉뚱한 채널에 고정됨).
+     *          축소 스케일 배치에서 zones 만 줄이고 이 값을 그대로 두는 것이 전형적인 실수라
+     *          load() 가 그 경우를 경고한다.
+     */
+    double hysteresisMargin = 0.5;
 
     // [좌표 변환 설정 — 채널별 카메라 캘리브레이션]
     std::vector<CameraCalibration> cameraCalibrations;
@@ -219,7 +287,7 @@ struct AppConfig {
     SimulationConfig simulation;
 
     // [네트워크 설정]
-    std::string mqttBrokerUrl = "tcp://localhost:1883";
+    std::string mqttBrokerUrl;  ///< config.json에서 주입 (예: tcp://host:1883, mqtts://host:8883)
     /**
      * @brief   RiskFrame 발행 토픽
      * @warning 기본값이 계약(veda::topic::kRisk = "veda/risk")과 달라서, 이대로 두면
@@ -227,8 +295,8 @@ struct AppConfig {
      *          다른 값을 넣으면 Contract.h 를 어기는 것이므로 클라이언트도 함께 바꿔야 함
      */
     std::string mqttSendTopic = veda::topic::kRisk;
-    std::string mqttCaFile = "/etc/veda/certs/ca.crt";  ///< mqttBrokerUrl이 ssl/mqtts일 때 사용하는 TLS CA 인증서 경로
-    std::string mqttClientId;                           ///< 비어있으면 MqttTransport가 자동 생성
+    std::string mqttCaFile;    ///< mqttBrokerUrl이 ssl/mqtts일 때 config.json에서 주입하는 TLS CA 경로
+    std::string mqttClientId;  ///< 비어있으면 MqttTransport가 자동 생성
     int mqttKeepAliveSeconds = 60;
     int mqttReconnectDelaySeconds = 1;      ///< 재연결 대기 시간 초기값 (초)
     int mqttReconnectDelayMaxSeconds = 10;  ///< 재연결 대기 시간 상한 (초, 지수 백오프)
@@ -286,10 +354,27 @@ struct AppConfig {
             config.logFileName = "veda.csv";
         }
         config.risk = veda::detail::get_or<RiskConfig>(j, "risk", config.risk);
+        if (!std::isfinite(config.risk.positionJitterRadius) || config.risk.positionJitterRadius < 0.0) {
+            std::cerr << "[Config] 경고: positionJitterRadius=" << config.risk.positionJitterRadius
+                      << " 는 0 이상의 유한한 값이어야 합니다 — 0(비활성화)으로 보정합니다.\n";
+            config.risk.positionJitterRadius = 0.0;
+        }
+        config.demoPedestrianProxy = veda::detail::get_or<bool>(j, "demoPedestrianProxy", config.demoPedestrianProxy);
         config.zones = veda::detail::get_or<std::vector<SpatialZone>>(j, "zones", config.zones);
+        config.hysteresisMargin = veda::detail::get_or<double>(j, "hysteresisMargin", config.hysteresisMargin);
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
         config.worldBounds = veda::detail::get_or<WorldBounds>(j, "worldBounds", config.worldBounds);
+
+        bool directionalZones = config.channelCount >= 4 && config.zones.size() == 4;
+        std::vector<bool> seenDirectionalIds(4, false);
+        for (const SpatialZone& zone : config.zones) {
+            if (zone.zoneId < 0 || zone.zoneId >= 4 || seenDirectionalIds[static_cast<std::size_t>(zone.zoneId)]) {
+                directionalZones = false;
+                break;
+            }
+            seenDirectionalIds[static_cast<std::size_t>(zone.zoneId)] = true;
+        }
 
         // [zone 값 검증] zoneId == channelId 이므로 하드웨어 채널 범위를 벗어난 항목을 통과시키면
         // 해당 구역은 위험도 집계에서 제외되어 알람이 울리지 않는다. 다른 채널로 clamp 하면
@@ -304,8 +389,9 @@ struct AppConfig {
                           << config.channelCount << ") 밖입니다 — 이 항목을 제거합니다.\n";
                 continue;
             }
-            if (!std::isfinite(zone.minX) || !std::isfinite(zone.maxX) || !std::isfinite(zone.minY) ||
-                !std::isfinite(zone.maxY) || zone.minX > zone.maxX || zone.minY > zone.maxY) {
+            if (!directionalZones &&
+                (!std::isfinite(zone.minX) || !std::isfinite(zone.maxX) || !std::isfinite(zone.minY) ||
+                 !std::isfinite(zone.maxY) || zone.minX > zone.maxX || zone.minY > zone.maxY)) {
                 std::cerr << "[Config] 경고: zones[" << i
                           << "] 의 좌표 범위가 유효하지 않습니다 — 이 항목을 제거합니다.\n";
                 continue;
@@ -323,8 +409,34 @@ struct AppConfig {
         }
         config.zones.swap(validZones);
 
-        if (config.worldBounds.enabled &&
-            (config.worldBounds.maxX <= config.worldBounds.minX || config.worldBounds.maxY <= config.worldBounds.minY)) {
+        // [히스테리시스 여유 폭 검증] SpatialZoneMapper 의 생성자는 비유한/음수를 예외로 거부하지만
+        // AppConfig 는 절대 던지지 않는 계약이므로 여기서 먼저 보정한다 (생성자 검사는 DI/테스트 경로용
+        // 이중 방어로 남는다). 잘못된 값에서 0(비활성)이 아니라 기본값으로 되돌리는 것은 의도적이다
+        // -- 히스테리시스를 조용히 꺼 버리면 두 채널 알람이 번갈아 켜지는 하드웨어 오동작이 되살아난다.
+        if (!std::isfinite(config.hysteresisMargin) || config.hysteresisMargin < 0.0) {
+            std::cerr << "[Config] 경고: hysteresisMargin=" << config.hysteresisMargin
+                      << " 는 0 이상의 유한한 값이어야 합니다 — 기본값(0.5)으로 보정합니다.\n";
+            config.hysteresisMargin = 0.5;
+        }
+
+        // 넓힌 상자가 이웃 zone 을 삼키면 객체가 첫 zone 에 영구히 갇힌다. 축소 스케일 배치에서
+        // zones 만 줄이고 이 값을 그대로 두는 실수가 흔해 경고만 남긴다 (보정하면 운영자 의도를
+        // 덮어쓰게 되고, 올바른 값은 현장 도면에 달려 있어 여기서 정할 수 없다).
+        if (!directionalZones && config.hysteresisMargin > 0.0 && !config.zones.empty()) {
+            double smallestHalfExtent = std::numeric_limits<double>::max();
+            for (const SpatialZone& zone : config.zones) {
+                smallestHalfExtent =
+                    std::min({smallestHalfExtent, (zone.maxX - zone.minX) * 0.5, (zone.maxY - zone.minY) * 0.5});
+            }
+            if (config.hysteresisMargin > smallestHalfExtent) {
+                std::cerr << "[Config] 경고: hysteresisMargin(" << config.hysteresisMargin
+                          << ") 이 가장 작은 zone 의 절반 변(" << smallestHalfExtent
+                          << ") 보다 큽니다 — 객체가 처음 배정된 zone 에서 빠져나오지 못할 수 있습니다.\n";
+            }
+        }
+
+        if (config.worldBounds.enabled && (config.worldBounds.maxX <= config.worldBounds.minX ||
+                                           config.worldBounds.maxY <= config.worldBounds.minY)) {
             std::cerr << "[Config] 경고: worldBounds 범위가 비어 있습니다 (max <= min) — 범위 검사를 끕니다.\n";
             config.worldBounds.enabled = false;
         }

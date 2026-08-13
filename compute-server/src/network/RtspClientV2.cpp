@@ -4,29 +4,89 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <openssl/md5.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
-#include <random>
+#include <limits>
+#include <optional>
 #include <sstream>
 
 #include "Logger.h"
 
 namespace {
 constexpr const char* kIface = "Network";
+constexpr std::size_t kMaxRtspHeaderBytes = 64 * 1024;
+constexpr std::size_t kMaxDigestParameterBytes = 256;
 
 /// @brief RTSP 응답의 첫 줄(상태 줄, 예: "RTSP/1.0 401 Unauthorized")만 잘라냄 - 진단용
 std::string statusLine(const std::string& response) {
-    const size_t end = response.find("\r\n");
-    return end == std::string::npos ? response : response.substr(0, end);
+    const std::size_t end = std::min(response.find("\r\n"), kMaxDigestParameterBytes);
+    std::string line = response.substr(0, end);
+    std::replace_if(line.begin(), line.end(), [](unsigned char c) { return c < 0x20 || c == 0x7F; }, '_');
+    return line;
+}
+
+bool isSafeHeaderComponent(std::string_view value, std::size_t maxLength) {
+    return !value.empty() && value.size() <= maxLength && std::none_of(value.begin(), value.end(), [](unsigned char c) {
+        return c < 0x20 || c == 0x7F || c == '"' || c == '\\';
+    });
+}
+
+std::optional<std::string> extractQuotedParameter(std::string_view response, std::string_view name) {
+    const std::string prefix = std::string(name) + "=\"";
+    const std::size_t begin = response.find(prefix);
+    if (begin == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    const std::size_t valueBegin = begin + prefix.size();
+    const std::size_t end = response.find('"', valueBegin);
+    if (end == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    const std::string_view value = response.substr(valueBegin, end - valueBegin);
+    if (!isSafeHeaderComponent(value, kMaxDigestParameterBytes)) {
+        return std::nullopt;
+    }
+
+    return std::string(value);
+}
+
+std::optional<int> parseBoundedInt(std::string_view value, int minValue, int maxValue) {
+    int parsed = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (error != std::errc{} || end == value.data() || parsed < minValue || parsed > maxValue) {
+        return std::nullopt;
+    }
+
+    return parsed;
+}
+
+std::string tlsError() {
+    const unsigned long code = ERR_get_error();
+    if (code == 0) {
+        return "unknown TLS error";
+    }
+
+    char buffer[256];
+    ERR_error_string_n(code, buffer, sizeof(buffer));
+    return buffer;
 }
 
 }  // namespace
@@ -40,16 +100,26 @@ RtspClientV2::RtspClientV2(const AppConfig& config)
       keepAliveIntervalSec_(config.rtspKeepAliveIntervalSec),
       metricsReportInterval_(config.metricsReportIntervalMs),
       cfg_(config) {
+    configValid_ = config.rtspPort > 0 && config.rtspPort <= 65535 && isSafeHeaderComponent(config.rtspUser, 255) &&
+                   isSafeHeaderComponent(config.rtspSetupUri, 2048) &&
+                   isSafeHeaderComponent(config.rtspPlayUri, 2048) && config.rtspPass.size() <= 255 &&
+                   !AppConfig::containsControlCharacters(config.rtspPass) && config.rtspCaFile.size() <= 4096 &&
+                   !AppConfig::containsControlCharacters(config.rtspCaFile) && config.rtspServerName.size() <= 255 &&
+                   !AppConfig::containsControlCharacters(config.rtspServerName);
     sockBuf_.resize(readBufBytes_);
     rtpPacket_.resize(kMaxRtpPayloadSize);
 
-    // client nonce 를 세션마다 무작위로 생성 (하드코딩된 고정 cnonce는 Digest 재전송 공격에 취약)
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<std::uint32_t> dist;
-    char cnonceBuf[9];
-    snprintf(cnonceBuf, sizeof(cnonceBuf), "%08x", dist(gen));
-    cnonce_ = cnonceBuf;
+    std::array<unsigned char, 16> nonceBytes{};
+    if (RAND_bytes(nonceBytes.data(), static_cast<int>(nonceBytes.size())) != 1) {
+        configValid_ = false;
+        return;
+    }
+    static constexpr char kHex[] = "0123456789abcdef";
+    cnonce_.resize(nonceBytes.size() * 2);
+    for (std::size_t i = 0; i < nonceBytes.size(); ++i) {
+        cnonce_[i * 2] = kHex[nonceBytes[i] >> 4];
+        cnonce_[i * 2 + 1] = kHex[nonceBytes[i] & 0x0F];
+    }
 }
 
 RtspClientV2::~RtspClientV2() {
@@ -65,10 +135,17 @@ RtspClientV2::~RtspClientV2() {
 }
 
 void RtspClientV2::closeSocket() noexcept {
-    // close 전에 무효화: 이후 cancel()이 들어와도 이미 닫힌(또는 번호가 재사용된) fd에 shutdown 하지 않음
-    cancelFd_.store(-1, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (ssl_ != nullptr) {
+        SSL_free(ssl_);
+        ssl_ = nullptr;
+    }
+    if (sslContext_ != nullptr) {
+        SSL_CTX_free(sslContext_);
+        sslContext_ = nullptr;
+    }
     if (sock_ != -1) {
-        close(sock_);
+        ::close(sock_);
         sock_ = -1;
     }
 }
@@ -76,40 +153,175 @@ void RtspClientV2::closeSocket() noexcept {
 void RtspClientV2::cancel() noexcept {
     cancelled_.store(true, std::memory_order_release);
 
-    // shutdown() 은 fd를 닫지 않고 연결만 끊으므로, 블로킹 중인 recv()가 즉시 0/-1로 반환된다.
-    // (close()를 쓰면 소유자 스레드가 같은 fd 번호를 다시 쓰는 순간 경합이 생김)
-    const int fd = cancelFd_.load(std::memory_order_acquire);
-    if (fd != -1) {
-        ::shutdown(fd, SHUT_RDWR);
+    // fd 조회와 shutdown을 close와 같은 임계영역에 둬 번호 재사용 사이의 TOCTOU를 없앤다.
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (sock_ != -1) {
+        ::shutdown(sock_, SHUT_RDWR);
     }
 }
 
+bool RtspClientV2::sendAll(std::string_view request, const char* operation) {
+    std::size_t sent = 0;
+    while (sent < request.size()) {
+        ssize_t result = 0;
+        if (ssl_ != nullptr) {
+            std::lock_guard<std::mutex> tlsLock(tlsIoMutex_);
+            const std::size_t remaining = request.size() - sent;
+            const int chunk =
+                static_cast<int>(std::min(remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+            result = SSL_write(ssl_, request.data() + sent, chunk);
+            if (result <= 0) {
+                const int error = SSL_get_error(ssl_, static_cast<int>(result));
+                if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+                    continue;
+                logError(kIface, std::string(operation) + " TLS 전송 실패 - " + tlsError());
+                return false;
+            }
+        } else {
+            result = ::send(sock_, request.data() + sent, request.size() - sent, MSG_NOSIGNAL);
+        }
+        if (result > 0) {
+            sent += static_cast<std::size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+
+        const char* reason = result == 0 ? "연결이 닫힘" : std::strerror(errno);
+        logError(kIface, std::string(operation) + " 전송 실패 - " + reason);
+        return false;
+    }
+    return true;
+}
+
+ssize_t RtspClientV2::recvSome(void* buffer, std::size_t length) noexcept {
+    if (ssl_ == nullptr) {
+        return ::recv(sock_, buffer, length, 0);
+    }
+
+    const int chunk = static_cast<int>(std::min(length, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+    while (true) {
+        std::lock_guard<std::mutex> tlsLock(tlsIoMutex_);
+        const int result = SSL_read(ssl_, buffer, chunk);
+        if (result > 0) {
+            return result;
+        }
+
+        const int error = SSL_get_error(ssl_, result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+            continue;
+        }
+
+        return result;
+    }
+}
+
+bool RtspClientV2::startTls() {
+    sslContext_ = SSL_CTX_new(TLS_client_method());
+    if (sslContext_ == nullptr) {
+        logError(kIface, "TLS context 생성 실패 - " + tlsError());
+        return false;
+    }
+    if (SSL_CTX_set_min_proto_version(sslContext_, TLS1_2_VERSION) != 1) {
+        logError(kIface, "TLS 최소 버전 설정 실패 - " + tlsError());
+        return false;
+    }
+    SSL_CTX_set_verify(sslContext_, SSL_VERIFY_PEER, nullptr);
+
+    const int trustLoaded = cfg_.rtspCaFile.empty()
+                                ? SSL_CTX_set_default_verify_paths(sslContext_)
+                                : SSL_CTX_load_verify_locations(sslContext_, cfg_.rtspCaFile.c_str(), nullptr);
+    if (trustLoaded != 1) {
+        logError(kIface, "RTSP CA 로드 실패 - " + tlsError());
+        return false;
+    }
+
+    ssl_ = SSL_new(sslContext_);
+    if (ssl_ == nullptr || SSL_set_fd(ssl_, sock_) != 1) {
+        logError(kIface, "TLS session 초기화 실패 - " + tlsError());
+        return false;
+    }
+
+    X509_VERIFY_PARAM* verify = SSL_get0_param(ssl_);
+    if (verify == nullptr) {
+        logError(kIface, "RTSP 인증서 검증 context 조회 실패");
+        return false;
+    }
+    if (cfg_.rtspServerName.empty()) {
+        if (X509_VERIFY_PARAM_set1_ip_asc(verify, cfg_.rtspIp.c_str()) != 1) {
+            logError(kIface, "RTSP 인증서 IP 검증 설정 실패");
+            return false;
+        }
+    } else {
+        if (SSL_set_tlsext_host_name(ssl_, cfg_.rtspServerName.c_str()) != 1 ||
+            SSL_set1_host(ssl_, cfg_.rtspServerName.c_str()) != 1) {
+            logError(kIface, "RTSP 인증서 이름 검증 설정 실패 - " + tlsError());
+            return false;
+        }
+    }
+
+    if (SSL_connect(ssl_) != 1) {
+        logError(kIface, "RTSP TLS handshake 실패 - " + tlsError());
+        return false;
+    }
+    if (SSL_get_verify_result(ssl_) != X509_V_OK) {
+        logError(kIface, "RTSP 서버 인증서 검증 실패");
+        return false;
+    }
+    return true;
+}
+
 bool RtspClientV2::connect() {
-    sock_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_ < 0) {
-        sock_ = -1;  // 불변식 유지: 실패 시 항상 -1
+    if (!configValid_) {
+        logError(kIface, "RTSP 설정에 비어 있는 필수값, 제어문자 또는 과도한 길이가 있어 연결을 거부함");
+        return false;
+    }
+    const int newSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (newSocket < 0) {
         logError(kIface, "소켓 생성 실패");
         return false;
     }
 
-    // cancel() 이 다른 스레드에서 이 fd 에 shutdown() 을 걸 수 있도록 공개 (원자적)
-    cancelFd_.store(sock_, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        if (cancelled_.load(std::memory_order_acquire)) {
+            ::close(newSocket);
+            return false;
+        }
+        sock_ = newSocket;
+    }
+
+    const auto failSocketCall = [this](const char* operation) {
+        const int error = errno;
+        logError(kIface, std::string(operation) + " 실패 - " + std::strerror(error));
+        closeSocket();
+        return false;
+    };
 
     struct timeval tv {
         recvTimeoutSec_, 0
     };
-    setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        return failSocketCall("SO_RCVTIMEO 설정");
+    }
+    if (setsockopt(sock_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        return failSocketCall("SO_SNDTIMEO 설정");
+    }
 
     const int noDelay = 1;
-    setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
+    if (setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay)) < 0) {
+        return failSocketCall("TCP_NODELAY 설정");
+    }
 
-    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &socketRecvBufBytes_, sizeof(socketRecvBufBytes_));
+    if (setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &socketRecvBufBytes_, sizeof(socketRecvBufBytes_)) < 0) {
+        return failSocketCall("SO_RCVBUF 설정");
+    }
 
     struct sockaddr_in serverAddr {};
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(static_cast<uint16_t>(cfg_.rtspPort));
-    // inet_pton 은 점 표기 IPv4 만 처리한다. 실패(호스트명/오타)를 확인하지 않으면 sin_addr 가
-    // 0 인 채로 0.0.0.0 에 접속을 시도해 원인 모를 실패로 이어진다
+    // inet_pton은 점 표기 IPv4 만 처리한다.
     if (inet_pton(AF_INET, cfg_.rtspIp.c_str(), &serverAddr.sin_addr) != 1) {
         logError(kIface, "잘못된 rtspIp=\"" + cfg_.rtspIp + "\" - 점 표기 IPv4 주소여야 합니다 (호스트명 미지원)");
         closeSocket();
@@ -117,9 +329,14 @@ bool RtspClientV2::connect() {
     }
 
     // connect() 자체는 SO_RCVTIMEO의 영향을 받지 않으므로, 논블로킹으로 전환한 뒤
-    // select()로 명시적 타임아웃을 건다 (카메라 무응답/방화벽 SYN drop 시 무한 대기 방지)
+    // select()로 명시적 타임아웃을 건다. (카메라 무응답/방화벽 SYN drop시 무한 대기 방지)
     const int origFlags = fcntl(sock_, F_GETFL, 0);
-    fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK);
+    if (origFlags < 0) {
+        return failSocketCall("socket flag 조회");
+    }
+    if (fcntl(sock_, F_SETFL, origFlags | O_NONBLOCK) < 0) {
+        return failSocketCall("nonblocking 설정");
+    }
 
     const int connectResult = ::connect(sock_, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr));
     if (connectResult < 0 && errno != EINPROGRESS) {
@@ -138,7 +355,10 @@ bool RtspClientV2::connect() {
         };
 
         const int selectResult = select(sock_ + 1, nullptr, &writeSet, nullptr, &connectTimeout);
-        if (selectResult <= 0) {
+        if (selectResult < 0) {
+            return failSocketCall("연결 대기");
+        }
+        if (selectResult == 0) {
             logError(kIface, "연결 시도 타임아웃 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ", " +
                                  std::to_string(connectTimeoutSec_) + "초)");
             closeSocket();
@@ -147,7 +367,9 @@ bool RtspClientV2::connect() {
 
         int sockErr = 0;
         socklen_t sockErrLen = sizeof(sockErr);
-        getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen);
+        if (getsockopt(sock_, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen) < 0) {
+            return failSocketCall("연결 결과 조회");
+        }
         if (sockErr != 0) {
             logError(kIface, "연결 실패 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ") - " +
                                  std::strerror(sockErr));
@@ -157,15 +379,25 @@ bool RtspClientV2::connect() {
     }
 
     // 이후 recvHeaders/readBytes 등은 블로킹 소켓을 전제로 하므로 원래 모드로 복원
-    fcntl(sock_, F_SETFL, origFlags);
+    if (fcntl(sock_, F_SETFL, origFlags) < 0) {
+        return failSocketCall("blocking mode 복원");
+    }
 
-    logSuccess(kIface, "연결 성공 (" + cfg_.rtspIp + ":" + std::to_string(cfg_.rtspPort) + ")");
+    if (!cfg_.rtspUseTls) {
+        logError(kIface, "RTSP TLS가 명시적으로 비활성화됨 - 신뢰된 격리망에서만 사용하십시오");
+    } else if (!startTls()) {
+        closeSocket();
+        return false;
+    }
+
+    logSuccess(kIface, std::string(cfg_.rtspUseTls ? "TLS " : "평문 ") + "연결 성공 (" + cfg_.rtspIp + ":" +
+                           std::to_string(cfg_.rtspPort) + ")");
     return true;
 }
 
 bool RtspClientV2::fillReadBuffer() {
     sockBufPos_ = 0;
-    const ssize_t n = recv(sock_, sockBuf_.data(), sockBuf_.size(), 0);
+    const ssize_t n = recvSome(sockBuf_.data(), sockBuf_.size());
     ++metrics_.recvSyscalls;
     if (n <= 0) {
         sockBufLen_ = 0;
@@ -185,6 +417,10 @@ bool RtspClientV2::readByte(std::uint8_t& out) {
 }
 
 bool RtspClientV2::readBytes(std::uint8_t* dest, std::size_t len) {
+    if (dest == nullptr && len != 0) {
+        return false;
+    }
+
     std::size_t copied = 0;
     while (copied < len) {
         if (sockBufPos_ >= sockBufLen_) {
@@ -204,13 +440,13 @@ bool RtspClientV2::recvHeaders(std::string& out) {
     out.clear();
     char buf[4096];
     while (out.find("\r\n\r\n") == std::string::npos) {
-        const int n = recv(sock_, buf, sizeof(buf), 0);
+        const ssize_t n = recvSome(buf, sizeof(buf));
         if (n <= 0) {
             return false;
         }
 
         out.append(buf, static_cast<size_t>(n));
-        if (out.size() > 65536) { // 하드 코딩..?
+        if (out.size() > kMaxRtspHeaderBytes) {
             return false;
         }
     }
@@ -221,9 +457,7 @@ bool RtspClientV2::setup() {
     std::string req1 = "SETUP " + cfg_.rtspSetupUri +
                        " RTSP/1.0\r\nCSeq: 1\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
-    // MSG_NOSIGNAL: 카메라가 이미 연결을 끊었으면 send() 가 SIGPIPE 를 내며 프로세스를 죽일 수 있음
-    if (send(sock_, req1.c_str(), req1.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("SETUP 1차 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req1, "SETUP 1차 요청")) {
         return false;
     }
 
@@ -233,26 +467,21 @@ bool RtspClientV2::setup() {
         return false;
     }
 
-    const size_t realmPos = res1.find("realm=\"");
-    const size_t noncePos = res1.find("nonce=\"");
-    if (realmPos != std::string::npos) {
-        realm_ = res1.substr(realmPos + 7, res1.find('"', realmPos + 7) - (realmPos + 7));
-    }
-    if (noncePos != std::string::npos) {
-        nonce_ = res1.substr(noncePos + 7, res1.find('"', noncePos + 7) - (noncePos + 7));
-    }
-    if (nonce_.empty()) {
+    const auto realm = extractQuotedParameter(res1, "realm");
+    const auto nonce = extractQuotedParameter(res1, "nonce");
+    if (!realm || !nonce) {
         logError(kIface, "인증 파라미터(nonce) 파싱 실패 - SETUP 1차 응답: [" + statusLine(res1) + "]");
         return false;
     }
+    realm_ = *realm;
+    nonce_ = *nonce;
 
     std::string auth = buildDigestHeader("SETUP", cfg_.rtspSetupUri);
     std::string req2 = "SETUP " + cfg_.rtspSetupUri +
                        " RTSP/1.0\r\nCSeq: 2\r\n"
                        "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n" +
                        auth + "\r\n";
-    if (send(sock_, req2.c_str(), req2.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("SETUP 2차(인증) 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req2, "SETUP 2차(인증) 요청")) {
         return false;
     }
 
@@ -272,17 +501,74 @@ bool RtspClientV2::setup() {
         return false;
     }
 
-    sessionId_ = res2.substr(sessPos + 9, res2.find_first_of(";\r\n", sessPos) - (sessPos + 9));
-    logSuccess(kIface, "인증 성공, 세션 ID: " + sessionId_);
+    const std::size_t sessionBegin = sessPos + 9;
+    const std::size_t sessionEnd = res2.find_first_of(";\r\n", sessionBegin);
+    const std::string_view session = std::string_view(res2).substr(
+        sessionBegin, sessionEnd == std::string::npos ? std::string::npos : sessionEnd - sessionBegin);
+    if (!isSafeHeaderComponent(session, kMaxDigestParameterBytes)) {
+        logError(kIface, "안전하지 않은 RTSP Session 식별자 - 연결 거부");
+        return false;
+    }
+    sessionId_.assign(session);
+
+    // Session 헤더 '한 줄' 전체를 떼어 timeout= 을 읽는다.
+    // sessionId_ 는 ';' 에서 잘리므로 timeout 은 그 뒤에 남아 있고, 예전에는 통째로 버려졌다
+    const std::size_t sessLineEnd = res2.find("\r\n", sessPos);
+    deriveKeepAliveInterval(
+        res2.substr(sessPos, (sessLineEnd == std::string::npos ? res2.size() : sessLineEnd) - sessPos));
+
+    // 인터리브 채널은 '요청'이 아니라 '응답'이 확정한다.
+    // 응답을 무시하고 0 을 가정하면, 서버가 2-3 을 배정한 경우 메타데이터를 통째로 놓치거나
+    // (channel != 0 으로 전부 버림) 엉뚱한 트랙을 ONVIF 파서에 먹이게 된다
+    const std::size_t ilPos = res2.find("interleaved=");
+    if (ilPos != std::string::npos) {
+        const std::string_view value(res2.data() + ilPos + 12, res2.size() - ilPos - 12);
+        if (const auto announced = parseBoundedInt(value, 0, 255))
+            rtpChannel_ = *announced;
+    }
+
+    logSuccess(kIface,
+               "인증 성공, 세션 ID: " + sessionId_ + ", 인터리브 채널=" + std::to_string(rtpChannel_) +
+                   ", 세션 타임아웃=" + (sessionTimeoutSec_ > 0 ? std::to_string(sessionTimeoutSec_) + "s" : "미통보") +
+                   ", keep-alive 주기=" + std::to_string(effectiveKeepAliveSec_) + "s");
     return true;
+}
+
+void RtspClientV2::deriveKeepAliveInterval(const std::string& sessionLine) {
+    sessionTimeoutSec_ = 0;
+
+    const std::size_t toPos = sessionLine.find("timeout=");
+    if (toPos != std::string::npos) {
+        const std::string_view value(sessionLine.data() + toPos + 8, sessionLine.size() - toPos - 8);
+        sessionTimeoutSec_ = parseBoundedInt(value, 1, AppConfig::kMaxRtspPolicySeconds).value_or(0);
+    }
+
+    // 통보가 없으면 설정값을 그대로 쓴다 (기존 동작)
+    effectiveKeepAliveSec_ = keepAliveIntervalSec_;
+
+    if (sessionTimeoutSec_ > 0) {
+        // 절반 주기: 한 번 유실돼도 다음 keep-alive 가 만료 전에 도착한다
+        const int safeInterval = sessionTimeoutSec_ / 2;
+        effectiveKeepAliveSec_ = std::min(keepAliveIntervalSec_, safeInterval);
+
+        if (effectiveKeepAliveSec_ < keepAliveIntervalSec_) {
+            logSuccess(kIface, "카메라가 세션 타임아웃 " + std::to_string(sessionTimeoutSec_) +
+                                   "s 를 통보 - keep-alive 주기를 설정값(" + std::to_string(keepAliveIntervalSec_) +
+                                   "s)에서 " + std::to_string(effectiveKeepAliveSec_) + "s 로 낮춤");
+        }
+    }
+
+    // 0 이면 keepAliveLoop 의 sleep 루프가 돌지 않아 폭주하므로 반드시 1 이상
+    if (effectiveKeepAliveSec_ < 1) {
+        effectiveKeepAliveSec_ = 1;
+    }
 }
 
 void RtspClientV2::play() {
     std::string auth = buildDigestHeader("PLAY", cfg_.rtspPlayUri);
     std::string req =
         "PLAY " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: 3\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
-    if (send(sock_, req.c_str(), req.length(), MSG_NOSIGNAL) < 0) {
-        logError(kIface, std::string("PLAY 요청 전송 실패 - ") + std::strerror(errno));
+    if (!sendAll(req, "PLAY 요청")) {
         return;
     }
 
@@ -308,6 +594,38 @@ void RtspClientV2::play() {
     keepaliveThread_ = std::thread(&RtspClientV2::keepAliveLoop, this);
 }
 
+std::size_t RtspClientV2::rtpHeaderLength(const std::uint8_t* packet, std::size_t packetLen) {
+    if (packetLen < static_cast<std::size_t>(kRtpHeaderSize)) {
+        return 0;
+    }
+
+    // 버전 검사: RTP 가 아니면(예: 스트림 desync 로 엉뚱한 바이트를 읽은 경우) 즉시 거른다
+    if (static_cast<std::uint8_t>((packet[0] >> 6) & 0x03) != kRtpVersion) {
+        return 0;
+    }
+
+    // 고정 헤더 + CSRC 목록 (첫 바이트 하위 4비트 = CSRC 개수, 항목당 4바이트)
+    std::size_t headerLen = static_cast<std::size_t>(kRtpHeaderSize) + 4u * static_cast<std::size_t>(packet[0] & 0x0F);
+    if (packetLen < headerLen) {
+        return 0;
+    }
+
+    // 확장 헤더 (X 비트): 4바이트 헤더 + (16비트 length 필드 x 4바이트)
+    if ((packet[0] & 0x10) != 0) {
+        if (packetLen < headerLen + 4u) {
+            return 0;
+        }
+        const std::size_t extWords =
+            (static_cast<std::size_t>(packet[headerLen + 2]) << 8) | static_cast<std::size_t>(packet[headerLen + 3]);
+        headerLen += 4u + 4u * extWords;
+        if (packetLen < headerLen) {
+            return 0;
+        }
+    }
+
+    return headerLen;
+}
+
 void RtspClientV2::run() {
     std::string metadataBuffer;
     metadataBuffer.reserve(8192);
@@ -319,42 +637,47 @@ void RtspClientV2::run() {
         if (!readByte(sync)) {
             break;
         }
-            
+
         if (sync != '$') {
             continue;
-        }            
+        }
 
         std::uint8_t header[3];
         if (!readBytes(header, 3)) {
             break;
         }
-            
+
         const int channel = header[0];
         const int payloadLen = (header[1] << 8) | header[2];
 
         if (static_cast<std::size_t>(payloadLen) > kMaxRtpPayloadSize) {
             break;
         }
-            
+
         if (!readBytes(rtpPacket_.data(), static_cast<std::size_t>(payloadLen))) {
             break;
         }
-            
-        if (channel != 0) {
+
+        // 메타데이터 트랙이 실린 채널만 통과시킨다. SETUP 응답이 배정한 값이며,
+        // 나머지(RTCP, 다른 트랙)는 여기서 버려야 ONVIF 파서에 비-메타데이터가 들어가지 않는다
+        if (channel != rtpChannel_) {
             continue;
         }
-            
-        if (payloadLen < kRtpHeaderSize) {
-            continue;
+
+        // RTP 헤더는 고정 12바이트가 아니다 -- CSRC/확장 헤더만큼 길어진다.
+        // 고정 12로 자르면 페이로드 앞에 이진 쓰레기가 붙어 XML 이 깨진다
+        const std::size_t rtpHeaderLen = rtpHeaderLength(rtpPacket_.data(), static_cast<std::size_t>(payloadLen));
+        if (rtpHeaderLen == 0 || static_cast<std::size_t>(payloadLen) <= rtpHeaderLen) {
+            continue;  // RTP 가 아니거나 페이로드가 비어 있음
         }
 
         if (metadataBuffer.empty()) {
             frameAssembleStart_ = std::chrono::steady_clock::now();
         }
-            
+
         const bool marker = (rtpPacket_[1] & 0x80) != 0;
-        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + kRtpHeaderSize),
-                              static_cast<size_t>(payloadLen - kRtpHeaderSize));
+        metadataBuffer.append(reinterpret_cast<const char*>(rtpPacket_.data() + rtpHeaderLen),
+                              static_cast<size_t>(payloadLen) - rtpHeaderLen);
 
         if (metadataBuffer.size() > maxMetadataFrameSize_) {
             // marker bit가 누락됐거나 스트림이 손상된 것으로 간주 -> 무한정 쌓이기 전에
@@ -373,7 +696,7 @@ void RtspClientV2::run() {
             if (onPayloadReceived) {
                 onPayloadReceived(std::string_view(metadataBuffer));
             }
-                
+
             metadataBuffer.clear();
 
             reportMetricsIfDue();
@@ -420,20 +743,23 @@ void RtspClientV2::reportMetricsIfDue() {
 }
 
 std::string RtspClientV2::md5Hex(const std::string& input) {
-    unsigned char hash[MD5_DIGEST_LENGTH];
-    // NOLINTNEXTLINE
-    MD5(reinterpret_cast<const unsigned char*>(input.c_str()), input.length(), hash);
-    char output[33];
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
-        snprintf(output + i * 2, 3, "%02x", hash[i]);
+    std::array<unsigned char, EVP_MAX_MD_SIZE> hash{};
+    unsigned int hashLength = 0;
+    if (EVP_Digest(input.data(), input.size(), hash.data(), &hashLength, EVP_md5(), nullptr) != 1)
+        return {};
+
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string output(hashLength * 2, '\0');
+    for (std::size_t i = 0; i < hashLength; ++i) {
+        output[i * 2] = kHex[hash[i] >> 4];
+        output[i * 2 + 1] = kHex[hash[i] & 0x0F];
     }
-        
-    return std::string(output);
+    return output;
 }
 
 std::string RtspClientV2::buildDigestHeader(const std::string& method, const std::string& uri) {
     char ncBuf[9];
-    snprintf(ncBuf, sizeof(ncBuf), "%08x", nonceCount_++);
+    snprintf(ncBuf, sizeof(ncBuf), "%08x", static_cast<unsigned int>(nonceCount_++));
     const std::string nc(ncBuf);
     const std::string& cnonce = cnonce_;
     const std::string qop = "auth";
@@ -442,19 +768,18 @@ std::string RtspClientV2::buildDigestHeader(const std::string& method, const std
     const std::string ha2 = md5Hex(method + ":" + uri);
     const std::string response = md5Hex(ha1 + ":" + nonce_ + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2);
 
-    char header[1024];
-    snprintf(header, sizeof(header),
-             "Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", "
-             "uri=\"%s\", response=\"%s\", qop=%s, nc=%s, cnonce=\"%s\"\r\n",
-             cfg_.rtspUser.c_str(), realm_.c_str(), nonce_.c_str(), uri.c_str(), response.c_str(), qop.c_str(),
-             nc.c_str(), cnonce.c_str());
-    return std::string(header);
+    std::string header;
+    header.reserve(128 + cfg_.rtspUser.size() + realm_.size() + nonce_.size() + uri.size() + cnonce.size());
+    header = "Authorization: Digest username=\"" + cfg_.rtspUser + "\", realm=\"" + realm_ + "\", nonce=\"" + nonce_ +
+             "\", uri=\"" + uri + "\", response=\"" + response + "\", qop=" + qop + ", nc=" + nc + ", cnonce=\"" +
+             cnonce + "\"\r\n";
+    return header;
 }
 
 void RtspClientV2::keepAliveLoop() {
     while (keepRunning_) {
         // 1초씩 쪼개서 자는 이유: 종료 요청(keepRunning_=false)에 최대 1초 안에 반응하기 위함
-        for (int i = 0; i < keepAliveIntervalSec_ && keepRunning_; ++i) {
+        for (int i = 0; i < effectiveKeepAliveSec_ && keepRunning_; ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         if (!keepRunning_) {
@@ -465,8 +790,7 @@ void RtspClientV2::keepAliveLoop() {
         std::string req = "GET_PARAMETER " + cfg_.rtspPlayUri + " RTSP/1.0\r\nCSeq: " + std::to_string(cseq_++) +
                           "\r\nSession: " + sessionId_ + "\r\n" + auth + "\r\n";
 
-        if (send(sock_, req.c_str(), req.length(), MSG_NOSIGNAL) < 0) {
-            logError(kIface, "Keep-alive 전송 실패 - 연결 끊김 추정");
+        if (!sendAll(req, "Keep-alive")) {
             break;
         }
     }

@@ -14,13 +14,6 @@
  * @details
  * IMetadataSource는 Pipeline이 보는 pull 인터페이스이고,
  * INetwork는 RTSP 프로토콜 자체(Digest 인증, TCP 인터리브 프레이밍)를 감춘 push 인터페이스
- *
- * @note [ 일반화 ]
- * 현재 RTSP에 너무 치중됨
- * -- MQTT나 다른 프로토콜로 수정되었을 때 갈아엎어야 할 상황이 발생 가능성 존재
- *
- * @todo
- * - 프로토콜과 상관 없도록 추상화하기
  */
 class INetwork {
 public:
@@ -39,7 +32,7 @@ public:
     virtual bool setup() = 0;
 
     /**
-     * @brief   RTSP PLAY 로 스트리밍을 시작하고 keepalive 를 구동
+     * @brief   RTSP PLAY로 스트리밍을 시작하고 keepalive를 구동
      */
     virtual void play() = 0;
 

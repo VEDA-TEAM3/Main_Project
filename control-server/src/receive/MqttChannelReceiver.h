@@ -42,8 +42,11 @@ public:
      * @param transport         sink와 공유하는 MQTT 연결 (null이면 start()가 실패하고 로그만 남김)
      * @param channelCount      frame.ch / topic 채널 번호의 유효 범위 [0, channelCount) (AppConfig::channelCount)
      * @param retryIntervalMs   최초 연결 실패 시 재시도 간격 (AppConfig::mqttReceiverRetryIntervalMs)
+     * @param demoPedestrianProxy [데모 전용] true 면 수신한 Human 을 Vehicle 로 치환
+     *                            (AppConfig::demoPedestrianProxy). 기본 false — 기존 호출부는 그대로 컴파일된다
      */
-    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs);
+    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs,
+                        bool demoPedestrianProxy = false);
     ~MqttChannelReceiver() override;
 
     MqttChannelReceiver(const MqttChannelReceiver&) = delete;
@@ -61,8 +64,8 @@ private:
     bool tryConnect() noexcept;
     void retryLoop() noexcept;
 
-    void handleMessage(std::string_view topic, std::string_view payload) noexcept;   ///< mosquitto 스레드: enqueue 만
-    void pipelineLoop() noexcept;                                                    ///< PipelineWorker 스레드 루프
+    void handleMessage(std::string_view topic, std::string_view payload) noexcept;  ///< mosquitto 스레드: enqueue 만
+    void pipelineLoop() noexcept;                                                   ///< PipelineWorker 스레드 루프
     void processMessage(std::string_view topic, std::string_view payload) noexcept;  ///< 디코드+파이프라인(워커에서)
     void handleConnection(bool connected) noexcept;
     std::optional<veda::ChannelId> parseChannel(std::string_view topic, std::string_view suffix) const noexcept;
@@ -71,6 +74,7 @@ private:
     std::shared_ptr<MqttTransport> transport_;
     int channelCount_;
     std::chrono::milliseconds retryInterval_;
+    bool demoPedestrianProxy_;  ///< [데모 전용] processMessage 에서 Human -> Vehicle 치환 (생성 후 불변)
 
     mutable std::mutex callbackMutex_;
     FrameCallback frameCallback_;
@@ -91,11 +95,17 @@ private:
     struct RawMessage {
         std::string topic;
         std::string payload;
+
+        std::size_t byteSize() const noexcept { return topic.size() + payload.size(); }
     };
-    static constexpr std::size_t kMaxQueuedMessages = 4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
+    static constexpr std::size_t kMaxTopViewPayloadBytes = 64U * 1024U;
+    static constexpr std::size_t kMaxQueuedPayloadBytes = 8U * 1024U * 1024U;
+    static constexpr std::size_t kMaxQueuedMessages =
+        4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
     std::mutex queueMutex_;
     std::condition_variable queueCv_;
     std::deque<RawMessage> queue_;  ///< queueMutex_ 로 보호
+    std::size_t queuedBytes_ = 0;    ///< queueMutex_ 로 보호 (topic + payload 합계)
     bool queueStopping_ = false;    ///< queueMutex_ 로 보호
     std::thread pipelineThread_;
     std::atomic_uint64_t queueDroppedCount_{0};

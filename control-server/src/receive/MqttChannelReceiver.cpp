@@ -12,9 +12,13 @@ namespace {
 
 constexpr const char* kIface = "MqttChannelReceiver";
 constexpr std::string_view kChannelPrefix = "veda/ch/";
+constexpr std::size_t kMaxObjectsPerFrame = 256;
 
 bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noexcept {
     if (frame.v != veda::kSchemaVersion || frame.ts <= 0 || frame.ch < 0 || frame.ch >= channelCount) {
+        return false;
+    }
+    if (frame.objects.size() > kMaxObjectsPerFrame) {
         return false;
     }
     for (const veda::TopViewObject& object : frame.objects) {
@@ -28,8 +32,11 @@ bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noex
 }  // namespace
 
 MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
-                                         std::uint64_t retryIntervalMs)
-    : transport_(std::move(transport)), channelCount_(channelCount), retryInterval_(retryIntervalMs) {}
+                                         std::uint64_t retryIntervalMs, bool demoPedestrianProxy)
+    : transport_(std::move(transport)),
+      channelCount_(channelCount),
+      retryInterval_(retryIntervalMs),
+      demoPedestrianProxy_(demoPedestrianProxy) {}
 
 MqttChannelReceiver::~MqttChannelReceiver() { stop(); }
 
@@ -52,6 +59,14 @@ void MqttChannelReceiver::start() {
         running_.store(false, std::memory_order_release);
         logError(kIface, "transport가 null임 (AppContext에서 공유 MqttTransport 주입 필요)");
         return;
+    }
+
+    // 켜져 있는 줄 모른 채 운영에 나가면 실제 보행자가 전부 차량으로 판정된다.
+    // 기본 로그 레벨(info)에서도 보이도록 에러 레벨로 남긴다.
+    if (demoPedestrianProxy_) {
+        logError(kIface,
+                 "[데모 모드] demoPedestrianProxy=true — 수신되는 Human 을 전부 Vehicle 로 치환함. "
+                 "운영 배포에서는 반드시 false 로 둘 것");
     }
 
     // PipelineWorker 를 먼저 띄운다 (메시지가 들어오기 전에 소비자 준비). mosquitto 콜백 스레드를
@@ -86,6 +101,8 @@ void MqttChannelReceiver::stop() {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         queueStopping_ = true;
+        queue_.clear();
+        queuedBytes_ = 0;
     }
     queueCv_.notify_all();
     if (pipelineThread_.joinable()) {
@@ -146,16 +163,41 @@ void MqttChannelReceiver::handleMessage(std::string_view topic, std::string_view
     if (!running_.load(std::memory_order_acquire)) {
         return;
     }
+
+    // 신뢰할 수 없는 MQTT payload를 복사하거나 nlohmann DOM으로 확장하기 전에 차단한다.
+    // alive는 wire 계약상 정확히 1 byte("0" 또는 "1")이며, TopView/기타 메시지는
+    // 정상 최대 256-object 프레임에 여유를 둔 64 KiB까지만 허용한다.
+    const std::size_t maxPayloadBytes =
+        topic.ends_with("/alive") ? 1U : kMaxTopViewPayloadBytes;
+    if (payload.size() > maxPayloadBytes) {
+        recordDrop(topic, "payload too large");
+        return;
+    }
+
+    RawMessage incoming{std::string(topic), std::string(payload)};
+    const std::size_t incomingBytes = incoming.byteSize();
+    if (incomingBytes > kMaxQueuedPayloadBytes) {
+        recordDrop(topic, "message exceeds queue byte limit");
+        return;
+    }
+
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (queueStopping_) {
             return;
         }
-        if (queue_.size() >= kMaxQueuedMessages) {
+
+        // 메시지 개수와 총 바이트를 함께 제한한다. 단일 payload 상한만 두면
+        // 64 KiB × 4096건으로 payload 문자열만 약 256 MiB까지 적체될 수 있다.
+        while (!queue_.empty() &&
+               (queue_.size() >= kMaxQueuedMessages ||
+                queuedBytes_ + incomingBytes > kMaxQueuedPayloadBytes)) {
+            queuedBytes_ -= queue_.front().byteSize();
             queue_.pop_front();  // drop-oldest: 실시간 좌표라 오래된 프레임보다 최신이 항상 유용
             queueDroppedCount_.fetch_add(1, std::memory_order_relaxed);
         }
-        queue_.push_back(RawMessage{std::string(topic), std::string(payload)});
+        queue_.push_back(std::move(incoming));
+        queuedBytes_ += incomingBytes;
     }
     queueCv_.notify_one();
 }
@@ -170,6 +212,7 @@ void MqttChannelReceiver::pipelineLoop() noexcept {
                 return;  // 종료: 남은 큐는 버리고 빠져나감
             }
             message = std::move(queue_.front());
+            queuedBytes_ -= message.byteSize();
             queue_.pop_front();
         }
         // 무거운 작업(디코드 + fusion/dispatch 파이프라인 전체)은 전부 이 워커 스레드에서 수행
@@ -179,7 +222,7 @@ void MqttChannelReceiver::pipelineLoop() noexcept {
 
 void MqttChannelReceiver::processMessage(std::string_view topic, std::string_view payload) noexcept {
     if (const auto channel = parseChannel(topic, "/topview")) {
-        const veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
+        veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
         if (!isValidTopViewFrame(frame, channelCount_)) {
             recordDrop(topic, "invalid TopViewFrame");
             return;
@@ -187,6 +230,20 @@ void MqttChannelReceiver::processMessage(std::string_view topic, std::string_vie
         if (frame.ch != *channel) {
             recordDrop(topic, "topic/payload channel mismatch");
             return;
+        }
+
+        // [데모 전용 엣지 치환] 사람을 차량으로 바꿔 넣는다. 위험 판정은 차량 중심이라
+        // (원칙 1: 차량이 없으면 전부 None) 사람만 걸어서는 경보가 하나도 울리지 않는데,
+        // 판정 규칙을 데모용으로 고치면 시연한 것과 배포하는 것이 달라진다. 그래서 핵심
+        // 로직(ThresholdRiskPolicy/Fuser/ZoneMapper)은 전혀 건드리지 않고 파이프라인
+        // 최외곽 -- 디코드/검증 직후, 집계기에 들어가기 전 -- 에서 cls 만 바꾼다.
+        // 하류는 이것이 원래부터 차량이었던 것처럼 처리한다.
+        if (demoPedestrianProxy_) {
+            for (veda::TopViewObject& object : frame.objects) {
+                if (object.cls == veda::ObjectClass::Human) {
+                    object.cls = veda::ObjectClass::Vehicle;
+                }
+            }
         }
 
         FrameCallback callback;

@@ -24,11 +24,11 @@ public:
     ~MqttTopViewSink() override;
 
 protected:
-    bool prepare(const veda::TopViewFrame& in, veda::TopViewFrame& out) noexcept override;
+    bool prepare(const veda::TopViewFrame& in, veda::TopViewFrame& out) override;
     std::string describe(const veda::TopViewFrame& frame) const override;
 
 private:
     bool isValidFrame(const veda::TopViewFrame& frame) const noexcept;
 
-    int channelCount_;  ///< AppConfig::channelCount, frame.ch 유효성 검사 범위 [0, channelCount)
+    veda::ChannelId channelId_;  ///< 이 프로세스의 채널 (frame.ch는 반드시 이 값과 같아야 함)
 };
