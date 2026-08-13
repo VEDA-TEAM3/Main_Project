@@ -421,6 +421,7 @@ QQuickWidget* MainWindow::createQuickView(const QString& qmlFile, QWidget* paren
         view->setAttribute(Qt::WA_AlwaysStackOnTop);
     }
     view->setFocusPolicy(Qt::NoFocus);
+    installQuickCursorReset(view);
     view->setSource(QUrl(QStringLiteral("qrc:/qml/") + qmlFile));
 
     if (!view->rootObject()) {

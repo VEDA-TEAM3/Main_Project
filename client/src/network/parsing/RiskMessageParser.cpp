@@ -7,7 +7,7 @@
 #include <utility>
 
 namespace {
-constexpr int riskProtocolVersion = 2;
+constexpr int riskProtocolVersion = 1;
 constexpr int minimumZoneId = 0;
 
 bool readInteger(const QJsonObject& object, const QString& name, qint64& value) {
@@ -70,7 +70,7 @@ int parseZoneId(const QJsonObject& object, int channelCount) {
 }  // namespace
 
 /**
- * @brief         RiskFrame v2 MQTT payload를 화면 입력 모델로 변환합니다.
+ * @brief         RiskFrame MQTT payload를 화면 입력 모델로 변환합니다.
  * @param payload MQTT JSON payload
  * @param topic   수신 토픽
  * @param frame   변환된 위험 프레임

@@ -22,11 +22,11 @@ bool parse(const QByteArray& payload, RiskFrameData& frame) {
 }
 
 /**
- * @brief RiskFrame v2의 zoneId 경계와 미배정 처리 규칙을 검사합니다.
+ * @brief RiskFrame의 zoneId 경계와 미배정 처리 규칙을 검사합니다.
  */
 void checkZoneIdValidation() {
     const QByteArray payload = R"({
-        "v": 2,
+        "v": 1,
         "ts": 1786300000000,
         "objects": [
             {"gid": 1, "cls": "human", "pos": {"x": -50, "y": 0}, "zoneId": 0, "riskLevel": "normal"},
@@ -39,7 +39,7 @@ void checkZoneIdValidation() {
     })";
 
     RiskFrameData frame;
-    check(parse(payload, frame), "valid v2 frame must parse");
+    check(parse(payload, frame), "valid v1 frame must parse");
     check(frame.objects.size() == 6, "all supported objects must be retained");
     check(frame.objects.value(0).zoneId == 0, "zoneId 0 must be accepted");
     check(frame.objects.value(1).zoneId == 7, "zoneId 7 must be accepted");
@@ -49,15 +49,15 @@ void checkZoneIdValidation() {
     check(frame.objects.value(5).zoneId == -1, "missing zoneId must become unassigned");
 }
 
-void checkLegacyVersionRejected() {
+void checkOtherVersionRejected() {
     RiskFrameData frame;
-    check(!parse(R"({"v":1,"ts":1,"objects":[]})", frame), "legacy RiskFrame version must be rejected");
+    check(!parse(R"({"v":2,"ts":1,"objects":[]})", frame), "other RiskFrame version must be rejected");
 }
 }  // namespace
 
 int main() {
     checkZoneIdValidation();
-    checkLegacyVersionRejected();
+    checkOtherVersionRejected();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

@@ -8,7 +8,6 @@ Checks: >
   bugprone-*
 
 HeaderFilterRegex: '.*'
-AnalyzeTemporaryDtors: false
 
 CheckOptions:
   - key:             readability-identifier-naming.VariableCase
