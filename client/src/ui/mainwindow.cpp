@@ -590,6 +590,8 @@ void MainWindow::setupDashboardPanelCoordinator() {
             &DashboardPanelCoordinator::resetEventLogForLiveInput, Qt::QueuedConnection);
     connect(ui_->digitalTwinMapWidget, &DigitalTwinMapWidget::channelRiskLevelsChanged, this,
             &MainWindow::updateVideoRiskBorders);
+    // 지도에서 구역을 직접 눌러도 상단 구역 선택과 같은 전환이 일어난다
+    connect(ui_->digitalTwinMapWidget, &DigitalTwinMapWidget::zoneSelected, this, &MainWindow::switchVideoArea);
 }
 
 /**

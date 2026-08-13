@@ -15,8 +15,8 @@
 #include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
 #include "model/MqttRealtimeData.h"
+#include "overlays/ChannelRiskOverlay.h"
 #include "overlays/DeviceStatusMapOverlay.h"
-#include "overlays/OverlayManager.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
 
 class DigitalTwinSimulationWorker;
@@ -26,6 +26,7 @@ class DangerAlertOverlay;
 class QGraphicsPathItem;
 class QGraphicsPixmapItem;
 class QGraphicsSimpleTextItem;
+class QMouseEvent;
 class QPainterPath;
 class QResizeEvent;
 
@@ -51,9 +52,13 @@ signals:
     void liveRiskStreamActivated();
     void simulationSnapshotUpdated(DigitalTwinSnapshot snapshot);
     void channelRiskLevelsChanged(QVector<DigitalTwinRiskLevel> riskLevels);
+    /** @brief 지도에서 CCTV가 있는 구역을 클릭했을 때 그 구역 인덱스를 알립니다. */
+    void zoneSelected(int zoneIndex);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
 
 private:
     struct DemoVisualItem {
@@ -69,7 +74,8 @@ private:
     void setupSimulationWorker();
     void applySimulationSnapshot(const DigitalTwinSnapshot& snapshot);
     void applyObjectUpdates(const QVector<DigitalTwinObject>& objects);
-    void showRiskPulse(const DigitalTwinRiskEvent& event);
+    void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
+    int zoneIndexAtScenePosition(const QPointF& scenePosition) const;
     void rebuildLiveSnapshot();
     int activeSeverityForChannel(int channelIndex) const;
     QVector<DigitalTwinRiskLevel> channelRiskLevels(const DigitalTwinSnapshot& snapshot) const;
@@ -88,7 +94,7 @@ private:
 
     QGraphicsScene scene_;
     QThread simulationThread_;
-    std::array<OverlayManager, 2> overlayManagers_;
+    std::array<ChannelRiskOverlay, 2> channelRiskOverlays_;
     DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
@@ -104,6 +110,7 @@ private:
     QElapsedTimer liveClock_;
     QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
+    QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
     DigitalTwinMapSceneLayout mapLayout_;
     std::array<QRectF, 2> objectAreaRects_;

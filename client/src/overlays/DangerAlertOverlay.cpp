@@ -10,7 +10,9 @@
 
 namespace {
 constexpr int alertHorizontalMargin = 18;
-constexpr int alertTopMargin = 16;
+/// 도면 아래쪽 장치 상태 칩 띠(scene 높이의 약 10%)를 덮지 않도록 그만큼 띄운다
+constexpr int alertBottomMarginPercent = 12;
+constexpr int alertMinimumBottomMargin = 14;
 constexpr int alertMinimumWidth = 170;
 constexpr int alertMaximumWidth = 300;
 constexpr int alertWidthPercent = 31;
@@ -22,7 +24,7 @@ constexpr qreal alertMinimumOpacity = 0.48;
 }  // namespace
 
 /**
- * @brief         맵 viewport 좌상단에 표시할 위험 알림 HUD를 생성합니다.
+ * @brief         맵 viewport 우하단에 표시할 위험 알림 HUD를 생성합니다.
  * @param parent  QGraphicsView viewport 위젯
  */
 DangerAlertOverlay::DangerAlertOverlay(QWidget* parent)
@@ -118,7 +120,11 @@ void DangerAlertOverlay::updateGeometryForViewport(const QSize& viewportSize) {
 
     setPixmap(scaledPixmap);
     resize(scaledPixmap.size());
-    move(alertHorizontalMargin, alertTopMargin);
+    // 도면 위·아래 띠에는 구역별 장치 상태 칩과 아이콘이 있다. 확장 예정 구역만 있는
+    // 오른쪽 아래에 두되, 아래쪽 칩 띠 위에서 멈춘다
+    const int bottomMargin = qMax(alertMinimumBottomMargin, viewportSize.height() * alertBottomMarginPercent / 100);
+    move(qMax(0, viewportSize.width() - scaledPixmap.width() - alertHorizontalMargin),
+         qMax(0, viewportSize.height() - scaledPixmap.height() - bottomMargin));
 
     if (active_) {
         raise();

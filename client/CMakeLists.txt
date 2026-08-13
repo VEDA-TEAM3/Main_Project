@@ -64,12 +64,10 @@ qt_add_executable(Qtcctvclient
     include/ui/VideoRiskBorderFrame.h
     src/ui/VideoRiskBorderFrame.cpp
 
-    include/overlays/RadarPulseItem.h
-    src/overlays/RadarPulseItem.cpp
     include/overlays/DangerAlertOverlay.h
     src/overlays/DangerAlertOverlay.cpp
-    include/overlays/OverlayManager.h
-    src/overlays/OverlayManager.cpp
+    include/overlays/ChannelRiskOverlay.h
+    src/overlays/ChannelRiskOverlay.cpp
     include/overlays/DeviceStatusMapOverlay.h
     src/overlays/DeviceStatusMapOverlay.cpp
 

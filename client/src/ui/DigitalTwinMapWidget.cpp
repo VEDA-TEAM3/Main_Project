@@ -8,6 +8,7 @@
 #include <QGraphicsSimpleTextItem>
 #include <QMetaObject>
 #include <QMetaType>
+#include <QMouseEvent>
 #include <QObject>
 #include <QPainter>
 #include <QPainterPath>
@@ -218,14 +219,10 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
-    // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에 파동이
-    // 하나씩만 있어도 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로
-    // 나눠 판단한다
+    // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에서 채널 하나씩만
+    // 켜져도 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로 나눠 판단한다
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
 
-    for (OverlayManager& overlayManager : overlayManagers_) {
-        overlayManager.setScene(&scene_);
-    }
     dangerAlertOverlay_ = new DangerAlertOverlay(viewport());
     dangerAlertOverlay_->updateGeometryForViewport(viewport()->size());
 
@@ -261,8 +258,8 @@ DigitalTwinMapWidget::~DigitalTwinMapWidget() {
         disconnect(simulationWorker_.get(), nullptr, this, nullptr);
     }
 
-    for (OverlayManager& overlayManager : overlayManagers_) {
-        overlayManager.clear();
+    for (ChannelRiskOverlay& channelRiskOverlay : channelRiskOverlays_) {
+        channelRiskOverlay.clear();
     }
 
     if (simulationWorker_ && simulationWorker_->thread() == &simulationThread_ && simulationThread_.isRunning()) {
@@ -396,11 +393,7 @@ void DigitalTwinMapWidget::rebuildLiveSnapshot() {
     const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
     const DigitalTwinSnapshot snapshot = riskObjectTracker_->buildSnapshot(currentTimeMsec);
     applyObjectUpdates(snapshot.objects);
-
-    const QVector<DigitalTwinRiskEvent> riskEvents = riskObjectTracker_->takeRiskEvents();
-    for (const DigitalTwinRiskEvent& riskEvent : riskEvents) {
-        showRiskPulse(riskEvent);
-    }
+    publishChannelRiskLevels(snapshot);
 
     const bool shouldPublish =
         lastLiveSnapshotPublishMsec_ <= 0 ||
@@ -408,7 +401,6 @@ void DigitalTwinMapWidget::rebuildLiveSnapshot() {
         !riskObjectTracker_->hasFrame();
     if (shouldPublish) {
         emit simulationSnapshotUpdated(snapshot);
-        emit channelRiskLevelsChanged(channelRiskLevels(snapshot));
         lastLiveSnapshotPublishMsec_ = currentTimeMsec;
     }
 
@@ -465,13 +457,17 @@ void DigitalTwinMapWidget::resizeEvent(QResizeEvent* event) {
  * @brief   데모 주차장 맵의 고정 배경 요소를 구성합니다.
  */
 void DigitalTwinMapWidget::setupScene() {
-    for (OverlayManager& overlayManager : overlayManagers_) {
-        overlayManager.clear();
+    // scene_.clear()가 아이템을 지우므로 오버레이가 들고 있는 아이템을 먼저 떼어 낸다
+    for (ChannelRiskOverlay& channelRiskOverlay : channelRiskOverlays_) {
+        channelRiskOverlay.clear();
     }
     scene_.clear();
     demoItems_.clear();
     visualItemIndexes_.clear();
     mapLayout_ = sceneBuilder_->build(&scene_);
+    for (int zoneIndex = 0; zoneIndex < static_cast<int>(channelRiskOverlays_.size()); ++zoneIndex) {
+        channelRiskOverlays_[zoneIndex].attach(&scene_, mapLayout_.zoneRects[zoneIndex]);
+    }
     updateObjectAreaRect();
     deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects, mapLayout_.zoneStatusSlots);
     deviceStatusMapOverlay_.setDisplaySettings(displaySettings_);
@@ -496,8 +492,6 @@ void DigitalTwinMapWidget::setupSimulationWorker() {
 
     connect(simulationWorker_.get(), &DigitalTwinSimulationWorker::snapshotUpdated, this,
             &DigitalTwinMapWidget::applySimulationSnapshot, Qt::QueuedConnection);
-    connect(simulationWorker_.get(), &DigitalTwinSimulationWorker::riskEventDetected, this,
-            &DigitalTwinMapWidget::showRiskPulse, Qt::QueuedConnection);
 
     simulationThread_.setObjectName(QStringLiteral("digital-twin-simulation"));
     simulationThread_.start();
@@ -514,8 +508,34 @@ void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& sn
     }
 
     applyObjectUpdates(snapshot.objects);
+    publishChannelRiskLevels(snapshot);
     emit simulationSnapshotUpdated(snapshot);
-    emit channelRiskLevelsChanged(channelRiskLevels(snapshot));
+}
+
+/**
+ * @brief           채널별 위험 단계를 지도 삼각형과 영상 테두리에 함께 반영합니다.
+ * @param snapshot  현재 디지털 트윈 객체 상태
+ *
+ * @details 단계가 바뀐 프레임에만 알린다. 렌더 주기마다 같은 값을 다시 보내면 영상 테두리와
+ *          패널이 매번 다시 그려진다.
+ */
+void DigitalTwinMapWidget::publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot) {
+    const QVector<DigitalTwinRiskLevel> riskLevels = channelRiskLevels(snapshot);
+    if (riskLevels == publishedChannelRiskLevels_) {
+        return;
+    }
+    publishedChannelRiskLevels_ = riskLevels;
+
+    for (int zoneIndex = 0; zoneIndex < static_cast<int>(channelRiskOverlays_.size()); ++zoneIndex) {
+        std::array<DigitalTwinRiskLevel, ChannelRiskOverlay::channelCount> zoneRiskLevels{};
+        for (int localChannel = 0; localChannel < ChannelRiskOverlay::channelCount; ++localChannel) {
+            zoneRiskLevels[localChannel] =
+                riskLevels.value(zoneIndex * digitalTwinChannelsPerZone + localChannel, DigitalTwinRiskLevel::Normal);
+        }
+        channelRiskOverlays_[zoneIndex].setChannelRiskLevels(zoneRiskLevels);
+    }
+
+    emit channelRiskLevelsChanged(riskLevels);
 }
 
 /**
@@ -573,25 +593,46 @@ void DigitalTwinMapWidget::applyObjectUpdates(const QVector<DigitalTwinObject>& 
 }
 
 /**
- * @brief       위험 이벤트 위치에 레이더 펄스 오버레이 표시를 요청합니다.
- * @param event  위험/주의 발생 정보
+ * @brief                 scene 좌표가 어느 CCTV 구역 안인지 찾습니다.
+ * @param scenePosition   scene 좌표
+ * @return                구역 인덱스, 구역 밖이면 -1
  */
-void DigitalTwinMapWidget::showRiskPulse(const DigitalTwinRiskEvent& event) {
-    if (QThread::currentThread() != thread()) {
-        QMetaObject::invokeMethod(this, [this, event]() { showRiskPulse(event); }, Qt::QueuedConnection);
-        return;
+int DigitalTwinMapWidget::zoneIndexAtScenePosition(const QPointF& scenePosition) const {
+    for (int zoneIndex = 0; zoneIndex < static_cast<int>(mapLayout_.zoneRects.size()); ++zoneIndex) {
+        if (mapLayout_.zoneRects[zoneIndex].contains(scenePosition)) {
+            return zoneIndex;
+        }
     }
 
-    if (event.channelIndex < 0) {
-        return;
+    return -1;
+}
+
+/**
+ * @brief        지도에서 CCTV 구역을 클릭하면 그 구역으로 전환하도록 알립니다.
+ * @param event  마우스 눌림 이벤트
+ */
+void DigitalTwinMapWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        const int zoneIndex = zoneIndexAtScenePosition(mapToScene(event->position().toPoint()));
+        if (zoneIndex >= 0) {
+            emit zoneSelected(zoneIndex);
+            event->accept();
+            return;
+        }
     }
 
-    const int zoneIndex = event.channelIndex / digitalTwinChannelsPerZone;
-    if (zoneIndex < 0 || zoneIndex >= static_cast<int>(overlayManagers_.size())) {
-        return;
-    }
+    QGraphicsView::mousePressEvent(event);
+}
 
-    overlayManagers_[zoneIndex].showRiskPulse(scenePointForObject(event.position, event.channelIndex), event.riskLevel);
+/**
+ * @brief        클릭할 수 있는 구역 위에서만 손 모양 커서를 보여 줍니다.
+ * @param event  마우스 이동 이벤트
+ */
+void DigitalTwinMapWidget::mouseMoveEvent(QMouseEvent* event) {
+    const bool overZone = zoneIndexAtScenePosition(mapToScene(event->position().toPoint())) >= 0;
+    setCursor(overZone ? Qt::PointingHandCursor : Qt::ArrowCursor);
+
+    QGraphicsView::mouseMoveEvent(event);
 }
 
 /**
