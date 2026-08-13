@@ -68,6 +68,8 @@
         ],
         "receiver": {
             "decoderMode": "auto",
+            "processingWidth": 1280,
+            "processingHeight": 720,
             "busPollIntervalMs": 200,
             "latencyMs": 250,
             "dropOnLatency": true,

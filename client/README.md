@@ -184,6 +184,13 @@ AI/MQTT 처리 결과와 맞추기 위한 의도적 영상 표시 지연입니�
 프레임과 직접 동기화하지 않고 최신 `RiskFrame`을 수신 순서대로 반영하며, 객체 위치만
 `digitalTwin.positionTransitionMs` 동안 부드럽게 전환합니다.
 
+`video.receiver.processingWidth`/`processingHeight`는 **시스템 메모리로 내려받기 전에 GPU에서 줄일 해상도**입니다
+(`d3d11` 디코더 경로에서만 적용, 둘 다 `0`이면 원본 유지). 블러와 전처리가 CPU에서 돌기 때문에 프레임은
+`d3d11download`로 한 번 내려왔다가 sink에서 다시 올라가는데, 여기서 줄이면 **전송량과 CPU 픽셀 수가 함께**
+줄어듭니다(1080p→720p 기준 약 55%). 2x2 그리드 타일이 화면상 약 430x240이라 720p로도 표시 해상도의 3배이며,
+채널을 확대했을 때만 약간 부드러워집니다. 너비와 높이를 모두 지정해도 `d3d11scale`이 pixel-aspect-ratio로
+화면비를 보정하므로 4:3 카메라도 왜곡되지 않습니다.
+
 `alignmentDelayMs`는 큐의 `min-threshold-time`으로 구현한 **고정 지연선**입니다. 임계값 아래로 내려가면
 출력이 멈추므로 쌓인 분량을 지터 흡수에 쓸 수 없습니다. 지터를 흡수하고 프레임을 버리는 지점은
 `renderQueueMaximumBuffers` 하나뿐입니다. 싱크가 `sinkSync: false`로 도착 즉시 렌더하므로 평시에는 이 큐가

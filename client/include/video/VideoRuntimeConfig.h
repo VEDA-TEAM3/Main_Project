@@ -46,6 +46,10 @@ struct BlurProcessorConfig {
 
 struct GstRtspReceiverConfig {
     QString decoderMode;
+    // 시스템 메모리로 내려받기 전에 GPU에서 줄일 해상도. 블러·전처리가 CPU에서 도는 구간의
+    // 픽셀 수와 GPU↔CPU 전송량을 함께 줄인다. 0이면 원본 해상도를 유지한다(d3d11 경로 전용).
+    int processingWidth = 0;
+    int processingHeight = 0;
     int busPollIntervalMsec = 0;
     int latencyMsec = 0;
     bool dropOnLatency = true;

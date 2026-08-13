@@ -42,6 +42,7 @@ private:
     void restartPipeline(const QString& reason);
     bool applySourceProperties(GstElement* source);
     QString decoderChain() const;
+    QString d3d11DecoderChain() const;
     void applyVideoPreprocessingSettings();
     void applyBlurPassthrough();
     void applyPresentationState();

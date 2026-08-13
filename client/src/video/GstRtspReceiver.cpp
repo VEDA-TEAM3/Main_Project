@@ -362,9 +362,14 @@ void GstRtspReceiver::startPipeline() {
                 QStringLiteral("async=%1").arg(config_.sinkAsync ? QStringLiteral("true") : QStringLiteral("false")));
 
     qDebug().noquote() << "[GstRtspReceiver] Manual RTSP pipeline:" << videoChainDesc;
-    qInfo().noquote() << QStringLiteral("[GstRtspReceiver] video alignment delay=%1ms maxBuffer=%2ms")
+    const QString processingSize =
+        config_.processingWidth > 0 && config_.processingHeight > 0
+            ? QStringLiteral("%1x%2").arg(config_.processingWidth).arg(config_.processingHeight)
+            : QStringLiteral("source");
+    qInfo().noquote() << QStringLiteral("[GstRtspReceiver] video alignment delay=%1ms maxBuffer=%2ms processing=%3")
                              .arg(config_.alignmentDelayMsec)
-                             .arg(config_.alignmentQueueMaximumTimeMsec);
+                             .arg(config_.alignmentQueueMaximumTimeMsec)
+                             .arg(processingSize);
 
     GError* error = nullptr;
     GstElement* source = gst_element_factory_make("rtspsrc", "src");
@@ -972,22 +977,44 @@ GstBusSyncReply GstRtspReceiver::onBusSyncMessage(GstBus*, GstMessage* message, 
  */
 QString GstRtspReceiver::decoderChain() const {
     const QByteArray decoderMode = config_.decoderMode.toLatin1();
+    const bool d3d11Available = hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download");
 
-    if (decoderMode == "d3d11" && hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download")) {
-        return "d3d11h264dec discard-corrupted-frames=true "
-               "automatic-request-sync-points=true ! d3d11download";
+    if (d3d11Available && (decoderMode == "d3d11" || !hasGstFactory("avdec_h264"))) {
+        return d3d11DecoderChain();
     }
 
     if (decoderMode != "d3d11" && hasGstFactory("avdec_h264")) {
         return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
     }
 
-    if (hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download")) {
-        return "d3d11h264dec discard-corrupted-frames=true "
-               "automatic-request-sync-points=true ! d3d11download";
+    if (d3d11Available) {
+        return d3d11DecoderChain();
     }
 
     return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
+}
+
+/**
+ * @brief   d3d11 하드웨어 디코더 체인을 반환합니다.
+ * @return  디코더 + (설정 시) GPU 축소 + 시스템 메모리 다운로드 체인
+ *
+ * @details 축소는 반드시 d3d11download **앞**에 둔다. 뒤에 두면 이미 원본 해상도를 CPU로
+ *          내려받은 뒤라 전송량이 그대로고, 축소 비용만 CPU에 더 얹힌다.
+ *          너비와 높이를 모두 지정해도 d3d11scale이 pixel-aspect-ratio로 화면비를 보정하므로
+ *          4:3 카메라도 sink의 force-aspect-ratio=true와 함께 올바르게 표시된다.
+ */
+QString GstRtspReceiver::d3d11DecoderChain() const {
+    QString chain = QStringLiteral(
+        "d3d11h264dec discard-corrupted-frames=true "
+        "automatic-request-sync-points=true");
+
+    if (config_.processingWidth > 0 && config_.processingHeight > 0 && hasGstFactory("d3d11scale")) {
+        chain += QStringLiteral(" ! d3d11scale ! video/x-raw(memory:D3D11Memory),width=%1,height=%2")
+                     .arg(config_.processingWidth)
+                     .arg(config_.processingHeight);
+    }
+
+    return chain + QStringLiteral(" ! d3d11download");
 }
 
 /**

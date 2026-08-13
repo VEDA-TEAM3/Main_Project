@@ -514,6 +514,23 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
         return false;
     }
 
+    // 두 값은 함께 있어야 의미가 있다. 한쪽만 주면 화면비가 조용히 틀어진다
+    const bool hasProcessingWidth = receiver.contains(QStringLiteral("processingWidth"));
+    const bool hasProcessingHeight = receiver.contains(QStringLiteral("processingHeight"));
+    if (hasProcessingWidth != hasProcessingHeight) {
+        error = QStringLiteral("video.receiver.processingWidth and processingHeight must be set together");
+        return false;
+    }
+    if (hasProcessingWidth &&
+        (!readInt(receiver, QStringLiteral("processingWidth"), 0, 7680, config.processingWidth, error) ||
+         !readInt(receiver, QStringLiteral("processingHeight"), 0, 4320, config.processingHeight, error))) {
+        return false;
+    }
+    if ((config.processingWidth > 0) != (config.processingHeight > 0)) {
+        error = QStringLiteral("video.receiver.processingWidth and processingHeight must both be 0 or both positive");
+        return false;
+    }
+
     if (receiver.contains(QStringLiteral("alignmentDelayMs")) &&
         !readInteger(receiver, QStringLiteral("alignmentDelayMs"), 0, 5000, config.alignmentDelayMsec, error)) {
         return false;
