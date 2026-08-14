@@ -166,7 +166,13 @@ elseif(EXISTS "${QTCCTV_EXAMPLE_CONFIG}")
 else()
     message(FATAL_ERROR "Neither config/app_config.json nor config/app_config.example.json exists")
 endif()
-configure_file("${QTCCTV_CONFIG_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/config/app_config.json" COPYONLY)
+# 빌드 디렉터리 사본이 앱이 실제로 읽고 쓰는 설정이다. 설정 팝업의 구역 추가가 여기에 쓰므로
+# 재구성 때마다 무조건 덮으면 사용자가 추가한 구역과 RTSP 계정이 조용히 사라진다.
+# 원본이 더 새로울 때만(= 개발자가 직접 고쳤을 때만) 다시 복사한다.
+set(QTCCTV_RUNTIME_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/config/app_config.json")
+if(NOT EXISTS "${QTCCTV_RUNTIME_CONFIG}" OR "${QTCCTV_CONFIG_SOURCE}" IS_NEWER_THAN "${QTCCTV_RUNTIME_CONFIG}")
+    configure_file("${QTCCTV_CONFIG_SOURCE}" "${QTCCTV_RUNTIME_CONFIG}" COPYONLY)
+endif()
 
 qt_add_resources(Qtcctvclient "style_resources"
     PREFIX "/styles"
@@ -192,6 +198,7 @@ qt_add_resources(Qtcctvclient "qml_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionCheckBox.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionComboBox.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionSlider.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionTextField.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLabel.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBar.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/TopBarForm.ui.qml"
@@ -338,6 +345,21 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(table_model_roles_check PRIVATE Qt6::Gui)
+
+    add_executable(config_area_writer_check
+        tests/ConfigAreaWriterCheck.cpp
+        src/config/ApplicationConfig.cpp
+    )
+
+    target_include_directories(config_area_writer_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_compile_definitions(config_area_writer_check PRIVATE
+        QTCCTV_EXAMPLE_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/app_config.example.json"
+    )
+
+    target_link_libraries(config_area_writer_check PRIVATE Qt6::Core)
 
     add_executable(risk_message_parser_check
         tests/RiskMessageParserCheck.cpp

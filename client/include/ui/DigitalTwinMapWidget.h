@@ -19,6 +19,7 @@
 #include "overlays/DangerBorderOverlay.h"
 #include "overlays/DeviceStatusMapOverlay.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
+#include "ui/DigitalTwinZoneIndex.h"
 
 class DigitalTwinSimulationWorker;
 class DigitalTwinObjectStyleProvider;
@@ -29,6 +30,7 @@ class QGraphicsSimpleTextItem;
 class QMouseEvent;
 class QPainterPath;
 class QResizeEvent;
+class QShowEvent;
 
 class DigitalTwinMapWidget : public QGraphicsView {
     Q_OBJECT
@@ -57,6 +59,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
 
@@ -70,8 +73,11 @@ private:
         DigitalTwinRiskLevel visibleRiskLevel = DigitalTwinRiskLevel::Normal;
     };
 
+    void ensureSceneReady();
     void setupScene();
     void setupSimulationWorker();
+    /// 현재 구역 수가 감당하는 전체 채널 수
+    int liveChannelCount() const { return zoneCount_ * digitalTwinChannelsPerZone; }
     void applySimulationSnapshot(const DigitalTwinSnapshot& snapshot);
     void applyObjectUpdates(const QVector<DigitalTwinObject>& objects);
     void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
@@ -94,7 +100,8 @@ private:
 
     QGraphicsScene scene_;
     QThread simulationThread_;
-    std::array<ChannelRiskOverlay, 2> channelRiskOverlays_;
+    // ChannelRiskOverlay는 QTimer와 unique_ptr을 들고 있어 복사도 이동도 되지 않는다
+    QVector<std::shared_ptr<ChannelRiskOverlay>> channelRiskOverlays_;
     DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
@@ -113,6 +120,9 @@ private:
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
     DigitalTwinMapSceneLayout mapLayout_;
-    std::array<QRectF, 2> objectAreaRects_;
+    QVector<QRectF> objectAreaRects_;
+    /// 활성 CCTV 구역 수. scene을 세우기 전에 configureLiveTracking이 실제 값으로 바꾼다
+    int zoneCount_ = 2;
+    bool sceneReady_ = false;
     bool liveMode_ = false;
 };

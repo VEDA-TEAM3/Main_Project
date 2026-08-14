@@ -63,13 +63,14 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
                        std::shared_ptr<DeviceStatusGatewayFactory> deviceStatusGatewayFactory,
                        std::shared_ptr<DashboardPanelFactory> dashboardPanelFactory,
                        std::shared_ptr<ReportGateway> reportGateway, VideoRuntimeConfig videoConfig,
-                       DigitalTwinRuntimeConfig digitalTwinConfig, QWidget* parent)
+                       DigitalTwinRuntimeConfig digitalTwinConfig, QString configSourcePath, QWidget* parent)
     : QMainWindow(parent),
       ui_(std::make_shared<Ui::MainWindow>()),
       deviceStatusGatewayFactory_(std::move(deviceStatusGatewayFactory)),
       dashboardPanelFactory_(std::move(dashboardPanelFactory)),
       reportGateway_(std::move(reportGateway)),
-      videoConfig_(std::move(videoConfig)) {
+      videoConfig_(std::move(videoConfig)),
+      configSourcePath_(std::move(configSourcePath)) {
     ui_->setupUi(this);
     if (ui_->digitalTwinMapWidget) {
         ui_->digitalTwinMapWidget->configureLiveTracking(digitalTwinConfig);
@@ -254,6 +255,7 @@ void MainWindow::setupDashboardLayout() {
     DashboardLayout::apply(this, ui_.get());
 
     mapSettingsDialog_ = new MapSettingsDialog(this);
+    mapSettingsDialog_->setConfigSourcePath(configSourcePath_);
     mapSettingsDialog_->installEventFilter(this);
     connect(mapSettingsDialog_, &MapSettingsDialog::settingsApplied, this,
             [this](const DigitalTwinMapDisplaySettings& settings, bool videoRiskBordersEnabled, bool faceBlurEnabled,
@@ -276,6 +278,7 @@ void MainWindow::setupDashboardLayout() {
                 }
                 updateVideoRiskBorders(latestVideoRiskLevels_);
             });
+    connect(mapSettingsDialog_, &MapSettingsDialog::videoAreaSelected, this, &MainWindow::switchVideoArea);
     connect(mapSettingsDialog_, &MapSettingsDialog::videoPreprocessingApplyRequested, this,
             [this](int channelIndex, const VideoPreprocessingSettings& settings) {
                 if (channelIndex < 0) {
@@ -462,6 +465,7 @@ void MainWindow::openMapSettingsDialog() {
     mapSettingsDialog_->setSettings(mapDisplaySettings_);
     mapSettingsDialog_->setVideoRiskBordersEnabled(videoRiskBordersEnabled_);
     mapSettingsDialog_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+    mapSettingsDialog_->setStreamConfigs(streamConfigs_);
     mapSettingsDialog_->setVideoAreas(videoConfig_.areas, currentVideoAreaIndex_);
     mapSettingsDialog_->setVideoPreprocessingSettings(videoPreprocessingSettingsByChannel_,
                                                       selectedPreprocessingChannelIndex_);

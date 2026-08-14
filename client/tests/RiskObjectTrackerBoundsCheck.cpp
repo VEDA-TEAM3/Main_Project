@@ -347,40 +347,53 @@ void checkStreamExpiryRemovesEverything() {
 
 /** @brief 물리 CCTV 구역을 서버 zoneId로 정하고, 무효할 때만 좌표로 되돌아가는지 검사합니다. */
 void checkPhysicalZoneSelection() {
-    check(digitalTwinZoneIndex(3, 50.0, 0.0) == 0, "zoneId 3 must stay on the first scene even with positive x");
-    check(digitalTwinZoneIndex(4, -50.0, 0.0) == 1, "zoneId 4 must stay on the second scene even with negative x");
-    check(digitalTwinZoneIndex(0, 0.0, 0.0) == 0, "zoneId 0..3 must map to the first scene");
-    check(digitalTwinZoneIndex(7, 0.0, 0.0) == 1, "zoneId 4..7 must map to the second scene");
+    check(digitalTwinZoneIndex(3, 2, 1) == 0, "zoneId 3 must stay on the first scene even when x says otherwise");
+    check(digitalTwinZoneIndex(4, 2, 0) == 1, "zoneId 4 must stay on the second scene even when x says otherwise");
+    check(digitalTwinZoneIndex(0, 2, 1) == 0, "zoneId 0..3 must map to the first scene");
+    check(digitalTwinZoneIndex(7, 2, 0) == 1, "zoneId 4..7 must map to the second scene");
 
-    check(digitalTwinZoneIndex(-1, -50.0, 0.0) == 0, "an unassigned zone must fall back to the x coordinate");
-    check(digitalTwinZoneIndex(-1, 50.0, 0.0) == 1, "an unassigned zone must fall back to the x coordinate");
-    check(digitalTwinZoneIndex(digitalTwinChannelCount, -50.0, 0.0) == 0, "an out-of-range zone must use the fallback");
+    check(digitalTwinZoneIndex(-1, 2, 0) == 0, "an unassigned zone must fall back to the world coordinate");
+    check(digitalTwinZoneIndex(-1, 2, 1) == 1, "an unassigned zone must fall back to the world coordinate");
+    check(digitalTwinZoneIndex(8, 2, 0) == 0, "a zoneId past the configured zones must use the fallback");
+    check(digitalTwinZoneIndex(-1, 2, 9) == 1, "the fallback must be clamped to the configured zones");
 
-    // 경계에서 좌표가 흔들려도 zoneId가 그대로면 Scene은 왕복하지 않는다
-    for (const double worldX : {-0.5, -0.01, 0.0, 0.01, 0.5}) {
-        check(digitalTwinZoneIndex(3, worldX, 0.0) == 0, "jitter around x=0 must not move a zoned object");
-        check(digitalTwinZoneIndex(4, worldX, 0.0) == 1, "jitter around x=0 must not move a zoned object");
-    }
+    // 구역을 늘리면 같은 zoneId가 그대로 뒤쪽 Scene을 가리켜야 한다
+    check(digitalTwinZoneIndex(8, 3, 0) == 2, "zoneId 8..11 must map to the third scene once it exists");
+    check(digitalTwinZoneIndex(31, 8, 0) == 7, "the eighth zone must accept its own channels");
+    check(digitalTwinZoneIndex(32, 8, 3) == 3, "a zoneId past the last zone must still fall back");
 }
 
 /**
- * @brief 구역별 월드 상자가 표시 배율을 정하고, 없을 때만 반 가르기로 돌아가는지
+ * @brief 구역별 월드 상자가 표시 배율을 정하고, 없을 때만 균등 가르기로 돌아가는지
  * 검사합니다.
  */
 void checkPhysicalZoneWorldBounds() {
     DigitalTwinWorldConfig halved;
     halved.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+    halved.zones.resize(2);
     check(halved.zoneBounds(0) == QRectF(-80.0, -40.0, 80.0, 80.0), "zone 0 must fall back to the left half");
     check(halved.zoneBounds(1) == QRectF(0.0, -40.0, 80.0, 80.0), "zone 1 must fall back to the right half");
 
-    // 100m 떨어진 15m짜리 구역 두 개는 반 가르기로 표현할 수 없다. 두 창이 붙어 있고
+    // 구역이 늘면 균등 가르기도 그 개수를 따라야 한다
+    DigitalTwinWorldConfig quartered = halved;
+    quartered.zones.resize(4);
+    check(quartered.zoneBounds(0) == QRectF(-80.0, -40.0, 40.0, 80.0), "four zones must split the bounds four ways");
+    check(quartered.zoneBounds(3) == QRectF(40.0, -40.0, 40.0, 80.0), "the last zone must end at the right edge");
+
+    // 100m 떨어진 15m짜리 구역 두 개는 균등 가르기로 표현할 수 없다. 창이 서로 붙어 있고
     // 폭도 같아야 하므로, 한쪽을 맞추면 다른 쪽은 지도 끝에 clamp된다
     DigitalTwinWorldConfig zoned = halved;
     zoned.zones = {QRectF(-58.0, -14.0, 17.0, 19.0), QRectF(42.0, -14.0, 17.0, 19.0)};
-    check(zoned.zoneBounds(0) == zoned.zones[0], "configured zone 0 box must win over the half split");
-    check(zoned.zoneBounds(1) == zoned.zones[1], "configured zone 1 box must win over the half split");
+    check(zoned.zoneBounds(0) == zoned.zones[0], "configured zone 0 box must win over the even split");
+    check(zoned.zoneBounds(1) == zoned.zones[1], "configured zone 1 box must win over the even split");
     check(zoned.zoneBounds(-1) == zoned.zones[0] && zoned.zoneBounds(9) == zoned.zones[1],
           "zone index must be clamped instead of reading out of bounds");
+
+    // zoneId가 없을 때 쓰는 좌표 되돌리기. 상자가 멀리 떨어져 있어도 맞는 구역을 골라야 한다
+    check(zoned.zoneIndexForWorldX(-50.0) == 0, "a coordinate inside zone 0 must pick zone 0");
+    check(zoned.zoneIndexForWorldX(50.0) == 1, "a coordinate inside zone 1 must pick zone 1");
+    check(zoned.zoneIndexForWorldX(-70.0) == 0, "a coordinate outside every box must pick the nearest zone");
+    check(zoned.zoneIndexForWorldX(70.0) == 1, "a coordinate outside every box must pick the nearest zone");
 
     // 실측 좌표가 맵을 꽉 채우는지 (반 가르기에서는 폭의 18%만 썼다)
     const QRectF zone = zoned.zoneBounds(0);

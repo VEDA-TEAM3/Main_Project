@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 #include <QTimer>
 #include <QVector>
 #include <memory>
@@ -50,7 +51,8 @@ public:
                         std::shared_ptr<DeviceStatusGatewayFactory> deviceStatusGatewayFactory,
                         std::shared_ptr<DashboardPanelFactory> dashboardPanelFactory,
                         std::shared_ptr<ReportGateway> reportGateway, VideoRuntimeConfig videoConfig,
-                        DigitalTwinRuntimeConfig digitalTwinConfig, QWidget* parent = nullptr);
+                        DigitalTwinRuntimeConfig digitalTwinConfig, QString configSourcePath,
+                        QWidget* parent = nullptr);
     ~MainWindow() override;
 
 protected:
@@ -120,6 +122,8 @@ private:
     std::shared_ptr<ReportGateway> reportGateway_;
     std::shared_ptr<DeviceStatusService> deviceStatusService_;
     VideoRuntimeConfig videoConfig_;
+    /// 구역 추가를 덧붙일 app_config.json 경로
+    QString configSourcePath_;
 
     QVector<QWidget*> videoWidgets_;
     QVector<VideoRiskBorderFrame*> videoTileFrames_;

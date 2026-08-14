@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls.Basic as Controls
 import "Theme.js" as Theme
 
 /**
@@ -14,6 +15,8 @@ PanelFrame {
     property alias showLed: ledCheck.checked
     property alias showCctv: cctvCheck.checked
     property alias showAlertDevice: alertDeviceCheck.checked
+    property alias iconScalePercent: iconScaleSetting.value
+    property alias movementTrailLength: trailLengthSetting.value
     property alias videoRiskBorders: riskBorderCheck.checked
     property alias faceBlur: faceBlurCheck.checked
     property alias licensePlateBlur: plateBlurCheck.checked
@@ -28,6 +31,28 @@ PanelFrame {
     property alias contrast: contrastSlider.value
     property alias gamma: gammaSlider.value
 
+    /// 설정 파일에 저장된 구역 이름들. 뒤쪽 activeZoneCount개 밖은 아직 실행에 반영되지 않은 구역입니다.
+    property var zoneNames: []
+    /// 고른 구역을 이 화면에서 고칠 수 있는지. 채널마다 계정이 다르면 false입니다.
+    property bool zoneEditable: true
+    /// 값을 고쳐 저장했지만 아직 실행에 반영되지 않은 구역 번호들
+    property var editedRows: []
+    property int activeZoneCount: 0
+    /// 지금 화면에 띄워 둔 구역. 목록에서 누르면 이 값이 그 구역으로 바뀝니다.
+    property int currentZoneIndex: 0
+    /// 목록에서 고른 줄. 실행 중인 구역이면 주소를 보여 주고, 빈 자리면 추가 입력을 보여 줍니다.
+    property int selectedRow: 0
+    property int zoneCapacity: 8
+    property string zoneMessage: ""
+    property bool zoneMessageError: false
+    property alias zoneName: zoneNameField.text
+    property alias zoneUser: zoneUserField.text
+    property alias zonePassword: zonePasswordField.text
+    property alias zoneUrl1: zoneUrlField1.text
+    property alias zoneUrl2: zoneUrlField2.text
+    property alias zoneUrl3: zoneUrlField3.text
+    property alias zoneUrl4: zoneUrlField4.text
+
     signal applied
     signal cancelled
     signal areaSelected(int index)
@@ -39,6 +64,9 @@ PanelFrame {
     signal applySelectedRequested
     signal applyAreaRequested
     signal applyAllRequested
+    signal zoneAddRequested
+    signal zoneSaveRequested(int index)
+    signal zoneSelectRequested(int index)
 
     implicitWidth: 800
     implicitHeight: 640
@@ -94,14 +122,14 @@ PanelFrame {
             property int currentIndex: 0
 
             Repeater {
-                model: ["UI 설정", "영상 설정"]
+                model: ["UI 설정", "영상 설정", "구역 관리"]
 
                 Rectangle {
                     id: tab
 
                     required property int index
                     required property string modelData
-                    width: tabBar.width / 2
+                    width: tabBar.width / 3
                     height: tabBar.height
                     color: tabBar.currentIndex === tab.index ? Theme.surface : Theme.background
 
@@ -211,6 +239,136 @@ PanelFrame {
                     }
                 }
 
+                /** 맵 표시 숫자 설정 한 줄입니다. */
+                component MapNumberSetting: Item {
+                    id: numberSetting
+
+                    required property string title
+                    property alias value: valueField.value
+                    property int minimumValue: 0
+                    property int maximumValue: 999
+                    property int stepSize: 1
+                    property string unit: ""
+
+                    implicitHeight: 44
+
+                    Column {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+
+                        Text {
+                            text: numberSetting.title
+                            color: Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0
+                        }
+
+                        Text {
+                            text: numberSetting.minimumValue + " ~ " + numberSetting.maximumValue + numberSetting.unit
+                            color: Theme.textMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 11
+                            font.letterSpacing: 0
+                        }
+                    }
+
+                    Controls.SpinBox {
+                        id: valueField
+
+                        anchors.right: parent.right
+                        width: 104
+                        height: 34
+                        from: numberSetting.minimumValue
+                        to: numberSetting.maximumValue
+                        stepSize: numberSetting.stepSize
+                        editable: true
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+
+                        contentItem: TextInput {
+                            z: 2
+                            leftPadding: 10
+                            rightPadding: 31
+                            text: valueField.textFromValue(valueField.value, valueField.locale)
+                            color: Theme.text
+                            selectionColor: Theme.cyanDark
+                            selectedTextColor: Theme.text
+                            horizontalAlignment: TextInput.AlignRight
+                            verticalAlignment: TextInput.AlignVCenter
+                            selectByMouse: true
+                            readOnly: !valueField.editable
+                            validator: valueField.validator
+                            inputMethodHints: Qt.ImhDigitsOnly
+                        }
+
+                        up.indicator: Rectangle {
+                            x: valueField.width - width
+                            y: 1
+                            width: 29
+                            height: valueField.height / 2 - 1
+                            color: valueField.up.pressed ? Theme.cyanDark :
+                                   (valueField.up.hovered ? Theme.surfaceRaised : "transparent")
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "▴"
+                                color: valueField.up.hovered ? Theme.text : Theme.cyan
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                width: 1
+                                height: parent.height
+                                color: Theme.border
+                            }
+                        }
+
+                        down.indicator: Rectangle {
+                            x: valueField.width - width
+                            y: valueField.height / 2
+                            width: 29
+                            height: valueField.height / 2 - 1
+                            color: valueField.down.pressed ? Theme.cyanDark :
+                                   (valueField.down.hovered ? Theme.surfaceRaised : "transparent")
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "▾"
+                                color: valueField.down.hovered ? Theme.text : Theme.cyan
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                width: 1
+                                height: parent.height
+                                color: Theme.border
+                            }
+
+                            Rectangle {
+                                anchors.top: parent.top
+                                width: parent.width
+                                height: 1
+                                color: Theme.border
+                            }
+                        }
+
+                        background: Rectangle {
+                            radius: 4
+                            color: Theme.background
+                            border.width: 1
+                            border.color: valueField.activeFocus ? Theme.borderStrong : Theme.border
+                        }
+                    }
+                }
+
                 Column {
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -233,6 +391,25 @@ PanelFrame {
                             OptionCheckBox { id: ledCheck; width: (mapGroup.width - 80) / 2; text: "LED 표시" }
                             OptionCheckBox { id: cctvCheck; width: (mapGroup.width - 80) / 2; text: "CCTV 표시" }
                             OptionCheckBox { id: alertDeviceCheck; width: (mapGroup.width - 80) / 2; text: "알림 장치 표시" }
+                            MapNumberSetting {
+                                id: iconScaleSetting
+                                width: (mapGroup.width - 80) / 2
+                                title: "아이콘 크기"
+                                value: 100
+                                minimumValue: 50
+                                maximumValue: 200
+                                stepSize: 5
+                                unit: "%"
+                            }
+                            MapNumberSetting {
+                                id: trailLengthSetting
+                                width: (mapGroup.width - 80) / 2
+                                title: "이동 경로 길이"
+                                value: 240
+                                minimumValue: 40
+                                maximumValue: 600
+                                stepSize: 10
+                            }
                         }
                     }
 
@@ -512,6 +689,486 @@ PanelFrame {
                         enabled: enabledCheck.checked
                         onClicked: root.applyAllRequested()
                     }
+                }
+            }
+
+            // ── 구역 관리 탭 ───────────────────────────────────────────
+            Item {
+                id: zoneTab
+
+                anchors.fill: parent
+                anchors.leftMargin: 24
+                anchors.rightMargin: 24
+                anchors.topMargin: 16
+                anchors.bottomMargin: 14
+                visible: tabBar.currentIndex === 2
+
+                /** 저장된 구역 수. 그중 앞의 activeZoneCount개만 현재 실행에 반영되어 있습니다. */
+                readonly property int savedZoneCount: root.zoneNames.length
+                readonly property bool canAddZone: zoneTab.savedZoneCount < root.zoneCapacity
+                /// 오른쪽 폼이 고칠 구역. 빈 자리를 골랐으면 -1이라 새 구역 입력이 됩니다.
+                readonly property int detailIndex: root.selectedRow < root.activeZoneCount ? root.selectedRow : -1
+                readonly property bool editMode: zoneTab.detailIndex >= 0
+                readonly property bool formEnabled: root.zoneEditable && (zoneTab.editMode || zoneTab.canAddZone)
+
+                component ZonePanel: Rectangle {
+                    id: zonePanel
+
+                    default property alias content: panelColumn.data
+                    required property string title
+
+                    color: Theme.background
+                    radius: 4
+                    border.width: 1
+                    border.color: Theme.border
+
+                    Text {
+                        id: panelTitle
+
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        anchors.top: parent.top
+                        anchors.topMargin: 14
+                        text: zonePanel.title
+                        color: Theme.cyan
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                        font.letterSpacing: 0
+                    }
+
+                    Column {
+                        id: panelColumn
+
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        anchors.top: panelTitle.bottom
+                        anchors.topMargin: 12
+                        spacing: 8
+                    }
+                }
+
+                /** 이름표 + 입력 칸 한 줄입니다. 구역 정보와 구역 추가가 같은 형식을 쓰도록 여기 둡니다. */
+                component ZoneField: Item {
+                    id: zoneField
+
+                    default property alias input: fieldSlot.data
+                    required property string label
+
+                    width: parent.width
+                    height: 34
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 62
+                        text: zoneField.label
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0
+                    }
+
+                    Item {
+                        id: fieldSlot
+
+                        anchors.left: parent.left
+                        anchors.leftMargin: 68
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: parent.height
+                    }
+                }
+
+                /** 두 패널의 구역을 가르는 줄입니다. */
+                component ZoneSeparator: Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.6
+                }
+
+                // 사용 중인 구역 수를 칸으로 먼저 보여 준다. 남은 자리가 몇 개인지가 이 탭의 핵심 정보다
+                Item {
+                    id: capacityRow
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 26
+
+                    Text {
+                        id: capacityLabel
+
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "등록된 구역"
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0
+                    }
+
+                    Row {
+                        anchors.left: capacityLabel.right
+                        anchors.leftMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 5
+
+                        Repeater {
+                            model: root.zoneCapacity
+
+                            Rectangle {
+                                id: pip
+
+                                required property int index
+                                width: 22
+                                height: 8
+                                radius: 2
+                                color: pip.index < root.activeZoneCount ? Theme.cyan
+                                     : pip.index < zoneTab.savedZoneCount ? Theme.warning : Theme.surface
+                                border.width: 1
+                                border.color: pip.index < zoneTab.savedZoneCount ? "transparent" : Theme.border
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: zoneTab.savedZoneCount + " / " + root.zoneCapacity
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 14
+                        font.weight: Font.Bold
+                        font.letterSpacing: 0
+                    }
+                }
+
+                ZonePanel {
+                    id: zoneListPanel
+
+                    anchors.left: parent.left
+                    anchors.top: capacityRow.bottom
+                    anchors.topMargin: 12
+                    anchors.bottom: zoneMessageText.top
+                    anchors.bottomMargin: 10
+                    width: 262
+                    title: "구역 목록"
+
+                    Repeater {
+                        model: root.zoneCapacity
+
+                        Item {
+                            id: zoneRow
+
+                            required property int index
+                            readonly property bool active: zoneRow.index < root.activeZoneCount
+                            readonly property bool pending: !zoneRow.active && zoneRow.index < zoneTab.savedZoneCount
+                            /// 저장은 됐지만 실행에 반영되지 않은 상태(새로 추가했거나 값을 고친 구역)
+                            readonly property bool restartNeeded: zoneRow.pending
+                                                                  || root.editedRows.indexOf(zoneRow.index) >= 0
+                            readonly property bool current: zoneRow.active && zoneRow.index === root.currentZoneIndex
+                            // 채널 번호가 0부터 빈틈 없이 이어져야 하므로 빈 자리는 맨 앞의 하나만 채울 수 있습니다.
+                            readonly property bool addTarget: !zoneRow.active && !zoneRow.pending
+                                                              && zoneRow.index === zoneTab.savedZoneCount
+                            readonly property bool selectable: zoneRow.active || zoneRow.addTarget
+                            readonly property color tone: zoneRow.active ? Theme.cyan
+                                                        : zoneRow.pending ? Theme.warning
+                                                        : zoneRow.addTarget ? Theme.cyan : Theme.textMuted
+
+                            width: parent.width
+                            height: 30
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 4
+                                color: zoneRow.index === root.selectedRow && zoneRow.selectable ? Theme.cyanDark
+                                     : zoneMouse.containsMouse ? Theme.surfaceRaised : "transparent"
+                                border.width: 1
+                                border.color: zoneRow.index === root.selectedRow && zoneRow.selectable
+                                              ? Theme.borderStrong
+                                            : zoneRow.addTarget ? Theme.border : "transparent"
+
+                                Behavior on color { ColorAnimation { duration: 110 } }
+                            }
+
+                            // 실행 중인 구역을 누르면 그 구역 화면으로 가고, 빈 자리를 누르면 추가 입력으로 갑니다.
+                            MouseArea {
+                                id: zoneMouse
+
+                                anchors.fill: parent
+                                enabled: zoneRow.selectable
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.selectedRow = zoneRow.index
+                                    // C++이 그 구역 값을 폼에 채우고, 실행 중인 구역이면 화면도 전환합니다
+                                    root.zoneSelectRequested(zoneRow.index)
+                                    Qt.callLater(zoneNameField.forceActiveFocus)
+                                }
+                            }
+
+                            Rectangle {
+                                id: zoneBadge
+
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 22
+                                height: 22
+                                radius: 11
+                                color: zoneRow.current ? Theme.cyan : "transparent"
+                                border.width: 1
+                                border.color: zoneRow.tone
+                                opacity: zoneRow.selectable || zoneRow.pending ? 1.0 : 0.35
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: zoneRow.index + 1
+                                    color: zoneRow.current ? Theme.background : zoneRow.tone
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                    font.letterSpacing: 0
+                                }
+                            }
+
+                            Text {
+                                anchors.left: zoneBadge.right
+                                anchors.leftMargin: 10
+                                anchors.right: zoneRowState.left
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: zoneRow.index < zoneTab.savedZoneCount ? root.zoneNames[zoneRow.index]
+                                    : zoneRow.addTarget ? "여기에 구역 추가" : "확장 예정"
+                                color: zoneRow.index < zoneTab.savedZoneCount ? Theme.text
+                                     : zoneRow.addTarget ? Theme.cyan : Theme.textMuted
+                                opacity: zoneRow.index < zoneTab.savedZoneCount || zoneRow.addTarget ? 1.0 : 0.45
+                                elide: Text.ElideRight
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0
+                            }
+
+                            Text {
+                                id: zoneRowState
+
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: zoneRow.restartNeeded ? "재시작 후 적용" : zoneRow.current ? "보는 중" : ""
+                                color: zoneRow.restartNeeded && !zoneRow.active ? Theme.warning : zoneRow.tone
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 0
+                            }
+                        }
+                    }
+                }
+
+                // 구역 추가와 수정이 같은 폼을 씁니다. 고른 줄이 실행 중인 구역이면 그 값이 채워집니다.
+                ZonePanel {
+                    id: zoneFormPanel
+
+                    anchors.left: zoneListPanel.right
+                    anchors.leftMargin: 14
+                    anchors.right: parent.right
+                    anchors.top: zoneListPanel.top
+                    anchors.bottom: zoneListPanel.bottom
+                    title: zoneTab.editMode
+                           ? "구역 " + (zoneTab.detailIndex + 1) + " 수정"
+                           : zoneTab.canAddZone ? "새 구역 추가 · 구역 " + (zoneTab.savedZoneCount + 1)
+                                                : "새 구역 추가"
+
+                    ZoneField {
+                        label: "구역 이름"
+
+                        OptionTextField {
+                            id: zoneNameField
+
+                            anchors.fill: parent
+                            enabled: zoneTab.formEnabled
+                            maximumLength: 40
+                            placeholderText: zoneTab.editMode ? "" : "예: 제 " + (zoneTab.savedZoneCount + 1) + "구역"
+                        }
+                    }
+
+                    // 계정은 주소와 분리해서 받습니다. 주소 칸에 넣으면 비밀번호가 관제 화면에
+                    // 그대로 보이고, 특수문자가 섞인 비밀번호는 URL 파싱도 깨집니다.
+                    Item {
+                        width: parent.width
+                        height: 34
+
+                        Text {
+                            id: userLabel
+
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 62
+                            text: "계정"
+                            color: Theme.textMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0
+                        }
+
+                        OptionTextField {
+                            id: zoneUserField
+
+                            anchors.left: userLabel.right
+                            anchors.leftMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: (parent.width - 68 - 74 - 12) / 2
+                            enabled: zoneTab.formEnabled
+                            placeholderText: "admin"
+                        }
+
+                        Text {
+                            id: passwordLabel
+
+                            anchors.left: zoneUserField.right
+                            anchors.leftMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 62
+                            text: "비밀번호"
+                            color: Theme.textMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0
+                        }
+
+                        OptionTextField {
+                            id: zonePasswordField
+
+                            anchors.left: passwordLabel.right
+                            anchors.leftMargin: 6
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            enabled: zoneTab.formEnabled
+                            echoMode: TextInput.Password
+                        }
+                    }
+
+                    ZoneSeparator {}
+
+                    ZoneField {
+                        label: "CH 01"
+
+                        OptionTextField {
+                            id: zoneUrlField1
+
+                            anchors.fill: parent
+                            enabled: zoneTab.formEnabled
+                            placeholderText: "rtsp://192.168.0.51:554/0/profile4/media.smp"
+                            // 구역을 고르면 C++이 값을 넣는데, 그때 커서가 끝으로 가 앞부분이 밀려 나갑니다.
+                            // 사용자가 입력 중일 때는(포커스가 있을 때) 건드리지 않습니다.
+                            onTextChanged: if (!activeFocus) cursorPosition = 0
+                        }
+                    }
+
+                    ZoneField {
+                        label: "CH 02"
+
+                        OptionTextField {
+                            id: zoneUrlField2
+
+                            anchors.fill: parent
+                            enabled: zoneTab.formEnabled
+                            onTextChanged: if (!activeFocus) cursorPosition = 0
+                        }
+                    }
+
+                    ZoneField {
+                        label: "CH 03"
+
+                        OptionTextField {
+                            id: zoneUrlField3
+
+                            anchors.fill: parent
+                            enabled: zoneTab.formEnabled
+                            onTextChanged: if (!activeFocus) cursorPosition = 0
+                        }
+                    }
+
+                    ZoneField {
+                        label: "CH 04"
+
+                        OptionTextField {
+                            id: zoneUrlField4
+
+                            anchors.fill: parent
+                            enabled: zoneTab.formEnabled
+                            onTextChanged: if (!activeFocus) cursorPosition = 0
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: 40
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: addZoneButton.left
+                            anchors.rightMargin: 12
+                            text: !root.zoneEditable ? "채널마다 계정이 달라 이 화면에서는 고칠 수 없습니다."
+                                : zoneTab.editMode ? "저장하면 다시 시작할 때 적용됩니다. 계정은 네 채널에 함께 적용됩니다."
+                                : zoneTab.canAddZone ? "구역은 앞자리부터 차례로 채워집니다. 계정은 네 채널에 함께 적용됩니다."
+                                : "구역 자리를 모두 사용했습니다."
+                            color: root.zoneEditable ? Theme.textMuted : Theme.warning
+                            wrapMode: Text.WordWrap
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.Normal
+                            font.letterSpacing: 0
+                        }
+
+                        NeonButton {
+                            id: addZoneButton
+
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 118
+                            text: zoneTab.editMode ? "변경 저장" : "구역 추가"
+                            selected: true
+                            enabled: zoneTab.formEnabled && zoneNameField.text.trim().length > 0
+                                     && zoneUrlField1.text.trim().length > 0 && zoneUrlField2.text.trim().length > 0
+                                     && zoneUrlField3.text.trim().length > 0 && zoneUrlField4.text.trim().length > 0
+                            onClicked: {
+                                if (zoneTab.editMode) {
+                                    root.zoneSaveRequested(zoneTab.detailIndex)
+                                } else {
+                                    root.zoneAddRequested()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    id: zoneMessageText
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 20
+                    text: root.zoneMessage
+                    color: root.zoneMessageError ? Theme.danger : Theme.safe
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 0
                 }
             }
         }

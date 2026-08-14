@@ -3,7 +3,6 @@
 #include <QPixmap>
 #include <QRectF>
 #include <QVector>
-#include <array>
 
 #include "model/DeviceStatus.h"
 #include "model/DigitalTwinMapDisplaySettings.h"
@@ -13,8 +12,7 @@ class QGraphicsScene;
 
 class DeviceStatusMapOverlay final {
 public:
-    void initialize(QGraphicsScene* scene, const std::array<QRectF, 2>& zoneRects,
-                    const std::array<QRectF, 2>& zoneStatusSlots);
+    void initialize(QGraphicsScene* scene, const QVector<QRectF>& zoneRects, const QVector<QRectF>& zoneStatusSlots);
     void setSignalAvailable(bool available);
     void setChannelStatuses(const QVector<DeviceChannelStatus>& statuses);
     void setDisplaySettings(const DigitalTwinMapDisplaySettings& settings);
@@ -40,8 +38,8 @@ private:
     const QPixmap& ledPixmap(const DeviceOutputState& outputs) const;
     QPixmap loadScaledPixmap(const QString& resourcePath, int size) const;
 
-    std::array<ChannelStatusRecord, 8> channels_;
-    std::array<ZoneVisualItems, 2> zones_;
+    QVector<ChannelStatusRecord> channels_;
+    QVector<ZoneVisualItems> zones_;
     QPixmap ledOffPixmap_;
     QPixmap ledSafePixmap_;
     QPixmap ledWarningPixmap_;
@@ -50,7 +48,7 @@ private:
     QPixmap sensorSafePixmap_;
     QPixmap sensorActivePixmap_;
     QPixmap cctvPixmap_;
-    std::array<QGraphicsPixmapItem*, 2> cctvItems_ = {nullptr, nullptr};
+    QVector<QGraphicsPixmapItem*> cctvItems_;
     DigitalTwinMapDisplaySettings displaySettings_;
     bool signalAvailable_ = false;
 };

@@ -7,7 +7,6 @@
 #include <QtGlobal>
 
 namespace {
-constexpr int channelCount = 8;
 constexpr int channelsPerZone = 4;
 constexpr int iconSize = 20;
 constexpr int centralCctvIconSize = 40;
@@ -27,14 +26,20 @@ constexpr double overlayZValue = 40.0;
  * @details 채널마다 아이콘을 뿌리면 도면 위가 아이콘으로 뒤덮여 객체와 구획선이 묻힌다.
  *          그래서 아이콘은 구역당 한 쌍만 두고 그 구역 채널들의 상태를 집약해서 보여 준다.
  */
-void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const std::array<QRectF, 2>& zoneRects,
-                                        const std::array<QRectF, 2>& zoneStatusSlots) {
-    if (!scene) {
+void DeviceStatusMapOverlay::initialize(QGraphicsScene* scene, const QVector<QRectF>& zoneRects,
+                                        const QVector<QRectF>& zoneStatusSlots) {
+    if (!scene || zoneRects.size() != zoneStatusSlots.size()) {
         return;
     }
 
+    // scene->clear()가 이전 아이템을 이미 지웠으므로 포인터만 새로 잡는다
+    const int zoneCount = static_cast<int>(zoneRects.size());
+    zones_.fill(ZoneVisualItems{}, zoneCount);
+    cctvItems_.fill(nullptr, zoneCount);
+    channels_.resize(zoneCount * channelsPerZone);
+
     loadPixmaps();
-    for (int zoneIndex = 0; zoneIndex < static_cast<int>(zoneRects.size()); ++zoneIndex) {
+    for (int zoneIndex = 0; zoneIndex < zoneCount; ++zoneIndex) {
         cctvItems_[zoneIndex] = scene->addPixmap(cctvPixmap_);
         cctvItems_[zoneIndex]->setPos(zoneRects[zoneIndex].center().x() - cctvPixmap_.width() / 2.0,
                                       zoneRects[zoneIndex].center().y() - cctvPixmap_.height() / 2.0);
@@ -80,7 +85,7 @@ void DeviceStatusMapOverlay::setSignalAvailable(bool available) {
 /** @brief 수신된 0 기반 채널 상태를 해당 지도 아이콘에 반영합니다. */
 void DeviceStatusMapOverlay::setChannelStatuses(const QVector<DeviceChannelStatus>& statuses) {
     for (const DeviceChannelStatus& status : statuses) {
-        if (status.channelIndex < 0 || status.channelIndex >= channelCount) {
+        if (status.channelIndex < 0 || status.channelIndex >= channels_.size()) {
             continue;
         }
 
@@ -155,7 +160,7 @@ void DeviceStatusMapOverlay::updateZone(int zoneIndex) {
     bool alarmActive = false;
     for (int localChannel = 0; localChannel < channelsPerZone; ++localChannel) {
         const int channelIndex = zoneIndex * channelsPerZone + localChannel;
-        if (channelIndex >= channelCount) {
+        if (channelIndex >= channels_.size()) {
             break;
         }
 

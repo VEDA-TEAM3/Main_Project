@@ -14,6 +14,8 @@
 #include <QString>
 #include <array>
 
+#include "model/DigitalTwinRuntimeConfig.h"
+
 namespace {
 // ---------------------------------------------------------------------------
 // 도면 치수 (scene 좌표, 1000x520)
@@ -46,6 +48,8 @@ constexpr int coverageColumnCount = 4;
 constexpr int coverageRowCount = 2;
 constexpr int coverageCellCount = coverageColumnCount * coverageRowCount;
 constexpr int channelsPerZone = 4;
+// 설정이 받아들이는 구역 수는 이 도면이 그릴 수 있는 칸 수와 같아야 한다
+static_assert(coverageCellCount == digitalTwinMaximumZoneCount);
 /// 셀 경계가 외벽·옆 셀과 겹쳐 보이지 않도록 두는 여백. 중심은 그대로 유지된다
 constexpr double coverageInset = 4.0;
 
@@ -438,24 +442,28 @@ void addStatusChip(QGraphicsScene* scene, const QRectF& slot, int zoneNumber, bo
 }  // namespace
 
 /**
- * @brief        주차장 도면 한 장을 네온 스타일로 구성하고 CCTV 커버리지 격자를 올립니다.
- * @param scene  고정 지도 요소를 추가할 scene
- * @return       전체 scene, 활성 CCTV 구역, 구역별 장치 상태 칩 자리
+ * @brief                  주차장 도면 한 장을 네온 스타일로 구성하고 CCTV 커버리지 격자를 올립니다.
+ * @param scene            고정 지도 요소를 추가할 scene
+ * @param activeZoneCount  CCTV가 붙어 있는 구역 수
+ * @return                 전체 scene, 활성 CCTV 구역, 구역별 장치 상태 칩 자리
  *
- * @details 커버리지는 4열 x 2행 격자이고 앞의 두 칸만 실제 CCTV가 있다. 나머지는 확장 자리로
- *          비워 둔다. CCTV를 늘릴 때는 DigitalTwinMapSceneLayout의 배열 크기와
- *          app_config.json의 video.areas / digitalTwin.world.zones를 같은 개수로 맞추면 된다.
+ * @details 커버리지는 4열 x 2행 격자이고 앞에서부터 activeZoneCount칸만 실제 CCTV가 있다.
+ *          나머지는 확장 자리로 비워 둔다. 구역을 늘리는 것은 app_config.json의 video.areas와
+ *          digitalTwin.world.zones를 같은 개수로 맞추는 일이고, 이 함수는 그 결과를 따른다.
  */
-DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scene) const {
+DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scene, int activeZoneCount) const {
     if (!scene) {
         return {};
     }
 
+    const int zoneCount = qBound(1, activeZoneCount, coverageCellCount);
     DigitalTwinMapSceneLayout layout;
     layout.sceneRect = QRectF(0.0, 0.0, sceneWidth, sceneHeight);
-    for (int zoneIndex = 0; zoneIndex < static_cast<int>(layout.zoneRects.size()); ++zoneIndex) {
-        layout.zoneRects[zoneIndex] = coverageCell(zoneIndex);
-        layout.zoneStatusSlots[zoneIndex] = coverageStatusSlot(zoneIndex);
+    layout.zoneRects.reserve(zoneCount);
+    layout.zoneStatusSlots.reserve(zoneCount);
+    for (int zoneIndex = 0; zoneIndex < zoneCount; ++zoneIndex) {
+        layout.zoneRects.append(coverageCell(zoneIndex));
+        layout.zoneStatusSlots.append(coverageStatusSlot(zoneIndex));
     }
 
     scene->setItemIndexMethod(QGraphicsScene::NoIndex);
@@ -466,9 +474,8 @@ DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scen
     addParkingField(scene);
     addColumnGridMarkers(scene);
 
-    const int activeZoneCount = static_cast<int>(layout.zoneRects.size());
     for (int cellIndex = 0; cellIndex < coverageCellCount; ++cellIndex) {
-        const bool active = cellIndex < activeZoneCount;
+        const bool active = cellIndex < zoneCount;
         if (active) {
             addActiveZone(scene, layout.zoneRects[cellIndex]);
         } else {

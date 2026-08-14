@@ -151,6 +151,16 @@ world 좌표는 Y가 위쪽 양수이므로 화면 매핑 시 Y를 뒤집습니�
 수신 좌표에서 자동으로 경계를 확장하지만, 정확한 채널 사분면 배치에는 고정 경계가 필요합니다.
 실 데이터가 처음 들어오면 내장 데모(`DigitalTwinSimulationWorker`)가 중지되고, 5초간 프레임이 없는 채널은 제거됩니다.
 
+**구역 수는 `video.areas` 개수를 따르고 상한은 8입니다**(도면 격자가 4열 x 2행, `digitalTwinMaximumZoneCount`).
+설정 로더가 `digitalTwin.world.zones` 길이를 `video.areas`와 같게 맞추므로 둘은 항상 짝이 맞습니다.
+**scene은 구역 수를 안 뒤에 딱 한 번만 세웁니다**(`ensureSceneReady`). 이 위젯은 `.ui`에서 승격돼 만들어져
+생성자 시점엔 구역 수를 모르므로, 생성자에서 세워 두고 `configureLiveTracking`에서 다시 세우면
+scene에 이미 올라간 오버레이 아이템을 떼었다 붙이는 경로를 타고 그 자리에서 heap이 깨집니다.
+그래서 구역 추가·수정은 **재시작으로만** 반영됩니다. 설정 팝업 "구역 관리" 탭이
+`ApplicationConfigWriter::appendArea`/`updateArea`로 설정 파일에만 쓰고 재시작을 안내합니다.
+앱이 읽고 쓰는 파일은 빌드 디렉터리 사본이므로, `CMakeLists.txt`의 `configure_file`은 **원본이 더
+새로울 때만** 복사합니다(무조건 덮으면 UI로 추가한 구역이 재구성 때 사라집니다).
+
 ### Qt Quick(QML) 계층
 
 UI는 **QWidget 골격 + 부분 QML** 하이브리드입니다. `qml/`의 컴포넌트를 `MainWindow::createQuickView()`가
@@ -160,7 +170,7 @@ QML 파일도 `CMakeLists.txt`의 `qt_add_resources(qml_resources)`에 등록해
 
 현재 QML로 옮긴 범위: 상단 표시줄, CCTV 툴바, 5개 패널 중 4개의 제목(`PanelHeader.qml`), 상태 범례,
 구역 선택·신고 다이얼로그, 표 2종(객체 목록·이벤트 로그, `DataTable.qml`),
-설정 팝업(`SettingsDialog.qml` + `OptionCheckBox`/`OptionComboBox`/`OptionSlider`),
+설정 팝업(`SettingsDialog.qml` + `OptionCheckBox`/`OptionComboBox`/`OptionSlider`/`OptionTextField`),
 장비 상태 패널(`DeviceStatusView.qml`).
 영상 타일, 맵, 안내 팝업(`InformationDialog`)은 위젯 그대로입니다.
 

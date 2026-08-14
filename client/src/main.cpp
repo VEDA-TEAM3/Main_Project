@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
                 qEnvironmentVariable("SLACK_REPORT_USER_ID"), qEnvironmentVariable("SLACK_REPORT_CHANNEL_ID"));
             MainWindow window(std::move(streamReceiverFactory), std::move(deviceStatusGatewayFactory),
                               std::move(dashboardPanelFactory), std::move(reportGateway), configResult.config.video,
-                              configResult.config.digitalTwin);
+                              configResult.config.digitalTwin, configResult.sourcePath);
 
             window.setWindowIcon(app.windowIcon());
             window.resize(configResult.config.window.width, configResult.config.window.height);

@@ -1,6 +1,7 @@
 #include "config/ApplicationConfig.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -8,7 +9,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QProcessEnvironment>
+#include <QSaveFile>
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
@@ -165,28 +168,55 @@ bool readWorldBounds(const QJsonObject& object, QRectF& bounds, QString& error) 
  * @param config  구역 상자를 채울 월드 설정
  * @param error   검증 실패 원인
  *
- * @details 선택 항목이다. 없으면 DigitalTwinWorldConfig::zoneBounds가 기존처럼 bounds를
- *          반 갈라 쓴다. 두 구역이 도면에서 멀리 떨어져 있을 때만 필요하다.
+ * @details 선택 항목이다. 없으면 zones가 비어 있는 채로 남고, resolveWorldZoneCount가
+ *          video.areas 개수만큼 늘려 DigitalTwinWorldConfig::zoneBounds가 bounds를 균등하게
+ *          갈라 쓰게 한다. 구역들이 도면에서 멀리 떨어져 있을 때만 실제 상자가 필요하다.
  */
 bool readWorldZones(const QJsonObject& world, DigitalTwinWorldConfig& config, QString& error) {
     if (!world.contains(QStringLiteral("zones"))) {
         return true;
     }
 
-    const qsizetype zoneCount = static_cast<qsizetype>(config.zones.size());
     const QJsonValue zonesValue = world.value(QStringLiteral("zones"));
-    if (!zonesValue.isArray() || zonesValue.toArray().size() != zoneCount) {
-        error = QStringLiteral("digitalTwin.world.zones must contain exactly %1 boxes").arg(zoneCount);
+    if (!zonesValue.isArray() || zonesValue.toArray().isEmpty() ||
+        zonesValue.toArray().size() > digitalTwinMaximumZoneCount) {
+        error = QStringLiteral("digitalTwin.world.zones must contain 1 to %1 boxes").arg(digitalTwinMaximumZoneCount);
         return false;
     }
 
     const QJsonArray zoneArray = zonesValue.toArray();
-    for (qsizetype index = 0; index < zoneCount; ++index) {
+    config.zones.resize(zoneArray.size());
+    for (qsizetype index = 0; index < zoneArray.size(); ++index) {
         if (!zoneArray.at(index).isObject() ||
             !readWorldBounds(zoneArray.at(index).toObject(), config.zones[index], error)) {
             error = QStringLiteral("digitalTwin.world.zones[%1] is invalid: %2").arg(index).arg(error);
             return false;
         }
+    }
+    return true;
+}
+
+/**
+ * @brief         구역 상자 개수를 실제 CCTV 구역 수에 맞춥니다.
+ * @param config  video와 digitalTwin이 모두 채워진 설정
+ * @param error   검증 실패 원인
+ *
+ * @details 맵은 video.areas 하나당 구역 하나를 그리므로 두 개수가 어긋나면 상자를 못 찾은
+ *          구역의 객체가 엉뚱한 배율로 그려진다. 상자를 아예 안 적었으면 균등 가르기를 쓰도록
+ *          빈 상자로 길이만 맞춰 둔다.
+ */
+bool resolveWorldZoneCount(ApplicationConfig& config, QString& error) {
+    const qsizetype areaCount = config.video.areas.size();
+    if (config.digitalTwin.world.zones.isEmpty()) {
+        config.digitalTwin.world.zones.resize(areaCount);
+        return true;
+    }
+
+    if (config.digitalTwin.world.zones.size() != areaCount) {
+        error = QStringLiteral("digitalTwin.world.zones has %1 boxes but video.areas has %2 areas")
+                    .arg(config.digitalTwin.world.zones.size())
+                    .arg(areaCount);
+        return false;
     }
     return true;
 }
@@ -593,8 +623,8 @@ bool parseVideo(const QJsonObject& root, VideoRuntimeConfig& config, QString& er
 
     const QJsonValue areaValue = video.value(QStringLiteral("areas"));
     if (!areaValue.isArray() || areaValue.toArray().isEmpty() ||
-        areaValue.toArray().size() > std::numeric_limits<int>::max() / videoChannelsPerArea) {
-        error = QStringLiteral("video.areas must contain a supported, non-empty area list");
+        areaValue.toArray().size() > digitalTwinMaximumZoneCount) {
+        error = QStringLiteral("video.areas must contain 1 to %1 areas").arg(digitalTwinMaximumZoneCount);
         return false;
     }
 
@@ -864,7 +894,7 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
         !parseDigitalTwin(root, result.config.digitalTwin, result.error) ||
         !parseVideo(root, result.config.video, result.error) ||
         !parseMqtt(root, result.config.mqtt, clientIdPrefix, result.error) ||
-        !parseLogging(root, result.config, result.error)) {
+        !parseLogging(root, result.config, result.error) || !resolveWorldZoneCount(result.config, result.error)) {
         return result;
     }
 
@@ -877,4 +907,312 @@ ApplicationConfigLoadResult ApplicationConfigLoader::load() {
     }
     result.successful = true;
     return result;
+}
+
+namespace {
+/**
+ * @brief        새 구역의 월드 상자를 만듭니다.
+ * @param zones  기존 digitalTwin.world.zones 배열
+ *
+ * @details RTSP 주소는 그 구역이 도면 어디에 있는지 알려 주지 않는다. 마지막 두 구역의 간격을
+ *          그대로 이어 붙여 겹치지 않는 자리에 두고, 정확한 좌표는 사용자가 나중에 보정한다.
+ *          크기를 그대로 물려받으므로 정사각형 상자라는 전제도 유지된다.
+ */
+QJsonObject nextZoneBox(const QJsonArray& zones) {
+    const QJsonObject last = zones.last().toObject();
+    const double minX = last.value(QStringLiteral("minX")).toDouble();
+    const double minY = last.value(QStringLiteral("minY")).toDouble();
+    const double maxX = last.value(QStringLiteral("maxX")).toDouble();
+    const double maxY = last.value(QStringLiteral("maxY")).toDouble();
+
+    double offsetX = (maxX - minX) * 1.25;
+    double offsetY = 0.0;
+    if (zones.size() >= 2) {
+        const QJsonObject previous = zones.at(zones.size() - 2).toObject();
+        offsetX = minX - previous.value(QStringLiteral("minX")).toDouble();
+        offsetY = minY - previous.value(QStringLiteral("minY")).toDouble();
+    }
+
+    // 앞의 두 구역이 같은 자리에 적혀 있으면 간격이 0이라 새 구역이 그 위에 겹친다
+    if (qFuzzyIsNull(offsetX) && qFuzzyIsNull(offsetY)) {
+        offsetX = (maxX - minX) * 1.25;
+    }
+
+    return QJsonObject{{QStringLiteral("minX"), minX + offsetX},
+                       {QStringLiteral("minY"), minY + offsetY},
+                       {QStringLiteral("maxX"), maxX + offsetX},
+                       {QStringLiteral("maxY"), maxY + offsetY}};
+}
+
+/**
+ * @brief           RTSP 주소에 구역 계정을 채워 넣습니다.
+ * @param address   사용자가 입력한 RTSP 주소
+ * @param userName  구역 계정, 비어 있으면 주소를 그대로 둡니다
+ * @param password  구역 비밀번호
+ * @return          계정이 포함된 RTSP URL
+ *
+ * @details 주소에 이미 계정이 있으면 그 값을 우선한다(카메라마다 계정이 다른 구성).
+ *          QUrl을 거치므로 '@'나 ':'가 든 비밀번호가 percent-encoding되어, 손으로 이어 붙일 때처럼
+ *          호스트가 잘못 잘리지 않는다. GstRtspReceiver가 FullyDecoded로 다시 풀어 쓴다.
+ */
+QString addressWithCredentials(const QString& address, const QString& userName, const QString& password) {
+    const QString trimmedAddress = address.trimmed();
+    QUrl url(trimmedAddress);
+    if (userName.isEmpty() || !url.isValid() || !url.userInfo().isEmpty()) {
+        return trimmedAddress;
+    }
+
+    url.setUserName(userName);
+    if (!password.isEmpty()) {
+        url.setPassword(password);
+    }
+    return url.toString(QUrl::FullyEncoded);
+}
+
+/**
+ * @brief                  구역 하나가 쓸 RTSP URL 네 개를 만들고 검증합니다.
+ * @param streamAddresses  사용자가 입력한 주소 목록
+ * @param streamUrls       계정까지 합친 결과
+ * @return                 실패 원인, 성공하면 빈 문자열
+ */
+QString buildStreamUrls(const QStringList& streamAddresses, const QString& userName, const QString& password,
+                        QStringList& streamUrls) {
+    if (streamAddresses.size() != videoChannelsPerArea) {
+        return QStringLiteral("RTSP 주소 %1개를 모두 입력하세요.").arg(videoChannelsPerArea);
+    }
+
+    streamUrls.clear();
+    for (qsizetype index = 0; index < streamAddresses.size(); ++index) {
+        const QString streamUrl = addressWithCredentials(streamAddresses.at(index), userName, password);
+        const QUrl url(streamUrl);
+        if (!url.isValid() || url.host().isEmpty() ||
+            (url.scheme() != QStringLiteral("rtsp") && url.scheme() != QStringLiteral("rtsps"))) {
+            return QStringLiteral("%1번 주소가 rtsp:// 형식이 아닙니다.").arg(index + 1);
+        }
+        streamUrls.append(streamUrl);
+    }
+    return {};
+}
+
+/** @brief 설정 파일을 읽어 JSON 객체로 돌려줍니다. */
+QString readConfigDocument(const QString& configPath, QJsonObject& root) {
+    QFile file(configPath);
+    if (!file.open(QFile::ReadOnly | QFile::Text)) {
+        return QStringLiteral("설정 파일을 열지 못했습니다: %1").arg(file.errorString());
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return QStringLiteral("설정 파일을 읽지 못했습니다: %1").arg(parseError.errorString());
+    }
+
+    root = document.object();
+    return {};
+}
+
+/**
+ * @brief 설정 파일을 통째로 교체하고 원래 접근 권한을 되돌립니다.
+ *
+ * @details 쓰다 만 파일이 남으면 다음 실행이 아예 못 뜬다. QSaveFile은 임시 파일을 만들어
+ *          원본을 교체하므로, 이 파일에 걸어 둔 접근 제한이 새 파일의 기본 권한으로 풀릴 수
+ *          있다. RTSP 비밀번호가 들어 있는 파일이라 권한을 다시 씌운다.
+ */
+QString writeConfigDocument(const QString& configPath, const QJsonObject& root) {
+    const QFile::Permissions originalPermissions = QFile::permissions(configPath);
+    QSaveFile output(configPath);
+    if (!output.open(QFile::WriteOnly | QFile::Text) ||
+        output.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0 || !output.commit()) {
+        return QStringLiteral("설정 파일을 저장하지 못했습니다: %1").arg(output.errorString());
+    }
+
+    if (originalPermissions != QFile::Permissions() && !QFile::setPermissions(configPath, originalPermissions)) {
+        qWarning() << "[ApplicationConfigWriter] Failed to restore configuration file permissions" << configPath;
+    }
+    return {};
+}
+
+/** @brief video.areas와 video.streams를 꺼내고 서로 개수가 맞는지 확인합니다. */
+QString readVideoArrays(const QJsonObject& root, QJsonObject& video, QJsonArray& areas, QJsonArray& streams) {
+    video = root.value(QStringLiteral("video")).toObject();
+    areas = video.value(QStringLiteral("areas")).toArray();
+    streams = video.value(QStringLiteral("streams")).toArray();
+    if (areas.isEmpty() || streams.size() != areas.size() * videoChannelsPerArea) {
+        return QStringLiteral("설정 파일의 구역과 채널 구성이 손상되어 있습니다.");
+    }
+    return {};
+}
+}  // namespace
+
+/**
+ * @brief 주소와 계정을 하나의 RTSP URL로 합칩니다.
+ */
+QString ApplicationConfigWriter::composeUrl(const QString& address, const QString& userName, const QString& password) {
+    return addressWithCredentials(address, userName, password);
+}
+
+/**
+ * @brief             구역 하나와 그 RTSP 채널들을 설정 파일 끝에 추가합니다.
+ * @param configPath  ApplicationConfigLoadResult::sourcePath
+ * @param areaName    화면에 표시할 구역 이름
+ * @param streamUrls  구역당 채널 수만큼의 RTSP URL
+ * @return            실패 원인, 성공하면 빈 문자열
+ */
+QString ApplicationConfigWriter::appendArea(const QString& configPath, const QString& areaName,
+                                            const QStringList& streamAddresses, const QString& userName,
+                                            const QString& password) {
+    const QString trimmedName = areaName.trimmed();
+    if (trimmedName.isEmpty()) {
+        return QStringLiteral("구역 이름을 입력하세요.");
+    }
+
+    QStringList streamUrls;
+    QString error = buildStreamUrls(streamAddresses, userName, password, streamUrls);
+    if (!error.isEmpty()) {
+        return error;
+    }
+
+    QJsonObject root;
+    error = readConfigDocument(configPath, root);
+    if (!error.isEmpty()) {
+        return error;
+    }
+
+    QJsonObject video;
+    QJsonArray areas;
+    QJsonArray streams;
+    error = readVideoArrays(root, video, areas, streams);
+    if (!error.isEmpty()) {
+        return error;
+    }
+    if (areas.size() >= digitalTwinMaximumZoneCount) {
+        return QStringLiteral("구역은 최대 %1개까지 추가할 수 있습니다.").arg(digitalTwinMaximumZoneCount);
+    }
+
+    QSet<QString> usedCameraIds;
+    QSet<QString> usedAreaIds;
+    for (const QJsonValue& stream : streams) {
+        usedCameraIds.insert(stream.toObject().value(QStringLiteral("cameraId")).toString());
+    }
+    for (const QJsonValue& area : areas) {
+        usedAreaIds.insert(area.toObject().value(QStringLiteral("areaId")).toString());
+    }
+
+    // 사용자가 손으로 id를 바꿔 두었어도 충돌하지 않도록 빈 자리를 찾아 붙인다
+    const auto uniqueIdentifier = [](const QString& format, int startNumber, const QSet<QString>& used) {
+        int number = startNumber;
+        QString candidate = format.arg(number, 2, 10, QLatin1Char('0'));
+        while (used.contains(candidate)) {
+            candidate = format.arg(++number, 2, 10, QLatin1Char('0'));
+        }
+        return candidate;
+    };
+
+    const int firstChannelIndex = static_cast<int>(streams.size());
+    const QString areaId = uniqueIdentifier(QStringLiteral("area-%1"), static_cast<int>(areas.size()) + 1, usedAreaIds);
+
+    QJsonArray streamIds;
+    for (int localChannelIndex = 0; localChannelIndex < videoChannelsPerArea; ++localChannelIndex) {
+        const int channelIndex = firstChannelIndex + localChannelIndex;
+        const QString cameraId = uniqueIdentifier(QStringLiteral("cam-%1"), channelIndex + 1, usedCameraIds);
+        usedCameraIds.insert(cameraId);
+        streamIds.append(cameraId);
+        streams.append(QJsonObject{
+            {QStringLiteral("cameraId"), cameraId},
+            {QStringLiteral("name"), QStringLiteral("CH - %1").arg(channelIndex + 1, 2, 10, QLatin1Char('0'))},
+            {QStringLiteral("url"), streamUrls.at(localChannelIndex)},
+            {QStringLiteral("channelIndex"), channelIndex},
+            {QStringLiteral("enabled"), true}});
+    }
+
+    areas.append(QJsonObject{{QStringLiteral("areaId"), areaId},
+                             {QStringLiteral("name"), trimmedName},
+                             {QStringLiteral("streamIds"), streamIds}});
+    video.insert(QStringLiteral("areas"), areas);
+    video.insert(QStringLiteral("streams"), streams);
+    root.insert(QStringLiteral("video"), video);
+
+    // zones가 없으면 로더가 bounds를 균등하게 갈라 쓰므로 그대로 둔다
+    QJsonObject digitalTwin = root.value(QStringLiteral("digitalTwin")).toObject();
+    QJsonObject world = digitalTwin.value(QStringLiteral("world")).toObject();
+    QJsonArray zones = world.value(QStringLiteral("zones")).toArray();
+    if (!zones.isEmpty()) {
+        zones.append(nextZoneBox(zones));
+        world.insert(QStringLiteral("zones"), zones);
+        digitalTwin.insert(QStringLiteral("world"), world);
+        root.insert(QStringLiteral("digitalTwin"), digitalTwin);
+    }
+
+    return writeConfigDocument(configPath, root);
+}
+
+/**
+ * @brief 이미 있는 구역의 이름과 RTSP 채널을 바꿔 씁니다.
+ *
+ * @details 구역 구성(개수, 채널 번호, 구역 상자)은 건드리지 않고 이름과 url만 갈아 끼운다.
+ *          채널 순서는 areas[].streamIds가 정하므로 cameraId로 찾아 쓴다.
+ */
+QString ApplicationConfigWriter::updateArea(const QString& configPath, int areaIndex, const QString& areaName,
+                                            const QStringList& streamAddresses, const QString& userName,
+                                            const QString& password) {
+    const QString trimmedName = areaName.trimmed();
+    if (trimmedName.isEmpty()) {
+        return QStringLiteral("구역 이름을 입력하세요.");
+    }
+
+    QStringList streamUrls;
+    QString error = buildStreamUrls(streamAddresses, userName, password, streamUrls);
+    if (!error.isEmpty()) {
+        return error;
+    }
+
+    QJsonObject root;
+    error = readConfigDocument(configPath, root);
+    if (!error.isEmpty()) {
+        return error;
+    }
+
+    QJsonObject video;
+    QJsonArray areas;
+    QJsonArray streams;
+    error = readVideoArrays(root, video, areas, streams);
+    if (!error.isEmpty()) {
+        return error;
+    }
+    if (areaIndex < 0 || areaIndex >= areas.size()) {
+        return QStringLiteral("설정 파일에 없는 구역입니다.");
+    }
+
+    QJsonObject area = areas.at(areaIndex).toObject();
+    const QJsonArray streamIds = area.value(QStringLiteral("streamIds")).toArray();
+    if (streamIds.size() != videoChannelsPerArea) {
+        return QStringLiteral("구역의 채널 구성이 손상되어 있습니다.");
+    }
+
+    for (qsizetype localChannelIndex = 0; localChannelIndex < streamIds.size(); ++localChannelIndex) {
+        const QString cameraId = streamIds.at(localChannelIndex).toString();
+        qsizetype streamIndex = -1;
+        for (qsizetype index = 0; index < streams.size(); ++index) {
+            if (streams.at(index).toObject().value(QStringLiteral("cameraId")).toString() == cameraId) {
+                streamIndex = index;
+                break;
+            }
+        }
+        if (streamIndex < 0) {
+            return QStringLiteral("구역이 참조하는 카메라 %1을(를) 찾지 못했습니다.").arg(cameraId);
+        }
+
+        QJsonObject stream = streams.at(streamIndex).toObject();
+        stream.insert(QStringLiteral("url"), streamUrls.at(localChannelIndex));
+        streams.replace(streamIndex, stream);
+    }
+
+    area.insert(QStringLiteral("name"), trimmedName);
+    areas.replace(areaIndex, area);
+    video.insert(QStringLiteral("areas"), areas);
+    video.insert(QStringLiteral("streams"), streams);
+    root.insert(QStringLiteral("video"), video);
+
+    return writeConfigDocument(configPath, root);
 }

@@ -32,7 +32,7 @@
 
 namespace {
 constexpr int maxTrailPointCount = 96;
-constexpr double maxTrailSceneLength = 240.0;
+constexpr double maximumStoredTrailSceneLength = 600.0;
 constexpr double movingIconRotationOffsetDegrees = 90.0;
 /// 객체 영역과 구역 테두리 사이 여백(scene 단위). 아이콘이 테두리를 넘지 않게 둔다
 constexpr double objectAreaMargin = 18.0;
@@ -134,7 +134,7 @@ double trailLength(const QVector<QPointF>& positions) {
  * 줄입니다.
  * @param positions  정리할 최근 위치 목록
  */
-void trimTrailPositions(QVector<QPointF>* positions) {
+void trimTrailPositions(QVector<QPointF>* positions, double maximumLength) {
     if (!positions) {
         return;
     }
@@ -143,9 +143,22 @@ void trimTrailPositions(QVector<QPointF>* positions) {
         positions->removeFirst();
     }
 
-    while (positions->size() > 2 && trailLength(*positions) > maxTrailSceneLength * 1.35) {
+    while (positions->size() > 2 && trailLength(*positions) > maximumLength * 1.35) {
         positions->removeFirst();
     }
+}
+
+/**
+ * @brief               설정 파일의 객체별 크기 비율을 유지하며 공통 배율을 적용합니다.
+ * @param iconConfig    기본 차량·보행자 아이콘 크기
+ * @param scalePercent  사용자 지정 백분율
+ * @return              배율이 적용된 아이콘 크기
+ */
+DigitalTwinIconConfig scaledIconConfig(const DigitalTwinIconConfig& iconConfig, int scalePercent) {
+    DigitalTwinIconConfig scaledConfig = iconConfig;
+    scaledConfig.vehiclePixels = qMax(8, qRound(iconConfig.vehiclePixels * scalePercent / 100.0));
+    scaledConfig.pedestrianPixels = qMax(8, qRound(iconConfig.pedestrianPixels * scalePercent / 100.0));
+    return scaledConfig;
 }
 
 /**
@@ -224,10 +237,6 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     // BoundingRect 모드는 더러워진 영역을 하나로 합치므로, 맵 양 끝에서 채널 하나씩만
     // 켜져도 매 프레임 화면 전체를 다시 그린다. Smart 모드는 영역별로 나눠 판단한다
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
-
-    setupScene();
-    setupSimulationWorker();
-    startDemo();
 }
 
 /**
@@ -236,6 +245,17 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
  */
 void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig& config) {
     liveConfig_ = config;
+
+    // 구역 수는 scene을 세우기 전에 정해져야 한다. 도면의 "확장 예정" 자리가 여기서 활성 구역이 된다
+    const int zoneCount = qBound(1, liveConfig_.world.zoneCount(), digitalTwinMaximumZoneCount);
+    if (sceneReady_ && zoneCount != zoneCount_) {
+        qWarning() << "[DigitalTwinMapWidget] Zone count changed after the map was built; restart to apply"
+                   << zoneCount_ << "->" << zoneCount;
+    } else {
+        zoneCount_ = zoneCount;
+    }
+    ensureSceneReady();
+
     liveFrameExpiryTimer_.setInterval(liveConfig_.frameExpiryPollMsec);
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
@@ -243,7 +263,8 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     updateObjectAreaRect();
 
     // 이미 떠 있는 데모 아이콘도 새 크기로 다시 그린다
-    objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(liveConfig_.icons);
+    objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(
+        scaledIconConfig(liveConfig_.icons, displaySettings_.iconScalePercent));
     for (DemoVisualItem& visualItem : demoItems_) {
         updateMarkerPixmap(&visualItem);
     }
@@ -257,8 +278,8 @@ DigitalTwinMapWidget::~DigitalTwinMapWidget() {
         disconnect(simulationWorker_.get(), nullptr, this, nullptr);
     }
 
-    for (ChannelRiskOverlay& channelRiskOverlay : channelRiskOverlays_) {
-        channelRiskOverlay.clear();
+    for (const std::shared_ptr<ChannelRiskOverlay>& channelRiskOverlay : channelRiskOverlays_) {
+        channelRiskOverlay->clear();
     }
 
     if (simulationWorker_ && simulationWorker_->thread() == &simulationThread_ && simulationThread_.isRunning()) {
@@ -301,17 +322,20 @@ void DigitalTwinMapWidget::stopDemo() {
 }
 
 /**
- * @brief          설정 팝업에서 확정한 맵 표시 옵션을 기존 객체와 장치
- * 오버레이에 적용합니다.
- * @param settings 적용할 네 개 표시 옵션
+ * @brief          설정 팝업에서 확정한 맵 표시 옵션을 기존 객체와 장치 오버레이에 적용합니다.
+ * @param settings 적용할 맵 표시 설정
  */
 void DigitalTwinMapWidget::applyDisplaySettings(const DigitalTwinMapDisplaySettings& settings) {
     displaySettings_ = settings;
     deviceStatusMapOverlay_.setDisplaySettings(settings);
+    objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(
+        scaledIconConfig(liveConfig_.icons, displaySettings_.iconScalePercent));
 
     for (DemoVisualItem& visualItem : demoItems_) {
+        updateMarkerPixmap(&visualItem);
         if (visualItem.trail) {
             visualItem.trail->setVisible(settings.showMovementTrails);
+            visualItem.trail->setPath(createTrailPath(visualItem.recentPositions));
         }
     }
 }
@@ -348,7 +372,7 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
 }
 
 void DigitalTwinMapWidget::applyCentralEvent(CentralEventData event) {
-    if (event.channelIndex < 0 || event.channelIndex >= digitalTwinChannelCount || event.sourceTimestamp <= 0) {
+    if (event.channelIndex < 0 || event.channelIndex >= liveChannelCount() || event.sourceTimestamp <= 0) {
         return;
     }
 
@@ -447,20 +471,44 @@ void DigitalTwinMapWidget::resizeEvent(QResizeEvent* event) {
 }
 
 /**
+ * @brief        설정 없이 화면에 올라간 경우에도 빈 지도가 남지 않도록 합니다.
+ * @param event  Qt 표시 이벤트
+ */
+void DigitalTwinMapWidget::showEvent(QShowEvent* event) {
+    ensureSceneReady();
+    QGraphicsView::showEvent(event);
+}
+
+/**
+ * @brief   구역 수가 정해진 뒤 scene과 시뮬레이션 worker를 한 번만 구성합니다.
+ *
+ * @details 이 위젯은 .ui에서 승격되어 만들어지므로 생성자에서는 구역 수를 알 수 없다.
+ *          생성자에서 미리 세워 두고 설정이 도착할 때 다시 세우면, 이미 scene에 올라간
+ *          오버레이 아이템을 떼었다 붙이는 경로를 타게 되고 그 경로에서 heap이 깨진다.
+ *          그래서 첫 configureLiveTracking(없으면 첫 표시)까지 미뤘다가 한 번만 세운다.
+ */
+void DigitalTwinMapWidget::ensureSceneReady() {
+    if (sceneReady_) {
+        return;
+    }
+
+    sceneReady_ = true;
+    setupScene();
+    setupSimulationWorker();
+    startDemo();
+}
+
+/**
  * @brief   데모 주차장 맵의 고정 배경 요소를 구성합니다.
+ *
+ * @details ensureSceneReady가 딱 한 번만 부른다. 다시 부르면 안 된다.
  */
 void DigitalTwinMapWidget::setupScene() {
-    // scene_.clear()가 아이템을 지우므로 오버레이가 들고 있는 아이템을 먼저 떼어 낸다
-    for (ChannelRiskOverlay& channelRiskOverlay : channelRiskOverlays_) {
-        channelRiskOverlay.clear();
-    }
-    dangerBorderOverlay_.clear();
-    scene_.clear();
-    demoItems_.clear();
-    visualItemIndexes_.clear();
-    mapLayout_ = sceneBuilder_->build(&scene_);
-    for (int zoneIndex = 0; zoneIndex < static_cast<int>(channelRiskOverlays_.size()); ++zoneIndex) {
-        channelRiskOverlays_[zoneIndex].attach(&scene_, mapLayout_.zoneRects[zoneIndex]);
+    mapLayout_ = sceneBuilder_->build(&scene_, zoneCount_);
+
+    for (const QRectF& zoneRect : mapLayout_.zoneRects) {
+        channelRiskOverlays_.append(std::make_shared<ChannelRiskOverlay>());
+        channelRiskOverlays_.last()->attach(&scene_, zoneRect);
     }
     updateObjectAreaRect();
     deviceStatusMapOverlay_.initialize(&scene_, mapLayout_.zoneRects, mapLayout_.zoneStatusSlots);
@@ -521,7 +569,7 @@ void DigitalTwinMapWidget::publishChannelRiskLevels(const DigitalTwinSnapshot& s
             zoneRiskLevels[localChannel] =
                 riskLevels.value(zoneIndex * digitalTwinChannelsPerZone + localChannel, DigitalTwinRiskLevel::Normal);
         }
-        channelRiskOverlays_[zoneIndex].setChannelRiskLevels(zoneRiskLevels);
+        channelRiskOverlays_[zoneIndex]->setChannelRiskLevels(zoneRiskLevels);
     }
 
     emit channelRiskLevelsChanged(riskLevels);
@@ -531,10 +579,10 @@ void DigitalTwinMapWidget::publishChannelRiskLevels(const DigitalTwinSnapshot& s
  * @brief           객체와 중앙 이벤트를 합쳐 채널별 최고 위험 단계를
  * 계산합니다.
  * @param snapshot  현재 디지털 트윈 객체 상태
- * @return          CH-01부터 CH-08까지의 위험 단계
+ * @return          구역 수만큼의 채널 위험 단계 (CH-01부터 순서대로)
  */
 QVector<DigitalTwinRiskLevel> DigitalTwinMapWidget::channelRiskLevels(const DigitalTwinSnapshot& snapshot) const {
-    QVector<DigitalTwinRiskLevel> riskLevels(digitalTwinChannelCount, DigitalTwinRiskLevel::Normal);
+    QVector<DigitalTwinRiskLevel> riskLevels(liveChannelCount(), DigitalTwinRiskLevel::Normal);
 
     for (const DigitalTwinObject& object : snapshot.objects) {
         if (!object.observed || object.channelIndex < 0 || object.channelIndex >= riskLevels.size()) {
@@ -661,8 +709,8 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
 
     if (liveMode_ && liveConfig_.debugDetail) {
         const QPointF scenePosition = scenePointForObject(object.position, object.channelIndex);
-        const int mapIndex =
-            digitalTwinZoneIndex(object.channelIndex, object.position.x(), liveConfig_.world.bounds.center().x());
+        const int mapIndex = digitalTwinZoneIndex(object.channelIndex, zoneCount_,
+                                                  liveConfig_.world.zoneIndexForWorldX(object.position.x()));
         qDebug().noquote() << QStringLiteral(
                                   "[TV SCENE] CREATE gid=%1 world=(%2,%3) zoneId=%4 "
                                   "map=%5 scene=(%6,%7) inside=%8 worldInside=%9")
@@ -721,7 +769,7 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     if (visualItem->object.observed &&
         (visualItem->recentPositions.isEmpty() || visualItem->recentPositions.constLast() != scenePosition)) {
         visualItem->recentPositions.append(scenePosition);
-        trimTrailPositions(&visualItem->recentPositions);
+        trimTrailPositions(&visualItem->recentPositions, maximumStoredTrailSceneLength);
     }
 
     visualItem->trail->setPath(createTrailPath(visualItem->recentPositions));
@@ -816,6 +864,7 @@ void DigitalTwinMapWidget::rebuildVisualItemIndexes() {
 
  */
 void DigitalTwinMapWidget::updateObjectAreaRect() {
+    objectAreaRects_.resize(mapLayout_.zoneRects.size());
     for (qsizetype zoneIndex = 0; zoneIndex < objectAreaRects_.size(); ++zoneIndex) {
         const QRectF cell = mapLayout_.zoneRects[zoneIndex];
         // 정사각형으로 잡는다. 월드 상자를 이 영역에 늘려 맞추므로 영역이 직사각형이면
@@ -835,7 +884,7 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
     const QRectF worldBounds = liveConfig_.world.bounds;
     const bool validBounds = worldBounds.width() > 0.0 && worldBounds.height() > 0.0;
     if (!liveMode_ || !validBounds) {
-        const int demoZoneIndex = channelIndex >= digitalTwinChannelsPerZone ? 1 : 0;
+        const int demoZoneIndex = qBound(0, channelIndex / digitalTwinChannelsPerZone, zoneCount_ - 1);
         const QRectF& demoArea = objectAreaRects_[demoZoneIndex];
         return QPointF(demoArea.left() + qBound(0.0, worldPosition.x(), 1.0) * demoArea.width(),
                        demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
@@ -843,7 +892,8 @@ QPointF DigitalTwinMapWidget::scenePointForObject(const QPointF& worldPosition, 
 
     // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치는 그 구역의
     // 월드 상자로 정규화한다
-    const int zoneIndex = digitalTwinZoneIndex(channelIndex, worldPosition.x(), liveConfig_.world.zoneSplitX());
+    const int zoneIndex =
+        digitalTwinZoneIndex(channelIndex, zoneCount_, liveConfig_.world.zoneIndexForWorldX(worldPosition.x()));
     const QRectF zoneBounds = liveConfig_.world.zoneBounds(zoneIndex);
     const double normalizedX = qBound(0.0, (worldPosition.x() - zoneBounds.left()) / zoneBounds.width(), 1.0);
     double normalizedY = qBound(0.0, (worldPosition.y() - zoneBounds.top()) / zoneBounds.height(), 1.0);
@@ -881,8 +931,8 @@ QPainterPath DigitalTwinMapWidget::createTrailPath(const QVector<QPointF>& posit
             continue;
         }
 
-        if (accumulatedLength + segmentLength >= maxTrailSceneLength) {
-            const double remainingLength = maxTrailSceneLength - accumulatedLength;
+        if (accumulatedLength + segmentLength >= displaySettings_.movementTrailLength) {
+            const double remainingLength = displaySettings_.movementTrailLength - accumulatedLength;
             const double ratio = remainingLength / segmentLength;
             const QPointF clippedStartPoint = currentPoint + (previousPoint - currentPoint) * ratio;
             visiblePositions.prepend(clippedStartPoint);
