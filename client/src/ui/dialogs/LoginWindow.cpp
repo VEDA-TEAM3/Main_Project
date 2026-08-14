@@ -1,8 +1,13 @@
 #include "ui/dialogs/LoginWindow.h"
 
+#include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QEvent>
+#include <QKeySequence>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QShortcut>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -46,6 +51,57 @@ LoginWindow::LoginWindow(std::shared_ptr<AuthGateway> authGateway, QWidget* pare
 
     // 계정이 없는 설치본은 로그인 대신 최초 관리자 생성으로 연다
     setQmlValue("bootstrapMode", authGateway_ && authGateway_->needsBootstrap());
+
+    // 메인 창의 Alt+Enter는 modal인 이 창이 focus를 쥐고 있는 동안 오지 않는다.
+    // 로그인 전에도 전체 화면으로 바꿀 수 있어야 하므로 같은 단축키를 여기에도 건다
+    for (const QKeySequence& sequence :
+         {QKeySequence(Qt::ALT | Qt::Key_Return), QKeySequence(Qt::ALT | Qt::Key_Enter)}) {
+        connect(new QShortcut(sequence, this), &QShortcut::activated, this, &LoginWindow::fullScreenToggleRequested);
+    }
+
+    // 메인 창이 움직이거나 크기가 바뀌면 따라간다. 안 따라가면 로그인 화면만 제자리에 남아
+    // 대시보드가 옆으로 드러난다
+    if (parent) {
+        parent->installEventFilter(this);
+    }
+}
+
+/**
+ * @brief   덮고 있는 창의 이동·크기 변화를 따라갑니다.
+ *
+ * @details 창 상태 변경(전체 화면 등)은 실제 크기가 반영된 뒤에 읽어야 하므로 한 프레임 미룹니다.
+ */
+bool LoginWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched != parentWidget()) {
+        return QWidget::eventFilter(watched, event);
+    }
+
+    // 로그인 전에 메인 창이 닫히면 로그인 화면만 남는다. 그대로 프로그램을 끝낸다
+    if (event->type() == QEvent::Close && !signedIn_) {
+        QCoreApplication::quit();
+        return QWidget::eventFilter(watched, event);
+    }
+
+    const QEvent::Type type = event->type();
+    const bool geometryChanged = type == QEvent::Move || type == QEvent::Resize || type == QEvent::WindowStateChange;
+    if (geometryChanged && isVisible()) {
+        QTimer::singleShot(0, this, [this]() { coverWidget(parentWidget()); });
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+/**
+ * @brief   인증 전에 로그인 창을 닫으면 프로그램을 끝냅니다.
+ *
+ * @details Alt+F4로 로그인 창만 닫으면 뒤의 대시보드가 그대로 드러나 관문을 통째로 건너뜁니다.
+ *          닫기는 "로그인 취소"가 아니라 "프로그램 종료"여야 합니다.
+ */
+void LoginWindow::closeEvent(QCloseEvent* event) {
+    if (!signedIn_) {
+        QCoreApplication::quit();
+    }
+    QWidget::closeEvent(event);
 }
 
 /**
@@ -117,6 +173,8 @@ void LoginWindow::handleBootstrapRequested() {
 
 /** @brief 인증이 끝난 뒤 세션 시작을 알리고 퇴장 연출을 시작합니다. */
 void LoginWindow::completeSignIn(const AuthenticatedUser& user) {
+    signedIn_ = true;
+
     // 연출보다 먼저 알린다. 그래야 RTSP·MQTT 접속이 퇴장 애니메이션과 겹쳐 진행된다
     emit authenticated(user.name, user.role);
     QMetaObject::invokeMethod(loginView_->rootObject(), "playExit");

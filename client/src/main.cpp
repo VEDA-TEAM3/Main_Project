@@ -138,8 +138,10 @@ int main(int argc, char* argv[]) {
                               configResult.config.digitalTwin, configResult.sourcePath);
 
             window.setWindowIcon(app.windowIcon());
+            // 설정 크기는 최대화를 풀었을 때 돌아갈 크기로 남기고, 시작은 창 모드 최대화로 연다
+            // (전체 화면이 아니라 제목 표시줄이 있는 최대화다. 전체 화면은 Alt+Enter)
             window.resize(configResult.config.window.width, configResult.config.window.height);
-            window.show();
+            window.showMaximized();
 
             // 로그인 창은 MainWindow와 같은 깊이의 최상위 창으로 덮는다. 자식 위젯으로
             // 덮으면 MainWindow의 QQuickWidget이 통째로 사라진다
@@ -152,6 +154,7 @@ int main(int argc, char* argv[]) {
             }
 
             QObject::connect(&login, &LoginWindow::authenticated, &window, &MainWindow::beginSession);
+            QObject::connect(&login, &LoginWindow::fullScreenToggleRequested, &window, &MainWindow::toggleFullScreen);
             login.coverWidget(&window);
             login.show();
             login.raise();

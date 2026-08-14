@@ -32,6 +32,12 @@ public:
 signals:
     /// 인증 성공 즉시 발생합니다. 퇴장 연출은 이 뒤에 이어집니다
     void authenticated(const QString& userName, const QString& role);
+    /// 로그인 화면에서도 Alt+Enter가 동작하도록 메인 창에 전달합니다
+    void fullScreenToggleRequested();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     // QML 루트 signal은 동적 metaobject에만 있어 문자열로 연결하므로 진짜 slot이어야 한다
@@ -46,4 +52,6 @@ private:
 
     std::shared_ptr<AuthGateway> authGateway_;
     QQuickWidget* loginView_ = nullptr;
+    /// 인증을 마쳤는지. 이 값이 false인 채로 창이 닫히면 프로그램을 끝낸다
+    bool signedIn_ = false;
 };

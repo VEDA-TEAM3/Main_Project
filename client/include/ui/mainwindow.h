@@ -57,6 +57,7 @@ public:
 
 public slots:
     void beginSession(const QString& userName, const QString& role);
+    void toggleFullScreen();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -112,7 +113,6 @@ private:
     void showQuickDialog(const QString& mode, const QString& title, const QString& message);
     void setReportDialogChannelProperties(int channelNumber);
     QRect quickDialogHostGeometry() const;
-    void toggleFullScreen();
 
     void toggleExpandVideo(QWidget* targetWidget);
     void expandVideo(QWidget* targetWidget);
