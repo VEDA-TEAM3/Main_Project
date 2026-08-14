@@ -23,6 +23,13 @@ constexpr int defaultIterations = 210000;
 constexpr int maximumIterations = 2000000;
 constexpr int failuresBeforeDelay = 3;
 constexpr int maximumDelaySeconds = 30;
+/// 짧은 비밀번호는 PBKDF2를 걸어도 오프라인에서 금방 풀린다. 계정 파일이 프로그램과 함께
+/// 옮겨 다니므로 파일이 남의 손에 들어가는 것을 전제로 최소 길이를 강제한다
+constexpr int minimumPasswordLength = 8;
+/// 파일이 무한정 커지지 않도록 아이디 길이를 묶는다
+constexpr int maximumUserNameLength = 64;
+/// 실패 기록은 시도된 아이디마다 생기므로, 임의의 아이디를 계속 넣으면 늘어나기만 한다
+constexpr int maximumTrackedFailures = 256;
 
 /**
  * @brief   길이와 내용을 상수 시간으로 비교합니다.
@@ -88,6 +95,11 @@ bool writeUsersDocument(const QString& path, const QJsonObject& root, QString& e
         error = QStringLiteral("계정 파일 저장에 실패했습니다: %1").arg(file.errorString());
         return false;
     }
+
+    // 같은 PC를 여러 사람이 쓰면 다른 계정이 해시를 그대로 읽어 갈 수 있다. 성공 여부는 보지
+    // 않는다 - FAT32 USB처럼 권한이 없는 매체에서는 실패하는 것이 정상이고, 그렇다고 계정
+    // 생성을 막을 이유는 없다
+    QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
     return true;
 }
 
@@ -141,6 +153,18 @@ AuthResult LocalFileAuthGateway::authenticate(const QString& userName, const QSt
     const QString key = userName.trimmed().toLower();
     const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
 
+    // 시도된 아이디마다 항목이 생기므로 아무 아이디나 계속 넣으면 늘어나기만 한다.
+    // 지연이 끝난 항목은 들고 있을 이유가 없으므로 한도를 넘으면 정리한다
+    if (failures_.size() > maximumTrackedFailures) {
+        for (auto iterator = failures_.begin(); iterator != failures_.end();) {
+            if (iterator.value().blockedUntilMsec <= nowMsec) {
+                iterator = failures_.erase(iterator);
+            } else {
+                ++iterator;
+            }
+        }
+    }
+
     FailureState& failure = failures_[key];
     if (failure.blockedUntilMsec > nowMsec) {
         const qint64 secondsLeft = (failure.blockedUntilMsec - nowMsec + 999) / 1000;
@@ -160,10 +184,15 @@ AuthResult LocalFileAuthGateway::authenticate(const QString& userName, const QSt
     const QByteArray storedHash = QByteArray::fromBase64(user.value(QStringLiteral("hash")).toString().toUtf8());
     const int iterations = user.value(QStringLiteral("iterations")).toInt();
 
-    // 아이디가 없어도 같은 실패 경로로 내려보낸다. 존재 여부를 응답 차이로 흘리지 않는다
     const bool usable = !salt.isEmpty() && !storedHash.isEmpty() && iterations > 0 && iterations <= maximumIterations;
     const bool disabled = user.value(QStringLiteral("disabled")).toBool(false);
-    if (!usable || disabled || !equalsInConstantTime(derive(password, salt, iterations), storedHash)) {
+
+    // 없는 아이디에도 같은 비용을 치른다. 여기서 곧바로 실패로 빠지면 응답이 마이크로초 만에
+    // 돌아오고, 실제 계정은 PBKDF2 때문에 수백 ms가 걸린다. 그 차이만으로 어떤 아이디가
+    // 존재하는지 훑을 수 있다. 결과는 버리더라도 derive는 반드시 한 번 돈다
+    const QByteArray candidateHash =
+        derive(password, usable ? salt : QByteArray(saltByteCount, '\0'), usable ? iterations : defaultIterations);
+    if (!usable || disabled || !equalsInConstantTime(candidateHash, storedHash)) {
         ++failure.count;
         if (failure.count >= failuresBeforeDelay) {
             const int delaySeconds = qMin(maximumDelaySeconds, 1 << qMin(5, failure.count - failuresBeforeDelay + 1));
@@ -211,8 +240,12 @@ bool LocalFileAuthGateway::createUser(const QString& userName, const QString& pa
         error = QStringLiteral("아이디를 입력하세요.");
         return false;
     }
-    if (password.isEmpty()) {
-        error = QStringLiteral("비밀번호를 입력하세요.");
+    if (trimmedName.size() > maximumUserNameLength) {
+        error = QStringLiteral("아이디는 %1자를 넘을 수 없습니다.").arg(maximumUserNameLength);
+        return false;
+    }
+    if (password.size() < minimumPasswordLength) {
+        error = QStringLiteral("비밀번호는 %1자 이상이어야 합니다.").arg(minimumPasswordLength);
         return false;
     }
     if (role != QStringLiteral("admin") && role != QStringLiteral("operator")) {

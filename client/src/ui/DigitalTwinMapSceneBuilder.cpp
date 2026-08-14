@@ -32,16 +32,16 @@ constexpr double wallTop = 46.0;
 constexpr double wallRight = 988.0;
 constexpr double wallBottom = 466.0;
 
-/// 좌측 진출입 순환로. 실측 도면처럼 넉넉한 폭을 준다
-constexpr double fieldLeft = 140.0;
+/// 좌측 진출입 순환로. 진입 화살표와 램프가 들어갈 만큼만 두고 남는 폭은 주차 구획에 준다
+constexpr double fieldLeft = 108.0;
 /// 우측 계단·승강기 코어와 출차 램프 앞까지가 주차 구획이다
 constexpr double fieldRight = 948.0;
 
 /// 상·하단 장치 상태 칩 띠의 중심
 constexpr double topStripCenterY = 20.0;
 constexpr double bottomStripCenterY = 494.0;
-constexpr double statusChipWidth = 116.0;
-constexpr double statusChipHeight = 26.0;
+constexpr double statusChipWidth = 132.0;
+constexpr double statusChipHeight = 32.0;
 
 /// 물리 CCTV 커버리지 격자. 열은 기둥 그리드, 행은 주 통로에 맞춘다
 constexpr int coverageColumnCount = 4;
@@ -467,7 +467,9 @@ DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scen
     }
 
     scene->setItemIndexMethod(QGraphicsScene::NoIndex);
-    scene->setSceneRect(layout.sceneRect.adjusted(-18.0, -18.0, 18.0, 18.0));
+    // 뷰가 fitInView로 이 사각형을 위젯에 맞추므로 여백이 그대로 지도 축소로 이어진다.
+    // 위험 테두리(펜 3)와 발광 레이어(펜 5)가 경계 밖으로 나가는 만큼만 남긴다
+    scene->setSceneRect(layout.sceneRect.adjusted(-6.0, -6.0, 6.0, 6.0));
     scene->setBackgroundBrush(QColor(QStringLiteral("#061726")));
 
     addShell(scene);

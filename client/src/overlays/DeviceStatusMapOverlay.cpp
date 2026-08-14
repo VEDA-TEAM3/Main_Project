@@ -8,7 +8,7 @@
 
 namespace {
 constexpr int channelsPerZone = 4;
-constexpr int iconSize = 20;
+constexpr int iconSize = 24;
 constexpr int centralCctvIconSize = 40;
 constexpr double iconGap = 4.0;
 /// 상태 칩 안쪽 여백. DigitalTwinMapSceneBuilder가 그리는 칩과 맞춰야 한다

@@ -1,5 +1,6 @@
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 #include <cstdio>
@@ -39,6 +40,17 @@ void checkCreateAndAuthenticate(const QString& usersFilePath) {
     const AuthResult unknown = gateway.authenticate(QStringLiteral("nobody"), QStringLiteral("pw-with-!@:/"));
     check(!unknown.successful, "an unknown account must be rejected");
     check(unknown.error == wrong.error, "an unknown account must not be told apart from a wrong password");
+
+    // 응답 시간으로 계정 존재 여부가 새면 아이디를 훑을 수 있다. 없는 아이디도 PBKDF2를
+    // 한 번 돌아야 하므로 두 실패의 소요 시간이 비슷해야 한다
+    QElapsedTimer timer;
+    timer.start();
+    gateway.authenticate(QStringLiteral("admin"), QStringLiteral("wrong-password"));
+    const qint64 knownMsec = timer.restart();
+    gateway.authenticate(QStringLiteral("nobody-at-all"), QStringLiteral("wrong-password"));
+    const qint64 unknownMsec = timer.elapsed();
+    check(unknownMsec * 4 >= knownMsec,
+          "an unknown account must cost about the same as a wrong password (no user enumeration by timing)");
 }
 
 /** @brief 비밀번호가 평문이나 단순 해시로 남지 않는지 검사합니다. */
@@ -59,12 +71,22 @@ void checkRejectedInput(const QString& usersFilePath) {
 
     check(!gateway.createUser(QStringLiteral("admin"), QStringLiteral("other"), QStringLiteral("admin"), error),
           "a duplicate account name must be rejected");
-    check(!gateway.createUser(QStringLiteral("guard"), QStringLiteral("pw"), QStringLiteral("superuser"), error),
+    check(!gateway.createUser(QStringLiteral("guard"), QStringLiteral("long-enough-pw"), QStringLiteral("superuser"),
+                              error),
           "an unknown role must be rejected");
-    check(!gateway.createUser(QString(), QStringLiteral("pw"), QStringLiteral("operator"), error),
+    check(!gateway.createUser(QString(), QStringLiteral("long-enough-pw"), QStringLiteral("operator"), error),
           "an empty account name must be rejected");
     check(!gateway.createUser(QStringLiteral("guard"), QString(), QStringLiteral("operator"), error),
           "an empty password must be rejected");
+
+    // 계정 파일이 프로그램과 함께 옮겨 다니므로 짧은 비밀번호는 오프라인에서 금방 풀린다
+    check(!gateway.createUser(QStringLiteral("guard"), QStringLiteral("short"), QStringLiteral("operator"), error),
+          "a password below the minimum length must be rejected");
+    check(gateway.createUser(QStringLiteral("guard"), QStringLiteral("12345678"), QStringLiteral("operator"), error),
+          "a password at the minimum length must be accepted");
+    check(!gateway.createUser(QString(65, QLatin1Char('x')), QStringLiteral("long-enough-pw"),
+                              QStringLiteral("operator"), error),
+          "an over-long account name must be rejected");
 
     // 최초 실행 화면이 관리자 추가 통로가 되면 안 된다
     check(!gateway.createInitialAdmin(QStringLiteral("second"), QStringLiteral("pw"), error),

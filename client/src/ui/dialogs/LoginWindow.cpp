@@ -175,6 +175,11 @@ void LoginWindow::handleBootstrapRequested() {
 void LoginWindow::completeSignIn(const AuthenticatedUser& user) {
     signedIn_ = true;
 
+    // 이 창은 파괴하지 않고 감추기만 하므로, 비워 두지 않으면 프로그램이 끝날 때까지
+    // 비밀번호가 입력 칸에 그대로 남는다
+    setQmlValue("password", QString());
+    setQmlValue("passwordConfirm", QString());
+
     // 연출보다 먼저 알린다. 그래야 RTSP·MQTT 접속이 퇴장 애니메이션과 겹쳐 진행된다
     emit authenticated(user.name, user.role);
     QMetaObject::invokeMethod(loginView_->rootObject(), "playExit");
