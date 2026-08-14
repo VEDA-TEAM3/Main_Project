@@ -66,6 +66,8 @@ private:
     void expandAutomaticWorldBounds(const RiskFrameData& frame);
     void logAutomaticWorldBounds(const QString& reason) const;
     bool worldBoundsReady() const;
+    bool isAcceptableWorldPosition(const QPointF& worldPosition) const;
+    qsizetype removeOutOfRangeObjects(RiskFrameData& frame, qint64 arrivalTimeMsec);
     QPointF medianFilteredWorldPosition(qint64 globalId, const QPointF& worldPosition);
     QPointF rateLimitedWorldPosition(qint64 globalId, const QPointF& worldPosition, qint64 arrivalTimeMsec);
     void logRateLimitedJump(qint64 globalId, double distance, double maximumDistance, qint64 localTimeMsec);
@@ -106,6 +108,7 @@ private:
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     qint64 lastRateLimitLogMsec_ = 0;
+    qint64 lastOutOfRangeLogMsec_ = 0;
     qint64 lastPulseEmitMsec_ = 0;
     bool hasConfiguredWorldBounds_ = false;
     bool hasAutomaticWorldBounds_ = false;

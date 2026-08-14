@@ -85,3 +85,4 @@ CMakeLists.txt.user*
 
 # Local runtime configuration may contain RTSP credentials.
 /config/app_config.json
+/config/users.json

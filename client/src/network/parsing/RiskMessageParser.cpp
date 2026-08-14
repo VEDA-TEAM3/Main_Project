@@ -1,10 +1,13 @@
 #include "network/parsing/RiskMessageParser.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <cmath>
 #include <utility>
+
+#include "network/parsing/MqttPayloadLimits.h"
 
 namespace {
 constexpr int riskProtocolVersion = 1;
@@ -101,6 +104,12 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
         return false;
     }
 
+    // 시계 창을 벗어난 ts는 자동 경계 warmup을 앞당기고 진단 통계를 망가뜨린다
+    if (!isFreshSourceTimestamp(timestamp, QDateTime::currentMSecsSinceEpoch())) {
+        error = QStringLiteral("RiskFrame ts is outside the accepted clock window on %1: %2").arg(topic).arg(timestamp);
+        return false;
+    }
+
     const QJsonValue objectsValue = root.value(QStringLiteral("objects"));
     if (!objectsValue.isArray()) {
         error = QStringLiteral("Missing objects array on %1").arg(topic);
@@ -116,6 +125,12 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
     }
 
     const QJsonArray objects = objectsValue.toArray();
+    // 넘치는 만큼만 잘라 쓰면 어떤 객체가 빠졌는지 알 수 없는 채로 안전 판단이 돈다
+    if (objects.size() > maximumRiskObjectsPerFrame) {
+        error = QStringLiteral("RiskFrame carries too many objects on %1: %2").arg(topic).arg(objects.size());
+        return false;
+    }
+
     frame.objects.reserve(objects.size());
     for (const QJsonValue& objectValue : objects) {
         if (!objectValue.isObject()) {

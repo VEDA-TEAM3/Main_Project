@@ -39,6 +39,17 @@ constexpr double maximumWorldSpeedMetersPerSecond = 8.0;
 // 4사분면이라 객체가 경계를 자주 넘는데, 표시 지연 때문에 경계 위에서 채널이
 // 왕복하면 위험 테두리와 신고 대상 채널이 깜빡인다
 constexpr int automaticBoundsExpansionFrameCount = 3;
+// 현재 월드 경계를 이 배율만큼 넓힌 영역 밖의 좌표는 받지 않는다.
+//
+// 유한하지만 비정상인 좌표(x=1e9 등)는 NaN 검사를 통과한다. 중앙값 필터와 속도 상한은
+// 이미 본 gid에만 걸리므로 처음 보는 gid의 첫 좌표는 둘 다 우회한다. 그 좌표가 자동
+// 경계 확장에 들어가면 경계가 한 번 벌어지고, 확장은 단조라 되돌아오지 않아 그 세션
+// 내내 정상 객체들이 지도 한 점에 뭉친다.
+//
+// 좌표를 경계로 clamp하지 않고 버린다. clamp하면 잘못된 위치가 정상처럼 표시된다.
+// 교정 오차와 실제 도면 확장 여유를 함께 덮도록 경계 크기에 비례해서 잡는다
+constexpr double worldBoundsAcceptanceMargin = 2.0;
+constexpr qint64 outOfRangeLogIntervalMsec = 1000;
 constexpr qint64 rateLimitLogIntervalMsec = 1000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
 // 중앙값 필터는 움직이는 객체의 좌표를 항상 한 프레임 분량만큼 되돌린다. 그
@@ -238,6 +249,9 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
     lastAcceptedInputFrame_ = frame;
+
+    // 좌표 필터보다 먼저 건다. 여기서 걸러야 이상치가 자동 경계 확장까지 못 간다
+    removeOutOfRangeObjects(frame, arrivalTimeMsec);
 
     ++frameSequence_;
 
@@ -696,6 +710,62 @@ void RiskObjectTracker::logAutomaticWorldBounds(const QString& reason) const {
 
 bool RiskObjectTracker::worldBoundsReady() const { return hasConfiguredWorldBounds_ || hasAutomaticWorldBounds_; }
 
+/**
+ * @brief                한 좌표가 현재 정규화 범위에서 받아들일 만한 거리에 있는지 봅니다.
+ * @param worldPosition  RiskFrame이 실어 온 월드 좌표(m)
+ * @return               경계를 여유만큼 넓힌 영역 안이면 true
+ *
+ * @details warmup 구간에는 비교할 경계 자체가 없다. 그 구간의 표본이 곧 경계가 되므로
+ *          바깥에서 검증할 기준이 없고, 고정 경계(VEDA_MAP_* 또는 digitalTwin.world)를
+ *          설정하는 것이 유일한 방어다. README의 권장 설정이 그래서 필요하다.
+ */
+bool RiskObjectTracker::isAcceptableWorldPosition(const QPointF& worldPosition) const {
+    if (!worldBoundsReady()) {
+        return true;
+    }
+
+    const QRectF bounds = hasConfiguredWorldBounds_ ? configuredWorldBounds_ : automaticWorldBounds_;
+    const double horizontalMargin = bounds.width() * worldBoundsAcceptanceMargin;
+    const double verticalMargin = bounds.height() * worldBoundsAcceptanceMargin;
+    const QRectF acceptedArea = bounds.adjusted(-horizontalMargin, -verticalMargin, horizontalMargin, verticalMargin);
+    return acceptedArea.contains(worldPosition);
+}
+
+/**
+ * @brief                   정규화 범위 밖의 객체를 프레임에서 제거합니다.
+ * @param frame             계약 검증을 통과한 최신 RiskFrame
+ * @param arrivalTimeMsec   로컬 수신 시각
+ * @return                  제거한 객체 수
+ */
+qsizetype RiskObjectTracker::removeOutOfRangeObjects(RiskFrameData& frame, qint64 arrivalTimeMsec) {
+    const auto rejects = [this](const RiskObjectData& object) {
+        return !isAcceptableWorldPosition(object.worldPosition);
+    };
+
+    // remove_if가 남기는 뒤쪽 원소는 move된 뒤라 내용을 믿을 수 없다. 로그에 쓸 좌표는
+    // 압축 전에 찾아 둔다
+    const auto firstRejected = std::find_if(frame.objects.begin(), frame.objects.end(), rejects);
+    if (firstRejected == frame.objects.end()) {
+        return 0;
+    }
+    const QPointF firstRejectedPosition = firstRejected->worldPosition;
+
+    // 앞쪽은 전부 통과한 원소이므로 압축도 여기서부터 시작하면 된다
+    const auto keptEnd = std::remove_if(firstRejected, frame.objects.end(), rejects);
+    const qsizetype rejectedCount = std::distance(keptEnd, frame.objects.end());
+    frame.objects.erase(keptEnd, frame.objects.end());
+
+    // 상류 캘리브레이션이 틀어진 것일 수도 있으므로 진단 수준과 무관하게 남긴다
+    if (arrivalTimeMsec - lastOutOfRangeLogMsec_ >= outOfRangeLogIntervalMsec) {
+        lastOutOfRangeLogMsec_ = arrivalTimeMsec;
+        qWarning().noquote() << QStringLiteral("[TV] dropped %1 object(s) outside %2, first=(%3)")
+                                    .arg(rejectedCount)
+                                    .arg(worldBoundsDescription())
+                                    .arg(formatPoint(firstRejectedPosition));
+    }
+    return rejectedCount;
+}
+
 /** @brief 현재 사용 중인 정규화 범위와 그 출처를 사람이 읽을 수 있는 문자열로
  * 만듭니다. */
 QString RiskObjectTracker::worldBoundsDescription() const {
@@ -1044,6 +1114,10 @@ void RiskObjectTracker::removeInactivePositionStates(const QHash<QString, QPoint
         if (objectIdOk) {
             renderedOpacities_.remove(objectId);
             opacityUpdateTimesMsec_.remove(objectId);
+            // 진단 맵도 여기서 함께 정리한다. gid는 상류가 정하므로 놔두면 계속 늘어나고,
+            // 하필 현장에서 몇 시간씩 켜 두는 level 2에서만 쌓인다
+            diagnostics_.previousRawPositions.remove(objectId);
+            diagnostics_.lastObjectLogMsec.remove(objectId);
         }
         iterator = positionTransitions_.erase(iterator);
     }

@@ -462,6 +462,13 @@ void MainWindow::openMapSettingsDialog() {
         return;
     }
 
+    // 설정 팝업의 구역 관리 탭은 RTSP 계정과 비밀번호를 보여주고 고칠 수 있다.
+    // 상단 버튼도 관제사에게는 감추지만, signal은 그 경로 말고도 올 수 있으므로 여기서 한 번 더 막는다
+    if (!sessionIsAdmin_) {
+        qWarning().noquote() << QStringLiteral("[Session] %1 is not allowed to open settings").arg(sessionUserName_);
+        return;
+    }
+
     mapSettingsDialog_->setSettings(mapDisplaySettings_);
     mapSettingsDialog_->setVideoRiskBordersEnabled(videoRiskBordersEnabled_);
     mapSettingsDialog_->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
@@ -635,7 +642,8 @@ void MainWindow::setupDeviceStatusService() {
                 &DashboardPanelCoordinator::consumeCentralEvent, Qt::QueuedConnection);
     }
 
-    deviceStatusService_->start();
+    // 연결만 걸어 두고 실제 수신은 beginSession()에서 시작한다. 로그인 화면 뒤에서 영상과
+    // 장비 상태가 이미 돌고 있으면 이 관문이 아무것도 막지 못한다
 }
 
 /**
@@ -674,12 +682,33 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
 void MainWindow::showEvent(QShowEvent* event) {
     QMainWindow::showEvent(event);
     updateDashboardAdaptiveSizes();
+}
 
-    if (streamSessionStarted_ || !streamSessionManager_) {
+/**
+ * @brief           로그인이 끝난 뒤 실제 수신을 시작합니다.
+ * @param userName  인증된 사용자 이름
+ * @param role      "admin" 또는 "operator"
+ *
+ * @details 로그인 창의 퇴장 연출과 겹쳐서 진행됩니다. RTSP handshake와 MQTT 접속에 걸리는
+ *          1~2초의 앞부분을 그 애니메이션이 덮고, 나머지는 타일의 로딩 표시가 받습니다.
+ */
+void MainWindow::beginSession(const QString& userName, const QString& role) {
+    if (streamSessionStarted_) {
         return;
     }
-
     streamSessionStarted_ = true;
+
+    sessionUserName_ = userName;
+    sessionIsAdmin_ = role == QStringLiteral("admin");
+    qInfo().noquote() << QStringLiteral("[Session] %1 (%2) signed in").arg(userName, role);
+
+    if (quickTopBar_ && quickTopBar_->rootObject()) {
+        quickTopBar_->rootObject()->setProperty("settingsAllowed", sessionIsAdmin_);
+    }
+
+    if (deviceStatusService_) {
+        deviceStatusService_->start();
+    }
 
     QTimer::singleShot(videoConfig_.initialStartDelayMsec, this, [this]() {
         if (streamSessionManager_) {

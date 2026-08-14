@@ -55,6 +55,9 @@ public:
                         QWidget* parent = nullptr);
     ~MainWindow() override;
 
+public slots:
+    void beginSession(const QString& userName, const QString& role);
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -159,6 +162,8 @@ private:
     QuickDialogMode quickDialogMode_ = QuickDialogMode::None;
 
     bool streamSessionStarted_ = false;
+    QString sessionUserName_;
+    bool sessionIsAdmin_ = false;
     bool videoRiskBordersEnabled_ = true;
     bool faceBlurEnabled_ = true;
     bool licensePlateBlurEnabled_ = true;

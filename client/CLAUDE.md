@@ -121,6 +121,14 @@ CMake는 로컬 파일이 있으면 그것을, 없으면 example을 빌드 디�
 - 고빈도 데이터(risk/blur)는 직접 signal로 쏘지 않고 `LatestRiskFrameBuffer`/`LatestBlurFrameBuffer`에
   최신값만 보관하고 `RiskFrameDispatcher`/`BlurFrameDispatcher`가 주기적으로 flush합니다. UI 갱신도
   `DashboardPanelCoordinator`에서 타이머로 배치 처리합니다. 이 버퍼링을 우회하면 UI/영상 스레드가 밀립니다.
+- **MQTT payload는 신뢰할 수 없는 입력입니다.** 공통 상한은 `include/network/parsing/MqttPayloadLimits.h`
+  한곳에 있습니다(payload 256KB, Risk 객체 256개, `ts`는 로컬 UTC 기준 -60초~+5초). 새 파서를 추가하면
+  `isFreshSourceTimestamp`를 **반드시** 부르세요. 미래 `ts`를 한 번 받아들이면 `BlurProcessor`가 최신
+  timestamp를 그쪽으로 끌어올려 뒤이어 오는 정상 metadata를 전부 과거로 보고 버리고, **블러가 조용히
+  꺼진 채 얼굴과 번호판이 그대로 나갑니다.** 그래서 미래 쪽 한계는 `blur.historyMs`보다 작아야 합니다.
+  상한을 넘긴 메시지는 잘라 쓰지 말고 통째로 거부합니다(블러 영역 64개만 예외 — 일부라도 가리는 편이 낫습니다).
+- **프로토콜 오류는 `emitProtocolError`에서 초당 하나로 제한됩니다.** 오류 하나마다 스레드 경계를 넘는
+  signal이 하나 나가므로, 제한을 풀면 잘못된 메시지를 쏟아붓는 것만으로 크기 상한보다 먼저 UI가 밀립니다.
 
 ### 채널 번호 규칙 (자주 틀리는 부분)
 
@@ -150,6 +158,12 @@ blur 메타데이터의 UTC `ts`를 실제 표시 프레임에 맞춘 뒤 sink �
 world 좌표는 Y가 위쪽 양수이므로 화면 매핑 시 Y를 뒤집습니다(`invertY`). 보정된 `VEDA_MAP_*` 경계가 없으면
 수신 좌표에서 자동으로 경계를 확장하지만, 정확한 채널 사분면 배치에는 고정 경계가 필요합니다.
 실 데이터가 처음 들어오면 내장 데모(`DigitalTwinSimulationWorker`)가 중지되고, 5초간 프레임이 없는 채널은 제거됩니다.
+
+**자동 경계 확장은 단조라 되돌아오지 않습니다.** 그래서 `RiskObjectTracker::submitFrame`은 필터를 돌리기
+전에 현재 경계를 크게 벗어난 좌표를 버립니다(`removeOutOfRangeObjects`). 중앙값 필터와 속도 상한은 이미
+본 gid에만 걸리므로 처음 보는 gid의 첫 좌표는 둘 다 우회하고, 그 한 좌표가 경계를 벌리면 그 세션 내내
+정상 객체가 지도 한 점에 뭉칩니다. **좌표를 경계로 clamp하지 마세요** — 잘못된 위치가 정상처럼 보입니다.
+warmup 구간에는 비교 기준이 없어 이 검사가 놀고, 고정 경계 설정이 유일한 방어입니다.
 
 **구역 수는 `video.areas` 개수를 따르고 상한은 8입니다**(도면 격자가 4열 x 2행, `digitalTwinMaximumZoneCount`).
 설정 로더가 `digitalTwin.world.zones` 길이를 `video.areas`와 같게 맞추므로 둘은 항상 짝이 맞습니다.
@@ -195,6 +209,15 @@ QML 루트의 `signal`은 동적 metaobject에만 있으므로 C++ 연결은 `SI
   `QDialog`→`QWidget`(`Qt::Dialog | Qt::FramelessWindowHint`) 교체로도 안 고쳐졌습니다.
   그래서 `InformationDialog`는 **의도적으로 위젯으로 남겨** 두었습니다. 설정 팝업에서 여는 2차 팝업을
   QML로 바꾸려면 이 문제부터 푸세요(별도 창 대신 설정 QML 안의 오버레이로 그리는 쪽이 현실적입니다).
+- **최상위 QQuickWidget 창은 창 자체를 애니메이션하면 죽습니다.** 로그인 창을 걷어내려고
+  `windowOpacity`를 `QPropertyAnimation`으로 내렸더니 heap이 깨졌고(`0xC0000374`), `pos`를
+  움직이는 방식으로 바꿨더니 같은 자리에서 access violation(`0xC0000005`)이 났습니다. 둘 다
+  로그인 성공 0.5초 뒤에 죽고, 백트레이스는 `QObject::event` → `RtlFreeHeap`으로 찍히지만
+  거기는 손상된 heap을 만지는 곳일 뿐입니다. `windowOpacity`는 Windows에서 `WS_EX_LAYERED`를
+  걸기 때문에 "투명 배경을 걸면 아무것도 렌더되지 않는다"는 위 항목과 같은 뿌리로 보입니다.
+  **창 단위 전환 연출은 포기하고 QML 안에서 끝내세요.** `LoginScreen.qml`은 카드를 띄워 지운 뒤
+  검은 사각형으로 덮고, C++은 이미 검게 된 창을 `hide()`만 합니다.
+  `close()`도 쓰면 안 됩니다 — 마지막 창 닫힘 판정을 타서 앱이 통째로 종료됩니다.
 - **`roleNames()`를 override할 땐 반드시 한 번 만든 값을 돌려주세요.** 호출할 때마다 새 `QHash`를 만들면
   QML에 붙이는 순간 heap이 깨집니다(`0xC0000374`/`0xC0000005`). 표를 QML로 옮기는 시도를 네 번 말아먹은
   원인이 이거였습니다.

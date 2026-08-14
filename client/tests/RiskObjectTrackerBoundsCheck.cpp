@@ -402,6 +402,31 @@ void checkPhysicalZoneWorldBounds() {
     check(narrowSpan > 0.75, "calibrated zone must use most of the map width");
     check(wideSpan < 0.2, "the half split wasted the map, which is what made objects clump");
 }
+/**
+ * @brief 정규화 범위에서 크게 벗어난 좌표가 화면과 자동 경계 계산에서 빠지는지 검사합니다.
+ *
+ * @details 유한한 이상치는 NaN 검사를 통과하고, 처음 보는 gid는 중앙값 필터와 속도
+ *          상한도 우회한다. 그대로 두면 자동 경계가 한 번 벌어진 뒤 되돌아오지 않는다.
+ */
+void checkOutOfRangeObjectsDropped() {
+    DigitalTwinRuntimeConfig config;
+    config.positionTransitionMsec = 0;
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+
+    RiskFrameData frame;
+    frame.sourceTimestamp = 10000;
+    frame.objects = {objectAt(1, QPointF(-50.0, 0.0), 0), objectAt(2, QPointF(999999999.0, 0.0), 1),
+                     objectAt(3, QPointF(-200.0, 10.0), 2)};
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(frame, 10000);
+    const DigitalTwinSnapshot snapshot = tracker.buildSnapshot(10000);
+    check(findObject(snapshot, 1) != nullptr, "an in-range object must survive");
+    check(findObject(snapshot, 2) == nullptr, "a finite but absurd coordinate must be dropped, not clamped");
+    check(findObject(snapshot, 3) != nullptr, "a coordinate within the calibration margin must survive");
+    check(snapshot.objects.size() == 2, "only the out-of-range object may disappear");
+}
 }  // namespace
 
 int main() {
@@ -416,6 +441,7 @@ int main() {
     checkStreamExpiryRemovesEverything();
     checkPhysicalZoneSelection();
     checkPhysicalZoneWorldBounds();
+    checkOutOfRangeObjectsDropped();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

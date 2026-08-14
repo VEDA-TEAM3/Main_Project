@@ -32,8 +32,14 @@ qt_add_executable(Qtcctvclient
     src/ui/mainwindow.ui
     include/ui/ClickableVideoWidget.h
     src/ui/ClickableVideoWidget.cpp
+    include/auth/AuthGateway.h
+    include/auth/LocalFileAuthGateway.h
+    src/auth/LocalFileAuthGateway.cpp
+
     include/ui/dialogs/MapSettingsDialog.h
     src/ui/dialogs/MapSettingsDialog.cpp
+    include/ui/dialogs/LoginWindow.h
+    src/ui/dialogs/LoginWindow.cpp
     include/ui/dialogs/InformationDialog.h
     src/ui/dialogs/InformationDialog.cpp
     include/ui/DashboardLayout.h
@@ -135,6 +141,7 @@ qt_add_executable(Qtcctvclient
     src/network/routing/BlurTopicHandler.cpp
     include/network/gateways/MqttDeviceStatusGateway.h
     include/network/parsing/BlurMessageParser.h
+    include/network/parsing/MqttPayloadLimits.h
     src/network/parsing/BlurMessageParser.cpp
     include/network/realtime/BlurFrameDispatcher.h
     src/network/realtime/BlurFrameDispatcher.cpp
@@ -195,6 +202,7 @@ qt_add_resources(Qtcctvclient "qml_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/DataTable.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/DeviceStatusView.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/SettingsDialog.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/LoginScreen.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionCheckBox.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionComboBox.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OptionSlider.qml"
@@ -360,6 +368,17 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(config_area_writer_check PRIVATE Qt6::Core)
+
+    add_executable(local_file_auth_gateway_check
+        tests/LocalFileAuthGatewayCheck.cpp
+        src/auth/LocalFileAuthGateway.cpp
+    )
+
+    target_include_directories(local_file_auth_gateway_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(local_file_auth_gateway_check PRIVATE Qt6::Core Qt6::Network)
 
     add_executable(risk_message_parser_check
         tests/RiskMessageParserCheck.cpp

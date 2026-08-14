@@ -57,6 +57,7 @@ private:
     void scheduleUiFlush();
     void flushPendingStatuses();
     bool isDuplicateReport(const DeviceStatusReport& report);
+    static bool isStaleConfirmedState(const DeviceChannelStatus& status, qint64 sourceTimestamp);
     QString reportKey(const DeviceStatusReport& report) const;
     void rememberReportKey(QString key);
 

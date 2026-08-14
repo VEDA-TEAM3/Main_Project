@@ -14,6 +14,7 @@ Item {
 
     property alias areaTapHandler: areaTapHandler
     property alias settingsTapHandler: settingsTapHandler
+    property alias settingsButton: settingsButton
 
     implicitHeight: 62
 

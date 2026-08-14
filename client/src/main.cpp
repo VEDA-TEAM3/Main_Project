@@ -11,9 +11,11 @@
 #include <memory>
 #include <utility>
 
+#include "auth/LocalFileAuthGateway.h"
 #include "config/ApplicationConfig.h"
 #include "network/gateways/MqttDeviceStatusGatewayFactory.h"
 #include "network/gateways/SlackReportGateway.h"
+#include "ui/dialogs/LoginWindow.h"
 #include "ui/mainwindow.h"
 #include "ui/panels/DefaultDashboardPanelFactory.h"
 #include "video/GstStreamReceiverFactory.h"
@@ -99,6 +101,30 @@ int main(int argc, char* argv[]) {
 
         qInfo().noquote() << QStringLiteral("[Config] Loaded %1").arg(configResult.sourcePath);
 
+        // 폴더째 옮겨 쓰는 배포에서 계정을 만들어 두기 위한 provisioning 경로.
+        // 비밀번호가 명령줄에 남으므로(프로세스 목록에서 보임) 현장 운영용이 아니라
+        // 배포 준비용이다. 최초 실행 시 화면에서 만드는 흐름으로 대체하는 것이 정석이다
+        const QStringList arguments = app.arguments();
+        const qsizetype createUserIndex = arguments.indexOf(QStringLiteral("--create-user"));
+        if (createUserIndex >= 0) {
+            if (arguments.size() < createUserIndex + 4) {
+                qCritical().noquote() << QStringLiteral("usage: --create-user <name> <password> <admin|operator>");
+                return 2;
+            }
+
+            LocalFileAuthGateway gateway(LocalFileAuthGateway::usersFilePathFor(configResult.sourcePath));
+            QString createError;
+            if (!gateway.createUser(arguments.at(createUserIndex + 1), arguments.at(createUserIndex + 2),
+                                    arguments.at(createUserIndex + 3), createError)) {
+                qCritical().noquote() << QStringLiteral("[Login] %1").arg(createError);
+                return 2;
+            }
+
+            qInfo().noquote() << QStringLiteral("[Login] Created %1 (%2)")
+                                     .arg(arguments.at(createUserIndex + 1), arguments.at(createUserIndex + 3));
+            return 0;
+        }
+
         {
             auto streamReceiverFactory = std::make_shared<GstStreamReceiverFactory>(configResult.config.video.receiver);
             auto deviceStatusGatewayFactory =
@@ -114,6 +140,22 @@ int main(int argc, char* argv[]) {
             window.setWindowIcon(app.windowIcon());
             window.resize(configResult.config.window.width, configResult.config.window.height);
             window.show();
+
+            // 로그인 창은 MainWindow와 같은 깊이의 최상위 창으로 덮는다. 자식 위젯으로
+            // 덮으면 MainWindow의 QQuickWidget이 통째로 사라진다
+            auto authGateway =
+                std::make_shared<LocalFileAuthGateway>(LocalFileAuthGateway::usersFilePathFor(configResult.sourcePath));
+            LoginWindow login(authGateway, &window);
+            if (!login.isReady()) {
+                qCritical() << "[Login] Login screen failed to load";
+                return 1;
+            }
+
+            QObject::connect(&login, &LoginWindow::authenticated, &window, &MainWindow::beginSession);
+            login.coverWidget(&window);
+            login.show();
+            login.raise();
+            login.activateWindow();
 
             ret = app.exec();
         }

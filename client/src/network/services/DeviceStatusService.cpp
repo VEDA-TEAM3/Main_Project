@@ -280,13 +280,14 @@ void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& 
         report.hardwareAlive ? QStringLiteral("hardware_alive") : QStringLiteral("hardware_unavailable");
     status.detail = status.sensorDetail;
 
-    if (report.hardwareAlive && report.hasOutputState) {
+    if (!report.hardwareAlive || !report.hasOutputState) {
+        status.feedbackHealth = DeviceFeedbackHealth::Unknown;
+    } else if (!isStaleConfirmedState(status, report.sourceTimestamp)) {
+        // 늦게 도착한 지난 스냅샷은 출력 상태만 무시하고 HW 연결 상태는 그대로 반영한다
         status.outputs = report.outputs;
         status.hasConfirmedState = true;
         status.feedbackHealth = DeviceFeedbackHealth::Confirmed;
         status.confirmedSourceTimestamp = report.sourceTimestamp;
-    } else {
-        status.feedbackHealth = DeviceFeedbackHealth::Unknown;
     }
 
     channelStatuses_.insert(status.channelIndex, status);
@@ -331,6 +332,10 @@ void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& repo
     }
 
     DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    if (isStaleConfirmedState(status, report.sourceTimestamp)) {
+        return;
+    }
+
     status.channelIndex = report.channelIndex;
     status.outputs = report.outputs;
     status.hasConfirmedState = true;
@@ -416,6 +421,20 @@ bool DeviceStatusService::isDuplicateReport(const DeviceStatusReport& report) {
 
     rememberReportKey(key);
     return false;
+}
+
+/**
+ * @brief                  이미 반영한 확정 출력보다 오래된 보고인지 봅니다.
+ * @param status           채널의 현재 상태
+ * @param sourceTimestamp  들어온 보고의 원본 시각
+ * @return                 더 오래된 보고이면 true
+ *
+ * @details 재전송이나 지연 배달로 지난 상태가 최신 상태 뒤에 도착하면 패널이 과거로
+ *          되돌아간다. 같은 timestamp는 받아들인다 - 완전히 같은 재전송은 이미
+ *          isDuplicateReport가 걸러내므로, 여기까지 온 동일 timestamp는 내용이 다르다.
+ */
+bool DeviceStatusService::isStaleConfirmedState(const DeviceChannelStatus& status, qint64 sourceTimestamp) {
+    return status.hasConfirmedState && sourceTimestamp > 0 && sourceTimestamp < status.confirmedSourceTimestamp;
 }
 
 /**

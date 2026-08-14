@@ -1,11 +1,14 @@
 #include "network/parsing/BlurMessageParser.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtGlobal>
 #include <cmath>
 #include <utility>
+
+#include "network/parsing/MqttPayloadLimits.h"
 
 namespace {
 constexpr int blurProtocolVersion = 1;
@@ -89,6 +92,13 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
 
     if (payloadChannel != topicWireChannel) {
         error = QStringLiteral("Blur topic/payload channel mismatch on %1").arg(topic);
+        return false;
+    }
+
+    // 미래 ts 하나를 받아들이면 BlurProcessor가 뒤이어 오는 정상 metadata를 전부 과거로
+    // 보고 버린다. 그러면 블러가 조용히 꺼진 채 얼굴과 번호판이 그대로 표시된다
+    if (!isFreshSourceTimestamp(timestamp, QDateTime::currentMSecsSinceEpoch())) {
+        error = QStringLiteral("Blur ts is outside the accepted clock window on %1: %2").arg(topic).arg(timestamp);
         return false;
     }
 

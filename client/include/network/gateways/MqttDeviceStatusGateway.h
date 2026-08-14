@@ -42,6 +42,8 @@ private:
     RiskFrameDispatcher* riskDispatcher_ = nullptr;
     QVector<qint64> lastBlurDebugLogMsec_;
     qint64 lastRiskDebugLogMsec_ = 0;
+    qint64 lastProtocolErrorMsec_ = 0;
+    qint64 suppressedProtocolErrorCount_ = 0;
     int blurDebugLogIntervalMsec_ = 0;
     int riskDebugLogIntervalMsec_ = 0;
     qsizetype maximumDebugPayloadLength_ = 0;

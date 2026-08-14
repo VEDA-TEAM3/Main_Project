@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <utility>
 
+#include "network/parsing/MqttPayloadLimits.h"
 #include "network/realtime/BlurFrameDispatcher.h"
 #include "network/realtime/LatestBlurFrameBuffer.h"
 #include "network/realtime/RiskFrameDispatcher.h"
@@ -12,6 +13,11 @@
 #include "network/transport/MqttTransportFactory.h"
 
 namespace {
+/// 프로토콜 오류를 이 주기로 한 번만 올린다. 오류 하나마다 로그 한 줄과 thread 경계를
+/// 넘는 signal이 하나씩 나가므로, 제한이 없으면 잘못된 메시지를 쏟아붓는 것만으로
+/// GUI 이벤트 큐가 payload 크기 상한에 걸리기 한참 전에 밀린다
+constexpr qint64 protocolErrorIntervalMsec = 1000;
+
 QString riskLevelName(DigitalTwinRiskLevel riskLevel) {
     switch (riskLevel) {
         case DigitalTwinRiskLevel::Warning:
@@ -150,6 +156,12 @@ void MqttDeviceStatusGateway::handleMessage(const QByteArray& payload, const QSt
         return;
     }
 
+    // JSON 파싱 전에 막는다. 한 번 파싱하고 나면 문서 전체가 이미 메모리에 올라와 있다
+    if (payload.size() > maximumMqttPayloadBytes) {
+        emitProtocolError(QStringLiteral("MQTT payload is too large on %1: %2 bytes").arg(topic).arg(payload.size()));
+        return;
+    }
+
     MqttRouteResult result = messageRouter_->route(payload, topic);
     if (logStatusPayload_ && result.logPayload) {
         logReceivedMessage(payload, topic);
@@ -248,6 +260,20 @@ void MqttDeviceStatusGateway::logRiskFrame(const QString& topic, const RiskFrame
 
 /** @brief MQTT 계약 또는 전송 오류를 기존 상태 서비스 경로로 전달합니다. */
 void MqttDeviceStatusGateway::emitProtocolError(QString detail) {
+    // 오류 하나마다 GUI thread로 signal이 하나 간다. 잘못된 메시지에는 제한이 없으므로
+    // 주기당 하나만 올리고 나머지는 개수만 세어 다음 오류에 붙인다
+    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+    if (lastProtocolErrorMsec_ > 0 && nowMsec - lastProtocolErrorMsec_ < protocolErrorIntervalMsec) {
+        ++suppressedProtocolErrorCount_;
+        return;
+    }
+
+    if (suppressedProtocolErrorCount_ > 0) {
+        detail += QStringLiteral(" (+%1 suppressed)").arg(suppressedProtocolErrorCount_);
+        suppressedProtocolErrorCount_ = 0;
+    }
+    lastProtocolErrorMsec_ = nowMsec;
+
     // 오류는 로그 카테고리와 무관하게 항상 남긴다
     qWarning().noquote() << QStringLiteral("[MQTT ERROR] %1").arg(detail);
 
