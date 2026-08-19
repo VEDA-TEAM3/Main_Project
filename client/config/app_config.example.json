@@ -27,8 +27,8 @@
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
         "icons": {
-            "vehiclePx": 40,
-            "pedestrianPx": 33
+            "vehiclePx": 42,
+            "pedestrianPx": 38
         },
         "world": {
             "fixedBoundsEnabled": true,
