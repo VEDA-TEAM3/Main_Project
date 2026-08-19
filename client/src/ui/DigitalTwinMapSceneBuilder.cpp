@@ -468,7 +468,8 @@ DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scen
 
     scene->setItemIndexMethod(QGraphicsScene::NoIndex);
     // 뷰가 fitInView로 이 사각형을 위젯에 맞추므로 여백이 그대로 지도 축소로 이어진다.
-    // 위험 테두리(펜 3)와 발광 레이어(펜 5)가 경계 밖으로 나가는 만큼만 남긴다
+    // 위험 테두리의 네온 겹 중 가장 굵은 것(펜 10)이 중심선 기준 5만큼 밖으로 나간다.
+    // DangerBorderOverlay의 획 굵기를 올리려면 이 여백부터 같이 키워야 광채가 잘리지 않는다
     scene->setSceneRect(layout.sceneRect.adjusted(-6.0, -6.0, 6.0, 6.0));
     scene->setBackgroundBrush(QColor(QStringLiteral("#061726")));
 

@@ -41,6 +41,36 @@ bool isInsideVerticalRange(int y, double centerY, double distanceLimit) {
 }
 
 /**
+ * @brief             한 행에서 세로 패스가 실제로 읽어 가는 가로 거리 제곱의 상한을 구합니다.
+ * @param y           픽셀 Y 좌표
+ * @param centerY     원의 중심 Y 좌표
+ * @param radius      원의 반지름
+ * @param blurRadius  box blur 반경(샘플)
+ * @return            가로 거리 제곱의 상한. 음수면 그 행은 어느 열에서도 읽히지 않는다
+ *
+ * @details 세로 패스는 출력 픽셀마다 위아래 blurRadius만큼의 중간값을 읽으므로, 원 밖의 행이라도
+ *          원 안쪽 행에서 blurRadius 안에 들면 가로 패스가 채워 두어야 한다. 딱 그만큼만 넓힌
+ *          범위라 세로 패스가 읽는 칸은 전부 덮이고, 그 밖은 계산하지 않는다.
+ */
+double horizontalDistanceLimit(int y, double centerY, double radius, int blurRadius) {
+    const double deltaY = qAbs(static_cast<double>(y) + 0.5 - centerY);
+    const double outside = qMax(0.0, deltaY - static_cast<double>(blurRadius));
+    return radius * radius - outside * outside;
+}
+
+/**
+ * @brief                 픽셀이 가로 패스가 채워야 할 범위 안인지 확인합니다.
+ * @param x               픽셀 X 좌표
+ * @param centerX         원의 중심 X 좌표
+ * @param distanceLimit   horizontalDistanceLimit()이 구한 상한
+ * @return                채워야 하면 true
+ */
+bool isInsideHorizontalRange(int x, double centerX, double distanceLimit) {
+    const double deltaX = static_cast<double>(x) + 0.5 - centerX;
+    return deltaX * deltaX <= distanceLimit;
+}
+
+/**
  * @brief        실수 픽셀 좌표를 내림한 뒤 영상 범위로 제한합니다.
  * @param value  실수 픽셀 좌표
  * @param extent 영상 축 길이
@@ -188,17 +218,42 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
         scratch.resize(scratchSize);
     }
 
+    // 가로 패스도 세로 패스가 실제로 읽어 갈 칸만 채운다. 상자 전체를 채우면 원 바깥 모서리까지
+    // 계산하는데, 그 값은 아무도 읽지 않는다. scratch는 프레임 사이에 재사용되지만 세로 패스가
+    // 읽는 범위는 여기서 빠짐없이 덮으므로(위 horizontalDistanceLimit 주석 참고) 남은 값을
+    // 읽는 경로는 생기지 않는다.
     for (int localY = 0; localY < region.height; ++localY) {
+        const double rowLimit = horizontalDistanceLimit(region.top + localY, region.centerY, region.radius, radius);
+        if (rowLimit < 0.0) {
+            continue;
+        }
+
+        const int centerColumn = qBound(0, static_cast<int>(region.centerX) - region.left, region.width - 1);
+        if (!isInsideHorizontalRange(region.left + centerColumn, region.centerX, rowLimit)) {
+            continue;
+        }
+
+        int firstNeededX = centerColumn;
+        while (firstNeededX > 0 && isInsideHorizontalRange(region.left + firstNeededX - 1, region.centerX, rowLimit)) {
+            --firstNeededX;
+        }
+        int lastNeededX = centerColumn;
+        while (lastNeededX < region.width - 1 &&
+               isInsideHorizontalRange(region.left + lastNeededX + 1, region.centerX, rowLimit)) {
+            ++lastNeededX;
+        }
+
         const guint8* sourceRow = pixels + (region.top + localY) * stride + region.left * pixelStride;
         for (int component = 0; component < componentCount; ++component) {
             quint64 sum = 0;
-            int windowEnd = std::min(radius, region.width - 1);
-            for (int x = 0; x <= windowEnd; ++x) {
+            int windowStart = std::max(0, firstNeededX - radius);
+            int windowEnd = std::min(region.width - 1, firstNeededX + radius);
+            for (int x = windowStart; x <= windowEnd; ++x) {
                 sum += sourceRow[x * pixelStride + component];
             }
 
-            for (int x = 0; x < region.width; ++x) {
-                const int windowStart = std::max(0, x - radius);
+            for (int x = firstNeededX; x <= lastNeededX; ++x) {
+                windowStart = std::max(0, x - radius);
                 windowEnd = std::min(region.width - 1, x + radius);
                 const int count = windowEnd - windowStart + 1;
                 scratch[(static_cast<size_t>(localY) * region.width + x) * componentCount + component] =
@@ -223,22 +278,47 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
             continue;
         }
 
+        // 원 안쪽 Y 범위는 열마다 한 번만 정한다. 기존처럼 모든 픽셀에서 실수 제곱을 반복하지
+        // 않고, 실제로 출력할 구간만 세로 blur를 진행한다.
+        //
+        // 경계는 sqrt로 한 번에 구하지 않고 중심 행에서 위아래로 훑어 찾는다. 이 MinGW 구성에서
+        // 우리 TU가 libm을 직접 부르면 실행 즉시 32비트 pseudo relocation으로 죽기 때문이다
+        // (같은 이유로 이 파일은 floor/ceil도 boundedFloorPixel/boundedCeilPixel로 대신한다).
+        // 안쪽 집합은 중심을 감싸는 연속 구간이라 이렇게 찾아도 정확하고, 훑는 양은 실제로
+        // 출력할 픽셀 수에 비례한다.
+        // centerY에 가장 가까운 행은 floor(centerY)다. 평면 좌표라 항상 0 이상이므로 절단이 곧 내림이다.
+        // 구간 밖으로 잘리면 남은 행 중 중심에 가장 가까운 쪽이 되므로, 그 행이 밖이면 이 열은 전부 밖이다
+        const int centerRow = qBound(0, static_cast<int>(region.centerY) - region.top, region.height - 1);
+        if (!isInsideVerticalRange(region.top + centerRow, region.centerY, distanceLimit)) {
+            // 중심에 가장 가까운 행조차 원 밖이면 이 열에는 그릴 것이 없다
+            continue;
+        }
+
+        int firstInsideY = centerRow;
+        while (firstInsideY > 0 &&
+               isInsideVerticalRange(region.top + firstInsideY - 1, region.centerY, distanceLimit)) {
+            --firstInsideY;
+        }
+        int lastInsideY = centerRow;
+        while (lastInsideY < region.height - 1 &&
+               isInsideVerticalRange(region.top + lastInsideY + 1, region.centerY, distanceLimit)) {
+            ++lastInsideY;
+        }
+
         for (int component = 0; component < componentCount; ++component) {
             quint64 sum = 0;
-            int windowEnd = std::min(radius, region.height - 1);
-            for (int y = 0; y <= windowEnd; ++y) {
+            int windowStart = std::max(0, firstInsideY - radius);
+            int windowEnd = std::min(region.height - 1, firstInsideY + radius);
+            for (int y = windowStart; y <= windowEnd; ++y) {
                 sum += scratch[(static_cast<size_t>(y) * region.width + localX) * componentCount + component];
             }
 
-            for (int localY = 0; localY < region.height; ++localY) {
-                const int windowStart = std::max(0, localY - radius);
+            for (int localY = firstInsideY; localY <= lastInsideY; ++localY) {
+                windowStart = std::max(0, localY - radius);
                 windowEnd = std::min(region.height - 1, localY + radius);
                 const int count = windowEnd - windowStart + 1;
-                if (isInsideVerticalRange(region.top + localY, region.centerY, distanceLimit)) {
-                    guint8* targetPixel =
-                        pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
-                    targetPixel[component] = static_cast<guint8>(sum / static_cast<quint64>(count));
-                }
+                guint8* targetPixel = pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
+                targetPixel[component] = static_cast<guint8>(sum / static_cast<quint64>(count));
 
                 const int removeY = localY - radius;
                 const int addY = localY + radius + 1;
@@ -388,6 +468,14 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
         return;
     }
 
+    // 블러 연산뿐 아니라 이력 조회까지 함께 잰다. regionsFor는 metadata를 넣는 dispatcher 스레드와
+    // 같은 뮤텍스를 쓰므로, 영상 스레드가 프레임당 막힐 수 있는 유일한 자리가 거기다.
+    // 연산만 재면 락 대기가 통째로 빠져 "블러는 빠른데 왜 끊기지"로 잘못 읽힌다
+    QElapsedTimer processingTimer;
+    if (config_.debugLogIntervalMsec > 0) {
+        processingTimer.start();
+    }
+
     const std::optional<VideoUtcTimestamp> frameTimestamp = utcClockMapper_.timestampFor(frame.buffer);
     if (!frameTimestamp.has_value()) {
         return;
@@ -417,14 +505,16 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
     qint64 lastLogMsec = lastApplyLogMsec_.load(std::memory_order_relaxed);
     if (nowMsec - lastLogMsec >= config_.debugLogIntervalMsec &&
         lastApplyLogMsec_.compare_exchange_strong(lastLogMsec, nowMsec, std::memory_order_relaxed)) {
-        qInfo().noquote() << QStringLiteral("[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6")
+        qInfo().noquote() << QStringLiteral(
+                                 "[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6 processingUs=%7")
                                  .arg(channelIndex_.load(std::memory_order_relaxed))
                                  .arg(regions.size())
                                  .arg(GST_VIDEO_FRAME_WIDTH(&frame))
                                  .arg(GST_VIDEO_FRAME_HEIGHT(&frame))
                                  .arg(targetTimestamp)
                                  .arg(frameTimestamp->senderClock ? QStringLiteral("rtcp")
-                                                                  : QStringLiteral("pts-anchor"));
+                                                                  : QStringLiteral("pts-anchor"))
+                                 .arg(processingTimer.nsecsElapsed() / 1000);
     }
 }
 

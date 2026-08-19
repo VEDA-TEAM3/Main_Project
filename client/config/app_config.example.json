@@ -27,8 +27,8 @@
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
         "icons": {
-            "vehiclePx": 38,
-            "pedestrianPx": 28
+            "vehiclePx": 40,
+            "pedestrianPx": 33
         },
         "world": {
             "fixedBoundsEnabled": true,
@@ -105,10 +105,10 @@
             },
             "blur": {
                 "syncOffsetMs": 300,
-                "historyMs": 10000,
+                "historyMs": 2000,
                 "matchToleranceMs": 250,
                 "holdLastMetadataMs": 1000,
-                "maximumHistorySize": 300,
+                "maximumHistorySize": 60,
                 "sourceRestartGapMs": 5000,
                 "sourceTimestampRestartThresholdMs": 2000,
                 "paddingRatio": 0.18,

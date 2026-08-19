@@ -174,7 +174,12 @@ PanelFrame {
                 width: 112
                 text: "적용"
                 selected: true
-                onClicked: root.applied()
+                onClicked: {
+                    // 아직 확정되지 않은 숫자 입력을 먼저 값으로 옮긴 뒤 C++이 읽게 한다
+                    iconScaleSetting.commit();
+                    trailLengthSetting.commit();
+                    root.applied();
+                }
             }
         }
 
@@ -245,6 +250,17 @@ PanelFrame {
 
                     required property string title
                     property alias value: valueField.value
+
+                    /**
+                     * 편집 중인 글자를 값으로 확정합니다.
+                     *
+                     * SpinBox는 focus를 잃거나 엔터를 칠 때만 글자를 값으로 옮깁니다. 적용 버튼은
+                     * TapHandler라 눌러도 focus가 옮겨가지 않아, 엔터를 치지 않으면 옛 값이 그대로
+                     * 적용됐습니다. focus 이동 시점에 기대지 않도록 여기서 직접 확정합니다.
+                     */
+                    function commit() {
+                        valueField.value = valueField.valueFromText(valueInput.text, valueField.locale);
+                    }
                     property int minimumValue: 0
                     property int maximumValue: 999
                     property int stepSize: 1
@@ -290,6 +306,8 @@ PanelFrame {
                         font.weight: Font.DemiBold
 
                         contentItem: TextInput {
+                            id: valueInput
+
                             z: 2
                             leftPadding: 10
                             rightPadding: 31

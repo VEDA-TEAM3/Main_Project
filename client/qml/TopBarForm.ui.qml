@@ -77,7 +77,7 @@ Item {
         }
 
         Row {
-            anchors.right: settingsButton.left
+            anchors.right: helpButton.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             height: parent.height
@@ -122,9 +122,9 @@ Item {
 
         Rectangle {
             id: settingsButton
-            anchors.right: helpButton.left
+            anchors.right: parent.right
             // 관제사 계정에서는 감춰지므로, 그 자리가 빈칸으로 남지 않도록 폭까지 접습니다
-            anchors.rightMargin: settingsButton.visible ? 6 : 0
+            anchors.rightMargin: 10
             anchors.verticalCenter: parent.verticalCenter
             width: settingsButton.visible ? 54 : 0
             height: 46
@@ -156,12 +156,12 @@ Item {
             TapHandler { id: settingsTapHandler }
         }
 
-        // 사용 안내 버튼입니다. 설정과 달리 역할을 가리지 않으므로, 관제사 계정에서도
-        // 오른쪽 끝이 비지 않도록 설정 버튼보다 바깥쪽에 둡니다.
+        // 사용 안내 버튼입니다. 설정과 달리 역할을 가리지 않으며, 설정이 감춰지면
+        // 자연스럽게 오른쪽 끝을 채웁니다.
         Rectangle {
             id: helpButton
-            anchors.right: parent.right
-            anchors.rightMargin: 10
+            anchors.right: settingsButton.left
+            anchors.rightMargin: settingsButton.visible ? 12 : 0
             anchors.verticalCenter: parent.verticalCenter
             width: 40
             height: 40

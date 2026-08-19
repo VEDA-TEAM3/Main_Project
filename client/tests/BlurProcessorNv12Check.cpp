@@ -156,6 +156,67 @@ void checkNv12RegionBlur() {
 }
 
 /**
+ * @brief 중간 버퍼를 재사용해도 같은 입력이 같은 결과를 내는지 검사합니다.
+ *
+ * @details 가로 패스는 세로 패스가 읽어 갈 칸만 채우고, 중간 버퍼는 프레임 사이에 재사용된다.
+ *          채우는 범위가 한 칸이라도 모자라면 직전 프레임이 남긴 값을 읽는데, 픽셀 값의 범위나
+ *          이웃 차이만 보는 검사로는 그게 드러나지 않는다. 크기가 다른 영역을 한 번 블러해
+ *          중간 버퍼를 다르게 더럽힌 뒤 같은 입력을 다시 블러해 바이트 단위로 비교한다.
+ */
+void checkScratchReuseIsStable() {
+    GstVideoInfo info;
+    gst_video_info_set_format(&info, GST_VIDEO_FORMAT_NV12, frameWidth, frameHeight);
+
+    BlurProcessor processor(makeConfig());
+    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+
+    const auto blurOnce = [&](const QRectF& normalizedBox) {
+        std::vector<guint8> result;
+        GstBuffer* buffer = createPatternBuffer(info);
+        if (!buffer) {
+            return result;
+        }
+
+        processor.observeVideoBuffer(buffer);
+
+        BlurFrameData metadata;
+        metadata.channelIndex = 0;
+        metadata.sourceTimestamp = nowMsec;
+        BlurRegionData region;
+        region.id = 1;
+        region.targetType = BlurTargetType::Face;
+        region.normalizedBox = normalizedBox;
+        metadata.regions.append(region);
+        processor.submitFrame(metadata);
+
+        GstVideoFrame frame;
+        if (gst_video_frame_map(&frame, &info, buffer, GST_MAP_READWRITE) == TRUE) {
+            processor.apply(frame);
+
+            const auto* luma = static_cast<const guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+            const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0);
+            result.reserve(static_cast<size_t>(frameWidth) * frameHeight);
+            for (int y = 0; y < frameHeight; ++y) {
+                result.insert(result.end(), luma + y * stride, luma + y * stride + frameWidth);
+            }
+            gst_video_frame_unmap(&frame);
+        }
+
+        gst_buffer_unref(buffer);
+        return result;
+    };
+
+    const QRectF probeBox(0.375, 0.375, 0.25, 0.25);
+    const std::vector<guint8> first = blurOnce(probeBox);
+    // 중간 버퍼를 다른 모양으로 덮어 둔다
+    blurOnce(QRectF(0.05, 0.05, 0.5, 0.5));
+    const std::vector<guint8> second = blurOnce(probeBox);
+
+    check(!first.empty(), "probe frame must be blurred");
+    check(first == second, "reusing the scratch buffer must not change the result");
+}
+
+/**
  * @brief 블러 대상이 모두 꺼져 있으면 프레임을 건드리지 않는지 검사합니다.
  */
 void checkDisabledTargetsLeaveFrame() {
@@ -195,6 +256,7 @@ int main(int argc, char* argv[]) {
     gst_init(&argc, &argv);
 
     checkNv12RegionBlur();
+    checkScratchReuseIsStable();
     checkDisabledTargetsLeaveFrame();
 
     if (failureCount > 0) {

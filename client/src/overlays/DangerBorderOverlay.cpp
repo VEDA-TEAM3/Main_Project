@@ -5,20 +5,44 @@
 #include <QObject>
 #include <QPen>
 #include <QtGlobal>
+#include <iterator>
+#include <utility>
 
 namespace {
 constexpr int overlayFrameIntervalMsec = 33;
-/// 한 번 밝아졌다 어두워지는 데 걸리는 시간
-constexpr qint64 blinkPeriodMsec = 1300;
+/// 한 번 차올랐다 잦아드는 데 걸리는 시간. 사람이 "경보"로 읽는 대역이다
+constexpr qint64 blinkPeriodMsec = 1100;
+/// 한 주기에서 차오르는 데 쓰는 비율. 나머지는 잦아드는 데 쓴다
+constexpr double attackRatio = 0.22;
 /// 짧게 스치는 위험도 알아볼 수 있도록 최소한 이만큼은 깜박인다
 constexpr qint64 minimumVisibleMsec = 2000;
 /// 위험이 풀린 뒤 사라지는 데 걸리는 시간
 constexpr qreal fadeOutStepPerFrame = static_cast<qreal>(overlayFrameIntervalMsec) / 380.0;
-constexpr qreal minimumOpacity = 0.35;
-constexpr qreal maximumOpacity = 1.0;
-constexpr qreal borderPenWidth = 3.0;
 /// 객체(4.0)와 상태 칩(5.2)보다 위에 그린다
 constexpr qreal borderZValue = 20.0;
+
+/** @brief 네온 획 한 겹의 굵기와 밝기 범위 */
+struct NeonStroke {
+    qreal penWidth;
+    qreal minimumOpacity;
+    qreal maximumOpacity;
+    const char* color;
+};
+
+// 바깥에서 안으로. 굵고 흐린 겹이 번지는 빛이 되고 안쪽으로 갈수록 좁고 진해진다.
+//
+// scene 사각형이 테두리 바깥으로 6만 여유를 두므로(DigitalTwinMapSceneBuilder) 획은 중심선
+// 기준 절반만 밖으로 나간다 — 가장 굵은 10짜리가 5까지다. 이 값을 12 이상으로 올리면 광채가
+// scene 밖으로 잘린다.
+//
+// 심지(마지막 겹)의 최소 밝기가 0.85인 것이 이 연출의 핵심이다. 파형의 골에서도 테두리가
+// 또렷하게 남아야 경보를 놓치지 않는다.
+constexpr NeonStroke neonStrokes[] = {
+    {10.0, 0.08, 0.55, "#ff2f3d"},
+    {6.5, 0.22, 0.80, "#ff2f3d"},
+    {3.5, 0.50, 0.95, "#ff5b66"},
+    {1.5, 0.85, 1.00, "#ffdfe2"},
+};
 }  // namespace
 
 /** @brief 깜박임 갱신 타이머를 준비합니다. 타이머는 이 객체를 만든 UI 스레드에서 돕니다. */
@@ -43,18 +67,25 @@ void DangerBorderOverlay::attach(QGraphicsScene* scene, const QRectF& borderRect
         return;
     }
 
-    QPen borderPen(QColor(QStringLiteral("#ff2f3d")), borderPenWidth);
-    borderPen.setJoinStyle(Qt::MiterJoin);
+    layers_.reserve(std::size(neonStrokes));
+    qreal layerZValue = borderZValue;
+    for (const NeonStroke& stroke : neonStrokes) {
+        QPen borderPen(QColor(QLatin1String(stroke.color)), stroke.penWidth);
+        borderPen.setJoinStyle(Qt::MiterJoin);
 
-    item_ = std::make_unique<QGraphicsRectItem>(borderRect);
-    item_->setPen(borderPen);
-    item_->setBrush(QBrush(Qt::NoBrush));
-    item_->setZValue(borderZValue);
-    item_->setOpacity(0.0);
-    item_->setVisible(false);
-    // 구역 클릭은 뷰가 좌표로 판정하므로 이 아이템이 입력을 가로채면 안 된다
-    item_->setAcceptedMouseButtons(Qt::NoButton);
-    scene->addItem(item_.get());
+        auto item = std::make_unique<QGraphicsRectItem>(borderRect);
+        item->setPen(borderPen);
+        item->setBrush(QBrush(Qt::NoBrush));
+        // 굵은 겹부터 올려야 좁고 밝은 심지가 그 위에 남는다
+        item->setZValue(layerZValue);
+        layerZValue += 0.01;
+        item->setOpacity(0.0);
+        item->setVisible(false);
+        // 구역 클릭은 뷰가 좌표로 판정하므로 이 아이템이 입력을 가로채면 안 된다
+        item->setAcceptedMouseButtons(Qt::NoButton);
+        scene->addItem(item.get());
+        layers_.push_back(std::move(item));
+    }
 }
 
 /**
@@ -71,7 +102,7 @@ void DangerBorderOverlay::setActive(bool active) {
         elapsedMsec_ = 0;
     }
 
-    if (item_ && !animationTimer_.isActive()) {
+    if (!layers_.empty() && !animationTimer_.isActive()) {
         animationTimer_.start();
     }
 }
@@ -80,19 +111,22 @@ void DangerBorderOverlay::setActive(bool active) {
 void DangerBorderOverlay::clear() {
     animationTimer_.stop();
 
-    if (item_ && item_->scene()) {
-        item_->scene()->removeItem(item_.get());
+    for (const std::unique_ptr<QGraphicsRectItem>& item : layers_) {
+        if (item && item->scene()) {
+            item->scene()->removeItem(item.get());
+        }
     }
 
-    item_.reset();
+    layers_.clear();
     elapsedMsec_ = 0;
-    opacity_ = 0.0;
+    pulse_ = 0.0;
+    fade_ = 0.0;
     active_ = false;
 }
 
 /** @brief 테두리 밝기를 한 프레임만큼 갱신합니다. */
 void DangerBorderOverlay::updateAnimation() {
-    if (!item_) {
+    if (layers_.empty()) {
         animationTimer_.stop();
         return;
     }
@@ -102,19 +136,29 @@ void DangerBorderOverlay::updateAnimation() {
     // 위험이 풀려도 최소 표시 시간까지는 계속 깜박인다
     const bool blinking = active_ || elapsedMsec_ < minimumVisibleMsec;
     if (blinking) {
-        // 삼각파를 smoothstep으로 눕혀 사인처럼 부드럽게 밝아졌다 어두워지게 한다
+        // 빠르게 차오르고 천천히 잦아드는 비대칭 파형이다. 대칭 사인파는 "숨쉰다"로 읽히고
+        // 이쪽은 "경보"로 읽힌다. 삼각파를 smoothstep으로 눕혀 꺾이는 지점을 없앤다.
+        // 삼각함수를 쓰지 않는 이유는 이 MinGW 구성에서 우리 TU가 libm을 직접 부르면
+        // 실행 즉시 pseudo relocation으로 죽기 때문이다(예전에 std::cos로 겪었다)
         const double phase = static_cast<double>(elapsedMsec_ % blinkPeriodMsec) / blinkPeriodMsec;
-        const double triangle = phase < 0.5 ? 1.0 - phase * 2.0 : (phase - 0.5) * 2.0;
-        const double eased = triangle * triangle * (3.0 - 2.0 * triangle);
-        opacity_ = minimumOpacity + (maximumOpacity - minimumOpacity) * eased;
+        const double ramp =
+            phase < attackRatio ? phase / attackRatio : 1.0 - (phase - attackRatio) / (1.0 - attackRatio);
+        pulse_ = ramp * ramp * (3.0 - 2.0 * ramp);
+        fade_ = 1.0;
     } else {
-        opacity_ = qMax(0.0, opacity_ - fadeOutStepPerFrame);
+        // 위상은 마지막 값에서 멈추고 전체가 함께 사라진다
+        fade_ = qMax(0.0, fade_ - fadeOutStepPerFrame);
     }
 
-    item_->setOpacity(opacity_);
-    item_->setVisible(opacity_ > 0.0);
+    for (size_t index = 0; index < layers_.size(); ++index) {
+        const NeonStroke& stroke = neonStrokes[index];
+        const qreal strokeOpacity =
+            (stroke.minimumOpacity + (stroke.maximumOpacity - stroke.minimumOpacity) * pulse_) * fade_;
+        layers_[index]->setOpacity(strokeOpacity);
+        layers_[index]->setVisible(strokeOpacity > 0.0);
+    }
 
-    if (!blinking && opacity_ <= 0.0) {
+    if (!blinking && fade_ <= 0.0) {
         animationTimer_.stop();
     }
 }
