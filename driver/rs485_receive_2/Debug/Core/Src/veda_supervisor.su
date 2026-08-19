@@ -1,4 +1,0 @@
-../Core/Src/veda_supervisor.c:13:13:veda_supervisor_blink_id	16	static
-../Core/Src/veda_supervisor.c:27:13:veda_supervisor_banner	16	static
-../Core/Src/veda_supervisor.c:78:13:veda_supervisor_strip_boot	16	static
-../Core/Src/veda_supervisor.c:102:6:veda_supervisor_run	8	static
