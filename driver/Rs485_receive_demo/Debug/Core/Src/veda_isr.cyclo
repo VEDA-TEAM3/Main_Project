@@ -1,2 +1,0 @@
-../Core/Src/veda_isr.c:4:6:HAL_UART_RxCpltCallback	2
-../Core/Src/veda_isr.c:14:6:HAL_UART_ErrorCallback	2

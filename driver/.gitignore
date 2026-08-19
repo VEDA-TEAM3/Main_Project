@@ -1,0 +1,14 @@
+# STM32CubeIDE 빌드 산출물 (재생성되므로 추적하지 않음)
+Debug/
+Release/
+
+# 컴파일 부산물
+*.o
+*.d
+*.su
+*.cyclo
+*.map
+*.list
+*.elf
+*.bin
+*.hex

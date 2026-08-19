@@ -1,7 +1,0 @@
-../Core/Src/veda_debug.c:26:6:slave_print	1
-../Core/Src/veda_debug.c:31:6:slave_print_digit	1
-../Core/Src/veda_debug.c:37:6:slave_print_u32	3
-../Core/Src/veda_debug.c:60:6:veda_debug_line_offer	3
-../Core/Src/veda_debug.c:73:6:veda_debug_line_service	3
-../Core/Src/veda_debug.c:91:6:veda_debug_loop_begin	1
-../Core/Src/veda_debug.c:97:6:veda_debug_loop_tick	3
