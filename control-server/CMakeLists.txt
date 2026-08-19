@@ -19,6 +19,7 @@ add_executable(control-server
     src/fuse/ConcatFuser.cpp
     src/fuse/GridFuser.cpp
     src/metric/EuclideanMetric.cpp
+    src/parking/StationaryParkingPolicy.cpp
     src/risk/ThresholdRiskPolicy.cpp
     src/dispatch/SerialHwEventDispatcher.cpp
     src/sink/MqttTransport.cpp

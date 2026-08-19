@@ -107,6 +107,61 @@ inline void from_json(const nlohmann::json& j, WorldBounds& b) {
     b.maxY = veda::detail::get_or<double>(j, "maxY", b.maxY);
 }
 
+struct ParkingPoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+inline void from_json(const nlohmann::json& j, ParkingPoint& p) {
+    p.x = veda::detail::get_or<double>(j, "x", p.x);
+    p.y = veda::detail::get_or<double>(j, "y", p.y);
+}
+
+struct ParkingSpace {
+    std::vector<ParkingPoint> points;
+};
+
+inline void from_json(const nlohmann::json& j, ParkingSpace& s) {
+    s.points = veda::detail::get_or<std::vector<ParkingPoint>>(j, "points", s.points);
+}
+
+inline constexpr std::size_t kMaxParkingSpaces = 4096;
+inline constexpr std::size_t kMaxParkingVertices = 16;
+
+inline bool isValidParkingSpace(const ParkingSpace& space) {
+    if (space.points.size() < 3 || space.points.size() > kMaxParkingVertices) {
+        return false;
+    }
+
+    double areaTwice = 0.0;
+    for (std::size_t i = 0, j = space.points.size() - 1; i < space.points.size(); j = i++) {
+        const ParkingPoint& a = space.points[j];
+        const ParkingPoint& b = space.points[i];
+        if (!std::isfinite(a.x) || !std::isfinite(a.y)) {
+            return false;
+        }
+        areaTwice += a.x * b.y - b.x * a.y;
+    }
+    return std::isfinite(areaTwice) && std::abs(areaTwice) > 1e-9;
+}
+
+/** 주차면 내부 차량의 정지 상태 판정 설정. spaces가 비어 있으면 정책은 no-op이다. */
+struct ParkingPolicyConfig {
+    std::uint64_t stationaryDurationMs = 5000;
+    std::uint64_t maxObservationGapMs = 1000;
+    double movementToleranceM = 0.3;
+    std::vector<ParkingSpace> spaces;
+};
+
+inline void from_json(const nlohmann::json& j, ParkingPolicyConfig& p) {
+    p.stationaryDurationMs =
+        veda::detail::get_or<std::uint64_t>(j, "stationaryDurationMs", p.stationaryDurationMs);
+    p.maxObservationGapMs =
+        veda::detail::get_or<std::uint64_t>(j, "maxObservationGapMs", p.maxObservationGapMs);
+    p.movementToleranceM = veda::detail::get_or<double>(j, "movementToleranceM", p.movementToleranceM);
+    p.spaces = veda::detail::get_or<std::vector<ParkingSpace>>(j, "spaces", p.spaces);
+}
+
 inline void from_json(const nlohmann::json& j, SpatialZone& z) {
     z.zoneId = veda::detail::get_or<veda::ChannelId>(j, "zoneId", -1);
     z.minX = veda::detail::get_or<double>(j, "minX", 0.0);
@@ -328,6 +383,9 @@ struct AppConfig {
     // [좌표 변환 결과 유효 범위 — 캘리브레이션 오류로 도면 밖에 사상된 객체를 폐기]
     WorldBounds worldBounds;
 
+    // [주차 차량 제외 정책 — 주차면 내부에서 일정 시간 정지한 Vehicle만 제거]
+    ParkingPolicyConfig parking;
+
     // [HW 헬스체크 설정]
     HwHealthCheckConfig hwHealthCheck;
 
@@ -386,6 +444,16 @@ struct AppConfig {
         }
         if (directionalZoneMapping && !supportsDirectionalZoneMapping(zones, cameraCalibrations)) {
             throw std::invalid_argument("directional zone mapping requires four calibrated channels per CCTV");
+        }
+        if (parking.stationaryDurationMs == 0 || parking.maxObservationGapMs == 0 ||
+            !std::isfinite(parking.movementToleranceM) || parking.movementToleranceM < 0.0 ||
+            parking.spaces.size() > kMaxParkingSpaces) {
+            throw std::invalid_argument("invalid parking policy configuration");
+        }
+        for (const ParkingSpace& space : parking.spaces) {
+            if (!isValidParkingSpace(space)) {
+                throw std::invalid_argument("parking space must be a finite, non-degenerate polygon");
+            }
         }
     }
 
@@ -461,6 +529,7 @@ struct AppConfig {
         config.cameraCalibrations =
             veda::detail::get_or<std::vector<CameraCalibration>>(j, "cameraCalibrations", config.cameraCalibrations);
         config.worldBounds = veda::detail::get_or<WorldBounds>(j, "worldBounds", config.worldBounds);
+        config.parking = veda::detail::get_or<ParkingPolicyConfig>(j, "parking", config.parking);
 
         bool directionalZones = config.directionalZoneMapping;
         if (directionalZones && !legacyFourDirection &&
