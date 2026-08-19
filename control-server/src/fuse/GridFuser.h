@@ -12,7 +12,6 @@
  * GridFuser 는 그 '가까운 쌍'만 그리드로 수집한 뒤, (i<j) 로 정렬해 ConcatFuser 와 완전히
  * 동일한 union-find + 채널중복 제약을 같은 순서로 적용한다 -> 같은 입력에 같은 클러스터/gid.
  * positionJitterRadius > 0이면 최종 위치에 공간 히스테리시스를 적용한다.
- * 또한 trackMaxDistance > 0에서 관측이 잠깐 끊기면 GridFuser만 최대 5윈도우 coast하므로
  * 전체 출력은 ConcatFuser와 다를 수 있다.
  *
  * [ Principle #3 (할당 최소화) / #6 (캐시 지역성) ]
@@ -77,7 +76,8 @@ private:
         }
     };
 
-    static constexpr int kMaxMissedWindows = 5;
+    /// @brief Retain a track through 10 consecutive missed windows.
+    static constexpr int kMaxMissedWindows = 10;
 
     /// @brief 공간 해시 버킷 개수 (2의 거듭제곱 -> 마스크로 인덱싱). 부하율 N/kBucketCount 가 k 를 좌우
     static constexpr std::uint32_t kBucketCount = 1u << 14;  // 16384
