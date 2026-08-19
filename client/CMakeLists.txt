@@ -62,6 +62,7 @@ qt_add_executable(Qtcctvclient
     src/ui/DigitalTwinMapSceneBuilder.cpp
     include/ui/DigitalTwinObjectStyleProvider.h
     src/ui/DigitalTwinObjectStyleProvider.cpp
+    include/ui/DigitalTwinHeading.h
     include/ui/DigitalTwinZoneIndex.h
     include/ui/DigitalTwinObjectTableModel.h
     src/ui/DigitalTwinObjectTableModel.cpp
@@ -199,6 +200,7 @@ qt_add_resources(Qtcctvclient "qml_resources"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/CctvToolbar.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/StatusLegend.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/OverlayDialog.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/GuideDialog.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/DataTable.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/DeviceStatusView.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/SettingsDialog.qml"
@@ -343,6 +345,16 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+
+    add_executable(digital_twin_heading_check
+        tests/DigitalTwinHeadingCheck.cpp
+    )
+
+    target_include_directories(digital_twin_heading_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(digital_twin_heading_check PRIVATE Qt6::Gui)
 
     add_executable(table_model_roles_check
         tests/TableModelRolesCheck.cpp

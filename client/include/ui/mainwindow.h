@@ -70,6 +70,7 @@ private:
     void setupQuickDashboardChrome();
     void setupQuickPanelHeaders();
     void setupQuickDialogOverlay();
+    void setupQuickGuideDialog();
     void addQuickPanelHeader(QBoxLayout* layout, const QString& title);
     QQuickWidget* createQuickView(const QString& qmlFile, QWidget* parent, Qt::WindowFlags windowFlags = {});
     void setupDashboardPanels();
@@ -87,6 +88,8 @@ private slots:
     void openMapSettingsDialog();
     void openVideoAreaSelectionDialog();
     void openReportConfirmationDialog(int channelNumber);
+    void openGuideDialog();
+    void closeGuideDialog();
     void handleQuickDialogAccepted(int selectedIndex);
     void closeQuickDialog();
 
@@ -146,6 +149,7 @@ private:
     QQuickWidget* quickCctvToolbar_ = nullptr;
     QQuickWidget* quickLegend_ = nullptr;
     QQuickWidget* quickDialogOverlay_ = nullptr;
+    QQuickWidget* quickGuideDialog_ = nullptr;
     DigitalTwinMapDisplaySettings mapDisplaySettings_;
     QVector<VideoPreprocessingSettings> videoPreprocessingSettingsByChannel_;
     QVector<DigitalTwinRiskLevel> latestVideoRiskLevels_;

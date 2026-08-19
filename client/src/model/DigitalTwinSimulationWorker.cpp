@@ -419,5 +419,7 @@ void DigitalTwinSimulationWorker::emitCurrentSnapshot() {
     DigitalTwinSnapshot snapshot;
     snapshot.objects = objects_;
     snapshot.pairRiskStates = pairRiskStates_;
+    // 데모는 보간 없이 tick마다 새 위치를 만들므로 매 스냅샷이 곧 수신 샘플이다
+    snapshot.sampleSequence = ++sampleSequence_;
     emit snapshotUpdated(std::move(snapshot));
 }

@@ -4,9 +4,12 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QLoggingCategory>
+#include <QScreen>
 #include <QStringList>
+#include <QTimer>
 #include <QtGlobal>
 #include <memory>
 #include <utility>
@@ -138,13 +141,13 @@ int main(int argc, char* argv[]) {
                               configResult.config.digitalTwin, configResult.sourcePath);
 
             window.setWindowIcon(app.windowIcon());
-            // 설정 크기는 최대화를 풀었을 때 돌아갈 크기로 남기고, 시작은 창 모드 최대화로 연다
-            // (전체 화면이 아니라 제목 표시줄이 있는 최대화다. 전체 화면은 Alt+Enter)
-            window.resize(configResult.config.window.width, configResult.config.window.height);
-            window.showMaximized();
 
             // 로그인 창은 MainWindow와 같은 깊이의 최상위 창으로 덮는다. 자식 위젯으로
-            // 덮으면 MainWindow의 QQuickWidget이 통째로 사라진다
+            // 덮으면 MainWindow의 QQuickWidget이 통째로 사라진다.
+            //
+            // 창을 띄우기 전에 먼저 만든다. 생성자의 QML 로드가 수백 ms 걸리는데, 그 사이
+            // MainWindow가 이미 화면에 올라와 있으면 대시보드가 그대로 드러난다. 여기서
+            // 만들어 두면 show 두 번이 같은 event loop turn에 붙어 노출 구간이 없어진다
             auto authGateway =
                 std::make_shared<LocalFileAuthGateway>(LocalFileAuthGateway::usersFilePathFor(configResult.sourcePath));
             LoginWindow login(authGateway, &window);
@@ -155,10 +158,37 @@ int main(int argc, char* argv[]) {
 
             QObject::connect(&login, &LoginWindow::authenticated, &window, &MainWindow::beginSession);
             QObject::connect(&login, &LoginWindow::fullScreenToggleRequested, &window, &MainWindow::toggleFullScreen);
-            login.coverWidget(&window);
+
+            // 로그인 화면을 먼저 띄운다. 메인 창을 먼저 보이면 패널이 다 그려지기 전의
+            // 반쯤 칠해진 대시보드가 그대로 노출된다
+            login.setGeometry(QGuiApplication::primaryScreen()->availableGeometry());
             login.show();
             login.raise();
             login.activateWindow();
+
+            // 로그인 화면이 한 번 그려진 뒤에 메인 창을 그 아래로 넣는다. 여기서 메인 창을
+            // 띄우면 Windows가 Z-order 맨 위에 올리므로 같은 호출 안에서 되돌린다
+            // (사이에 화면 갱신이 없어 눈에 보이지 않는다)
+            bool mainWindowShown = false;
+            const auto showMainWindow = [&]() {
+                if (mainWindowShown) {
+                    return;
+                }
+                mainWindowShown = true;
+
+                // 설정 크기는 최대화를 풀었을 때 돌아갈 크기로 남기고, 시작은 창 모드 최대화로
+                // 연다 (전체 화면이 아니라 제목 표시줄이 있는 최대화다. 전체 화면은 Alt+Enter)
+                window.resize(configResult.config.window.width, configResult.config.window.height);
+                window.showMaximized();
+
+                login.coverWidget(&window);
+                login.raise();
+                login.activateWindow();
+            };
+
+            QObject::connect(&login, &LoginWindow::firstFrameRendered, &window, showMainWindow);
+            // 렌더 신호가 오지 않는 환경에서도 메인 창 없이 멈추지 않게 한다
+            QTimer::singleShot(3000, &window, showMainWindow);
 
             ret = app.exec();
         }

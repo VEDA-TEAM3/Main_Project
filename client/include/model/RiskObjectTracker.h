@@ -77,6 +77,7 @@ private:
     QString worldBoundsDescription() const;
     QPointF transitionedPosition(const QString& objectId, const QPointF& targetPosition, qint64 frameSequence,
                                  qint64 localTimeMsec);
+    qint64 positionTransitionDurationMsec() const;
     qreal lifecycleOpacity(qint64 objectId, bool present, qint64 missingAgeMsec, qint64 localTimeMsec);
     void removeInactivePositionStates(const QHash<QString, QPointF>& currentPositions, qint64 localTimeMsec);
 
@@ -105,6 +106,8 @@ private:
     int pendingExpansionFrameCount_ = 0;
     Diagnostics diagnostics_;
     qint64 frameSequence_ = 0;
+    /// 실제 프레임 수신 간격의 지수이동평균. 위치 보간이 다음 프레임 도착에 맞춰 끝나도록 쓴다
+    qint64 measuredArrivalIntervalMsec_ = 0;
     qint64 lastArrivalTimeMsec_ = 0;
     qint64 lastDiagnosticsMsec_ = 0;
     qint64 lastRateLimitLogMsec_ = 0;

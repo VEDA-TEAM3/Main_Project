@@ -46,6 +46,9 @@ struct DigitalTwinPairRiskState {
 struct DigitalTwinSnapshot {
     QVector<DigitalTwinObject> objects;
     QVector<DigitalTwinPairRiskState> pairRiskStates;
+    /// 이 스냅샷이 몇 번째 수신 샘플에서 나왔는지. 렌더 보간 프레임은 직전 값을 그대로 물려받으므로
+    /// 지도는 이 값이 바뀐 프레임에만 이동 경로 점을 남긴다
+    qint64 sampleSequence = 0;
 };
 
 Q_DECLARE_METATYPE(DigitalTwinObject)

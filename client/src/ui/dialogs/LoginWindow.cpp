@@ -7,6 +7,7 @@
 #include <QKeySequence>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QQuickWindow>
 #include <QShortcut>
 #include <QTimer>
 #include <QUrl>
@@ -43,6 +44,22 @@ LoginWindow::LoginWindow(std::shared_ptr<AuthGateway> authGateway, QWidget* pare
 
     layout->addWidget(view);
     loginView_ = view;
+
+    // 이 화면이 한 번 그려진 뒤에야 메인 창을 띄운다. 먼저 띄우면 대시보드가 반쯤 칠해진
+    // 상태(패널 자리가 흰 사각형)로 드러난다. afterRendering은 렌더 thread에서 오므로
+    // queued로 받아 GUI thread에서 한 번만 올린다
+    if (QQuickWindow* quickWindow = view->quickWindow()) {
+        connect(
+            quickWindow, &QQuickWindow::afterRendering, this,
+            [this]() {
+                if (firstFrameRendered_) {
+                    return;
+                }
+                firstFrameRendered_ = true;
+                emit firstFrameRendered();
+            },
+            Qt::QueuedConnection);
+    }
 
     // QML 루트의 signal은 동적 metaobject에만 있으므로 문자열로 연결한다
     connect(loginView_->rootObject(), SIGNAL(loginRequested()), this, SLOT(handleLoginRequested()));

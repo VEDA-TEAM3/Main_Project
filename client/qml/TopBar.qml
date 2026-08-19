@@ -9,9 +9,11 @@ TopBarForm {
 
     signal areaRequested
     signal settingsRequested
+    signal guideRequested
 
     settingsButton.visible: root.settingsAllowed
 
     areaTapHandler.onTapped: root.areaRequested()
     settingsTapHandler.onTapped: root.settingsRequested()
+    helpTapHandler.onTapped: root.guideRequested()
 }

@@ -429,6 +429,88 @@ void checkOutOfRangeObjectsDropped() {
 }
 }  // namespace
 
+/**
+ * @brief 위치 보간 구간이 고정 상수가 아니라 실제 수신 간격을 따라가는지 검사합니다.
+ *
+ * @details 설정값(66ms)만 쓰면 200ms 주기 소스에서 마커가 66ms 만에 목표에 도착해
+ *          남은 134ms 동안 멈춘다. 그 정지 구간이 초당 다섯 번 반복되면 눈에 띄게 끊긴다.
+ */
+void checkPositionTransitionFollowsArrivalInterval() {
+    DigitalTwinRuntimeConfig config;
+    config.positionTransitionMsec = 66;
+    config.fadeInMsec = 0;
+    config.world.fixedBoundsEnabled = true;
+    config.world.bounds = QRectF(-80.0, -40.0, 160.0, 80.0);
+
+    RiskObjectTracker tracker(config);
+
+    // 200ms 간격으로 일정하게 움직이는 객체를 흘려 수신 간격 평균이 수렴하게 한다.
+    // 중앙값 필터가 3샘플을 채워야 목표 좌표가 실제로 움직이기 시작한다
+    qint64 arrivalMsec = 1000;
+    double worldX = -40.0;
+    const auto movingFrame = [&worldX](qint64 sourceTimestamp) {
+        RiskFrameData frame;
+        frame.sourceTimestamp = sourceTimestamp;
+        frame.objects = {objectAt(100, QPointF(worldX, 4.0), 0)};
+        return frame;
+    };
+
+    for (int index = 0; index < 5; ++index) {
+        tracker.submitFrame(movingFrame(arrivalMsec), arrivalMsec);
+        tracker.buildSnapshot(arrivalMsec);
+        arrivalMsec += 200;
+        worldX += 0.5;
+    }
+
+    tracker.submitFrame(movingFrame(arrivalMsec), arrivalMsec);
+
+    // buildSnapshot은 값을 돌려주므로 스냅샷을 변수에 묶어 둔다. 임시 객체에 findObject를
+    // 걸면 포인터가 그 자리에서 매달린다
+    const DigitalTwinSnapshot startSnapshot = tracker.buildSnapshot(arrivalMsec);
+    const DigitalTwinSnapshot configWindowSnapshot = tracker.buildSnapshot(arrivalMsec + 66);
+    const DigitalTwinSnapshot arrivalWindowSnapshot = tracker.buildSnapshot(arrivalMsec + 200);
+    const DigitalTwinSnapshot heldSnapshot = tracker.buildSnapshot(arrivalMsec + 260);
+
+    const DigitalTwinObject* startObject = findObject(startSnapshot, 100);
+    const DigitalTwinObject* configWindowObject = findObject(configWindowSnapshot, 100);
+    const DigitalTwinObject* arrivalWindowObject = findObject(arrivalWindowSnapshot, 100);
+    const DigitalTwinObject* heldObject = findObject(heldSnapshot, 100);
+
+    check(startObject != nullptr && configWindowObject != nullptr && arrivalWindowObject != nullptr &&
+              heldObject != nullptr,
+          "a moving object must stay in every snapshot");
+    if (startObject == nullptr || configWindowObject == nullptr || arrivalWindowObject == nullptr ||
+        heldObject == nullptr) {
+        return;
+    }
+
+    check(startObject->position != arrivalWindowObject->position,
+          "the probe object must actually move, otherwise this check proves nothing");
+    // 설정값만 쓰면 여기서 이미 목표에 도착해 있다 (= 남은 134ms 동안 정지)
+    check(configWindowObject->position != arrivalWindowObject->position,
+          "interpolation must still be running at the configured window when the source is slower");
+    check(heldObject->position == arrivalWindowObject->position,
+          "interpolation must finish exactly when the next sample is due");
+}
+
+/** @brief 렌더 보간 프레임과 새 수신 샘플을 지도가 구분할 수 있는지 검사합니다. */
+void checkSnapshotCarriesSampleSequence() {
+    DigitalTwinRuntimeConfig config = lifecycleConfig();
+    config.positionTransitionMsec = 66;
+
+    RiskObjectTracker tracker(config);
+    tracker.submitFrame(lifecycleFrame(9000), 9000);
+    const qint64 firstSequence = tracker.buildSnapshot(9000).sampleSequence;
+
+    // 새 프레임 없이 다시 그린 스냅샷은 같은 샘플이다 (이동 경로에 점을 남기면 안 된다)
+    check(tracker.buildSnapshot(9033).sampleSequence == firstSequence,
+          "a render-only snapshot must keep the same sample sequence");
+
+    tracker.submitFrame(lifecycleFrame(9200), 9200);
+    check(tracker.buildSnapshot(9200).sampleSequence != firstSequence,
+          "a new source frame must advance the sample sequence");
+}
+
 int main() {
     checkServerZoneIdPassThrough();
     checkSecondPhysicalCctvObjects();
@@ -442,6 +524,8 @@ int main() {
     checkPhysicalZoneSelection();
     checkPhysicalZoneWorldBounds();
     checkOutOfRangeObjectsDropped();
+    checkPositionTransitionFollowsArrivalInterval();
+    checkSnapshotCarriesSampleSequence();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

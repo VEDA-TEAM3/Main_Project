@@ -49,5 +49,6 @@ private:
     QVector<DigitalTwinPairRiskState> pairRiskStates_;
     QHash<QString, DigitalTwinRiskLevel> previousPairRiskLevels_;
     QHash<QString, int> pairPulseCooldownTicks_;
+    qint64 sampleSequence_ = 0;
     int spawnCountdownMsec_ = 0;
 };

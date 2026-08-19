@@ -87,6 +87,7 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupQuickDashboardChrome();
     setupQuickPanelHeaders();
     setupQuickDialogOverlay();
+    setupQuickGuideDialog();
     setupTopBarStatuses();
     setupClock();
     setupWindowShortcuts();
@@ -99,13 +100,16 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupStreamSessionManager(std::move(streamReceiverFactory));
 }
 
-/** @brief Alt+Enter로 메인 창의 전체 화면 상태를 전환하는 단축키를 등록합니다.
+/** @brief Alt+Enter로 전체 화면을 전환하고 F1으로 사용 안내를 여는 단축키를 등록합니다.
  */
 void MainWindow::setupWindowShortcuts() {
     auto* returnShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Return), this);
     auto* enterShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Enter), this);
     connect(returnShortcut, &QShortcut::activated, this, &MainWindow::toggleFullScreen);
     connect(enterShortcut, &QShortcut::activated, this, &MainWindow::toggleFullScreen);
+
+    auto* guideShortcut = new QShortcut(QKeySequence(Qt::Key_F1), this);
+    connect(guideShortcut, &QShortcut::activated, this, &MainWindow::openGuideDialog);
 }
 
 /** @brief 전체 화면으로 전환하거나 전체 화면 진입 전의 창 상태로 복원합니다. */
@@ -320,6 +324,7 @@ void MainWindow::setupQuickTopBar() {
     QObject* rootObject = quickTopBar_->rootObject();
     connect(rootObject, SIGNAL(areaRequested()), this, SLOT(openVideoAreaSelectionDialog()));
     connect(rootObject, SIGNAL(settingsRequested()), this, SLOT(openMapSettingsDialog()));
+    connect(rootObject, SIGNAL(guideRequested()), this, SLOT(openGuideDialog()));
 }
 
 /** @brief CCTV 조작부와 상태 범례를 공통 Qt Quick 테마로 교체합니다. */
@@ -399,6 +404,65 @@ void MainWindow::setupQuickDialogOverlay() {
     setQuickDialogProperty("selectionAnimated", false);
     connect(quickDialogOverlay_->rootObject(), SIGNAL(accepted(int)), this, SLOT(handleQuickDialogAccepted(int)));
     connect(quickDialogOverlay_->rootObject(), SIGNAL(rejected()), this, SLOT(closeQuickDialog()));
+}
+
+/**
+ * @brief 상단 표시줄 "?" 버튼과 F1이 여는 사용 안내 창을 준비합니다.
+ *
+ * @details 오버레이와 같은 이유로 최상위 창으로 띄웁니다. 창을 닫을 때는 hide()만 씁니다 —
+ * close()는 마지막 창 닫힘 판정을 타서 앱이 통째로 종료됩니다.
+ */
+void MainWindow::setupQuickGuideDialog() {
+    quickGuideDialog_ = createQuickView(QStringLiteral("GuideDialog.qml"), this, Qt::Dialog | Qt::FramelessWindowHint);
+    if (!quickGuideDialog_) {
+        return;
+    }
+
+    quickGuideDialog_->setWindowModality(Qt::WindowModal);
+    quickGuideDialog_->setClearColor(QColor(QStringLiteral("#123a55")));
+    quickGuideDialog_->hide();
+    connect(quickGuideDialog_->rootObject(), SIGNAL(closed()), this, SLOT(closeGuideDialog()));
+
+    // QQuickWidget은 포커스를 받지 않게 만들어 두어서 QML 쪽 Keys로는 Esc가 오지 않습니다.
+    auto* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), quickGuideDialog_);
+    connect(escapeShortcut, &QShortcut::activated, this, &MainWindow::closeGuideDialog);
+}
+
+/**
+ * @brief 사용 안내 창을 메인 창 가운데에 띄웁니다.
+ *
+ * @details 설정 팝업이나 오버레이가 떠 있는 동안에는 열지 않습니다. 최상위 QQuickWidget 창 위에
+ * 또 다른 최상위 QQuickWidget 창을 겹치면 안쪽이 검은 사각형으로만 그려집니다.
+ */
+void MainWindow::openGuideDialog() {
+    if (!quickGuideDialog_ || !quickGuideDialog_->rootObject()) {
+        return;
+    }
+
+    if ((mapSettingsDialog_ && mapSettingsDialog_->isVisible()) ||
+        (quickDialogOverlay_ && quickDialogOverlay_->isVisible())) {
+        return;
+    }
+
+    QQuickItem* rootObject = quickGuideDialog_->rootObject();
+    rootObject->setProperty("adminMode", sessionIsAdmin_);
+
+    // QML이 알려준 패널 크기를 창 크기로 고정합니다. setGeometry만으로는 위젯 sizeHint에 밀립니다.
+    const QSize panelSize(qRound(rootObject->implicitWidth()), qRound(rootObject->implicitHeight()));
+    quickGuideDialog_->setFixedSize(panelSize);
+    const QWidget* host = ui_->centralwidget;
+    const QPoint hostCenter = host->mapToGlobal(host->rect().center());
+    quickGuideDialog_->move(hostCenter - QPoint(panelSize.width() / 2, panelSize.height() / 2));
+    quickGuideDialog_->show();
+    quickGuideDialog_->raise();
+    quickGuideDialog_->activateWindow();
+}
+
+/** @brief 사용 안내 창을 감춥니다. */
+void MainWindow::closeGuideDialog() {
+    if (quickGuideDialog_) {
+        quickGuideDialog_->hide();
+    }
 }
 
 /**

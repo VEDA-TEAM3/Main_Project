@@ -26,6 +26,7 @@
 #include "model/DigitalTwinSimulationWorker.h"
 #include "model/RiskObjectTracker.h"
 #include "overlays/DangerBorderOverlay.h"
+#include "ui/DigitalTwinHeading.h"
 #include "ui/DigitalTwinMapSceneBuilder.h"
 #include "ui/DigitalTwinObjectStyleProvider.h"
 #include "ui/DigitalTwinZoneIndex.h"
@@ -33,7 +34,15 @@
 namespace {
 constexpr int maxTrailPointCount = 96;
 constexpr double maximumStoredTrailSceneLength = 600.0;
-constexpr double movingIconRotationOffsetDegrees = 90.0;
+// 아이콘 방향에 쓸 이동 벡터의 지수이동평균 가중치. 이동량은 렌더 프레임 간 차분이라
+// 저속에서 노이즈가 커서, 그대로 각도를 내면 아이콘이 제자리에서 떤다
+constexpr double headingSmoothing = 0.25;
+// 회전을 갱신할 최소 화면 이동량(scene 단위/프레임). 월드 단위로 잡으면 상류 캘리브레이션
+// 배율이 바뀌는 것만으로 같은 상수가 전혀 다른 속도를 뜻하게 된다
+constexpr double minimumHeadingSceneStep = 0.05;
+// 이보다 작은 각도 변화는 눈에 띄지 않는다. 매 프레임 회전을 건드리면 마커의 device
+// 좌표 캐시가 그때마다 무효화되어 캐시가 무의미해진다
+constexpr double minimumHeadingChangeDegrees = 2.0;
 /// 객체 영역과 구역 테두리 사이 여백(scene 단위). 아이콘이 테두리를 넘지 않게 둔다
 constexpr double objectAreaMargin = 18.0;
 
@@ -63,45 +72,6 @@ int riskPriority(DigitalTwinRiskLevel riskLevel) {
     }
 
     return 0;
-}
-
-/**
- * @brief        실수 값의 절댓값을 반환합니다.
- * @param value  입력 값
- * @return       절댓값
- */
-double absoluteValue(double value) { return value < 0.0 ? -value : value; }
-
-/**
- * @brief           객체 속도 벡터를 화면 아이콘 회전 각도로 근사합니다.
- * @param velocity  정규화 좌표계 기준 이동 벡터
- * @return          degree 단위 회전 각도
- */
-double approximateRotationDegrees(const QPointF& velocity) {
-    if (qFuzzyIsNull(velocity.x()) && qFuzzyIsNull(velocity.y())) {
-        return 0.0;
-    }
-
-    const double absoluteX = absoluteValue(velocity.x());
-    const double absoluteY = absoluteValue(velocity.y());
-
-    if (absoluteX > absoluteY * 2.0) {
-        return velocity.x() >= 0.0 ? 0.0 : 180.0;
-    }
-
-    if (absoluteY > absoluteX * 2.0) {
-        return velocity.y() >= 0.0 ? 90.0 : 270.0;
-    }
-
-    if (velocity.x() >= 0.0 && velocity.y() >= 0.0) {
-        return 45.0;
-    }
-
-    if (velocity.x() < 0.0 && velocity.y() >= 0.0) {
-        return 135.0;
-    }
-
-    return velocity.x() < 0.0 ? 225.0 : 315.0;
 }
 
 /**
@@ -358,6 +328,8 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
         updateObjectAreaRect();
         riskObjectTracker_->reset();
         lastLiveSnapshotPublishMsec_ = 0;
+        // 데모와 실데이터는 서로 다른 카운터라 값이 겹칠 수 있다
+        lastTrailSampleSequence_ = -1;
         liveFrameExpiryTimer_.start();
         emit liveRiskStreamActivated();
     }
@@ -415,7 +387,7 @@ void DigitalTwinMapWidget::setDeviceSignalAvailable(bool available) {
 void DigitalTwinMapWidget::rebuildLiveSnapshot() {
     const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
     const DigitalTwinSnapshot snapshot = riskObjectTracker_->buildSnapshot(currentTimeMsec);
-    applyObjectUpdates(snapshot.objects);
+    applyObjectUpdates(snapshot);
     publishChannelRiskLevels(snapshot);
 
     const bool shouldPublish =
@@ -544,7 +516,7 @@ void DigitalTwinMapWidget::setupSimulationWorker() {
 void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& snapshot) {
     dangerBorderOverlay_.setActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
 
-    applyObjectUpdates(snapshot.objects);
+    applyObjectUpdates(snapshot);
     publishChannelRiskLevels(snapshot);
     emit simulationSnapshotUpdated(snapshot);
 }
@@ -605,10 +577,14 @@ QVector<DigitalTwinRiskLevel> DigitalTwinMapWidget::channelRiskLevels(const Digi
 }
 
 /**
- * @brief          worker가 계산한 객체 상태를 scene 아이템에 반영합니다.
- * @param objects  최신 객체 상태 목록
+ * @brief           worker가 계산한 객체 상태를 scene 아이템에 반영합니다.
+ * @param snapshot  최신 객체 상태 스냅샷
  */
-void DigitalTwinMapWidget::applyObjectUpdates(const QVector<DigitalTwinObject>& objects) {
+void DigitalTwinMapWidget::applyObjectUpdates(const DigitalTwinSnapshot& snapshot) {
+    const QVector<DigitalTwinObject>& objects = snapshot.objects;
+    trailSampleFrame_ = snapshot.sampleSequence != lastTrailSampleSequence_;
+    lastTrailSampleSequence_ = snapshot.sampleSequence;
+
     for (const auto& object : objects) {
         if (!visualItemIndexes_.contains(object.objectId)) {
             createVisualItem(object);
@@ -681,6 +657,9 @@ void DigitalTwinMapWidget::createVisualItem(const DigitalTwinObject& object) {
     visualItem.object = object;
     visualItem.marker = scene_.addPixmap(QPixmap());
     visualItem.marker->setTransformationMode(Qt::SmoothTransformation);
+    // 뷰가 fitInView로 비정수 배율을 쓰기 때문에 아이콘이 움직일 때마다 다시 리샘플링된다.
+    // device 좌표 캐시는 이동으로는 무효화되지 않아 회전이 바뀔 때만 다시 그린다
+    visualItem.marker->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
     visualItem.marker->setZValue(4.0);
 
     const DigitalTwinObjectVisualStyle visualStyle = objectStyleProvider_->styleFor(object);
@@ -746,14 +725,28 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     const QPointF scenePosition = scenePointForObject(visualItem->object.position, visualItem->object.channelIndex);
     visualItem->marker->setPos(scenePosition);
 
-    const bool isMoving =
-        !qFuzzyIsNull(visualItem->object.velocity.x()) || !qFuzzyIsNull(visualItem->object.velocity.y());
+    // 방향은 월드 속도가 아니라 화면상 이동으로 정한다. invertY가 켜져 있으면 두 축의 부호가
+    // 반대라, 월드 속도로 각도를 내면 화면에서 위로 가는 객체의 아이콘이 아래를 본다
+    const QPointF sceneStep =
+        visualItem->hasPreviousScenePosition ? scenePosition - visualItem->previousScenePosition : QPointF();
+    visualItem->previousScenePosition = scenePosition;
+    visualItem->hasPreviousScenePosition = true;
+    visualItem->smoothedSceneVelocity =
+        visualItem->smoothedSceneVelocity * (1.0 - headingSmoothing) + sceneStep * headingSmoothing;
 
     if (visualItem->object.type == DigitalTwinObjectType::Pedestrian) {
         visualItem->marker->setRotation(0.0);
-    } else if (isMoving) {
-        visualItem->marker->setRotation(approximateRotationDegrees(visualItem->object.velocity) +
-                                        movingIconRotationOffsetDegrees);
+    } else if (std::hypot(visualItem->smoothedSceneVelocity.x(), visualItem->smoothedSceneVelocity.y()) >=
+               minimumHeadingSceneStep) {
+        const double headingRotation =
+            digitalTwinHeadingDegrees(visualItem->smoothedSceneVelocity) + digitalTwinHeadingOffsetDegrees;
+        if (!visualItem->hasRotation ||
+            std::fabs(digitalTwinAngleDifferenceDegrees(headingRotation, visualItem->visibleRotationDegrees)) >=
+                minimumHeadingChangeDegrees) {
+            visualItem->visibleRotationDegrees = headingRotation;
+            visualItem->hasRotation = true;
+            visualItem->marker->setRotation(headingRotation);
+        }
     }
 
     const DigitalTwinObjectVisualStyle visualStyle = objectStyleProvider_->styleFor(visualItem->object);
@@ -764,14 +757,18 @@ void DigitalTwinMapWidget::updateVisualItem(DemoVisualItem* visualItem) {
     visualItem->label->setOpacity(objectOpacity);
     visualItem->trail->setOpacity(0.55 * visualItem->object.opacity);
 
-    // 좌표가 그대로인 프레임까지 쌓으면(수신이 잠시 멈춘 구간) 96칸 경로 버퍼가 같은
-    // 점으로 채워져 실제 이동 경로가 밀려 나간다
-    if (visualItem->object.observed &&
-        (visualItem->recentPositions.isEmpty() || visualItem->recentPositions.constLast() != scenePosition)) {
-        visualItem->recentPositions.append(scenePosition);
-        trimTrailPositions(&visualItem->recentPositions, maximumStoredTrailSceneLength);
+    // 이동 경로에는 수신 샘플만 남긴다. 렌더 보간 프레임까지 쌓으면 96칸 버퍼가 3초치
+    // 보간 흔적으로 차서 실제 궤적이 그만큼 짧아지고, 객체마다 매 프레임 경로를 다시
+    // 만드느라(길이 재계산 + setPath) 객체 수에 비례해 렌더가 밀린다.
+    // 좌표가 그대로인 프레임까지 쌓으면(수신이 잠시 멈춘 구간) 버퍼가 같은 점으로
+    // 채워져 실제 이동 경로가 밀려 나간다
+    if (!trailSampleFrame_ || !visualItem->object.observed ||
+        (!visualItem->recentPositions.isEmpty() && visualItem->recentPositions.constLast() == scenePosition)) {
+        return;
     }
 
+    visualItem->recentPositions.append(scenePosition);
+    trimTrailPositions(&visualItem->recentPositions, maximumStoredTrailSceneLength);
     visualItem->trail->setPath(createTrailPath(visualItem->recentPositions));
 }
 

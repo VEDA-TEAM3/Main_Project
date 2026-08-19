@@ -34,6 +34,8 @@ signals:
     void authenticated(const QString& userName, const QString& role);
     /// 로그인 화면에서도 Alt+Enter가 동작하도록 메인 창에 전달합니다
     void fullScreenToggleRequested();
+    /// 로그인 화면이 실제로 한 번 그려졌습니다. 메인 창은 이 뒤에 띄웁니다
+    void firstFrameRendered();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -52,6 +54,7 @@ private:
 
     std::shared_ptr<AuthGateway> authGateway_;
     QQuickWidget* loginView_ = nullptr;
+    bool firstFrameRendered_ = false;
     /// 인증을 마쳤는지. 이 값이 false인 채로 창이 닫히면 프로그램을 끝낸다
     bool signedIn_ = false;
 };

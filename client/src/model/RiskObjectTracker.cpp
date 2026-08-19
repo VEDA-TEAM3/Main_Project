@@ -10,6 +10,9 @@
 
 namespace {
 constexpr qint64 sourceRestartGapMsec = 5000;
+// 보간 구간의 상한. 수신이 이보다 느려지면 다음 프레임까지 끌지 않고 먼저 도착시킨다.
+// 배달이 통째로 밀린 구간을 늘어진 이동으로 위장하면 화면이 실제보다 최신처럼 보인다
+constexpr qint64 maximumPositionTransitionMsec = 400;
 constexpr qint64 warningPulseRepeatMsec = 1200;
 constexpr qint64 dangerPulseRepeatMsec = 1500;
 // 같은 쌍의 위험도가 올라가도 이보다 자주는 울리지 않는다
@@ -201,6 +204,7 @@ void RiskObjectTracker::reset() {
     pendingExpansionBounds_ = {};
     pendingExpansionFrameCount_ = 0;
     lastArrivalTimeMsec_ = 0;
+    measuredArrivalIntervalMsec_ = 0;
     lastDiagnosticsMsec_ = 0;
     lastRateLimitLogMsec_ = 0;
     lastPulseEmitMsec_ = 0;
@@ -228,8 +232,11 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
         return false;
     }
 
+    // reset()이 lastArrivalTimeMsec_를 지우므로 재시작 판정보다 먼저 떠 둔다
+    const qint64 arrivalDeltaMsec = lastArrivalTimeMsec_ > 0 ? arrivalTimeMsec - lastArrivalTimeMsec_ : 0;
+
     if (diagnostics_.level > 0 && lastArrivalTimeMsec_ > 0) {
-        diagnostics_.arrivalIntervalsMsec.append(arrivalTimeMsec - lastArrivalTimeMsec_);
+        diagnostics_.arrivalIntervalsMsec.append(arrivalDeltaMsec);
     }
 
     if (lastArrivalTimeMsec_ > 0 && arrivalTimeMsec - lastArrivalTimeMsec_ > sourceRestartGapMsec) {
@@ -254,6 +261,14 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     removeOutOfRangeObjects(frame, arrivalTimeMsec);
 
     ++frameSequence_;
+
+    // 중복으로 걸러진 재전송은 수신 간격이 아니므로 여기까지 온 프레임만 센다.
+    // 재시작 공백(reset을 부른 구간)도 평균을 끌어올리지 않도록 제외한다
+    if (arrivalDeltaMsec > 0 && arrivalDeltaMsec <= sourceRestartGapMsec) {
+        measuredArrivalIntervalMsec_ = measuredArrivalIntervalMsec_ <= 0
+                                           ? arrivalDeltaMsec
+                                           : (measuredArrivalIntervalMsec_ * 3 + arrivalDeltaMsec) / 4;
+    }
 
     QVector<QPointF> rawPositions;
     QVector<QPointF> medianPositions;
@@ -395,6 +410,7 @@ DigitalTwinSnapshot RiskObjectTracker::buildSnapshot(qint64 localTimeMsec) {
     }
 
     DigitalTwinSnapshot snapshot;
+    snapshot.sampleSequence = frameSequence_;
     QHash<QString, QPointF> currentPositions;
     QHash<QString, int> currentChannelIndexes;
     QHash<qint64, int> sourceChannelIndexes;
@@ -1018,14 +1034,15 @@ void RiskObjectTracker::logRateLimitedJump(qint64 globalId, double distance, dou
  */
 QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const QPointF& targetPosition,
                                                 qint64 frameSequence, qint64 localTimeMsec) {
-    auto currentPosition = [this, localTimeMsec](const PositionTransitionState& state) {
-        if (config_.positionTransitionMsec <= 0 || state.transitionStartMsec <= 0) {
+    const qint64 transitionDurationMsec = positionTransitionDurationMsec();
+    auto currentPosition = [transitionDurationMsec, localTimeMsec](const PositionTransitionState& state) {
+        if (transitionDurationMsec <= 0 || state.transitionStartMsec <= 0) {
             return state.targetPosition;
         }
 
         const qint64 elapsedMsec = qMax<qint64>(0, localTimeMsec - state.transitionStartMsec);
         const double ratio =
-            qBound(0.0, static_cast<double>(elapsedMsec) / static_cast<double>(config_.positionTransitionMsec), 1.0);
+            qBound(0.0, static_cast<double>(elapsedMsec) / static_cast<double>(transitionDurationMsec), 1.0);
         return interpolatePosition(state.startPosition, state.targetPosition, ratio);
     };
 
@@ -1050,6 +1067,28 @@ QPointF RiskObjectTracker::transitionedPosition(const QString& objectId, const Q
     }
 
     return currentPosition(state);
+}
+
+/**
+ * @brief   위치 보간에 쓸 구간 길이를 돌려줍니다.
+ * @return  보간 구간(ms). 0이면 보간 없이 목표 위치를 바로 씁니다.
+ *
+ * @details 설정의 고정값만 쓰면 소스 주기와 어긋난다. 소스가 더 느리면 마커가 목표에 먼저
+ *          닿아 멈췄다가 다음 프레임에 다시 출발해 초당 수 회 끊겨 보이고, 더 빠르면 목표에
+ *          닿기 전에 새 목표가 와서 늘 뒤처진다. 그래서 실제 수신 간격을 재서 다음 프레임이
+ *          도착하는 시점에 보간이 끝나도록 맞춘다. 설정값은 하한으로만 남는다.
+ */
+qint64 RiskObjectTracker::positionTransitionDurationMsec() const {
+    if (config_.positionTransitionMsec <= 0) {
+        return 0;
+    }
+
+    if (measuredArrivalIntervalMsec_ <= 0) {
+        return config_.positionTransitionMsec;
+    }
+
+    const qint64 upperBoundMsec = qMax(config_.positionTransitionMsec, maximumPositionTransitionMsec);
+    return qBound(config_.positionTransitionMsec, measuredArrivalIntervalMsec_, upperBoundMsec);
 }
 
 /**

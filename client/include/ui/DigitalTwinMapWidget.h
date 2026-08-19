@@ -70,7 +70,14 @@ private:
         QGraphicsSimpleTextItem* label = nullptr;
         QGraphicsPathItem* trail = nullptr;
         QVector<QPointF> recentPositions;
+        /// 화면상 이동 벡터의 평활값. 아이콘 방향을 여기서 낸다
+        QPointF smoothedSceneVelocity;
+        QPointF previousScenePosition;
+        /// 마커에 실제로 적용해 둔 회전 각도. 미세한 변화로 device 캐시를 깨지 않도록 비교 기준으로 쓴다
+        double visibleRotationDegrees = 0.0;
         DigitalTwinRiskLevel visibleRiskLevel = DigitalTwinRiskLevel::Normal;
+        bool hasPreviousScenePosition = false;
+        bool hasRotation = false;
     };
 
     void ensureSceneReady();
@@ -79,7 +86,7 @@ private:
     /// 현재 구역 수가 감당하는 전체 채널 수
     int liveChannelCount() const { return zoneCount_ * digitalTwinChannelsPerZone; }
     void applySimulationSnapshot(const DigitalTwinSnapshot& snapshot);
-    void applyObjectUpdates(const QVector<DigitalTwinObject>& objects);
+    void applyObjectUpdates(const DigitalTwinSnapshot& snapshot);
     void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
     int zoneIndexAtScenePosition(const QPointF& scenePosition) const;
     void rebuildLiveSnapshot();
@@ -119,6 +126,11 @@ private:
     QTimer liveFrameRenderTimer_;
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
+    /// 이동 경로에 마지막으로 점을 남긴 수신 샘플 번호. 렌더 보간 프레임을 걸러 내는 기준이다
+    qint64 lastTrailSampleSequence_ = -1;
+    /// 지금 처리 중인 스냅샷이 새 수신 샘플인지. applyObjectUpdates가 한 번 정하고
+    /// createVisualItem/updateVisualItem이 함께 읽는다
+    bool trailSampleFrame_ = true;
     DigitalTwinMapSceneLayout mapLayout_;
     QVector<QRectF> objectAreaRects_;
     /// 활성 CCTV 구역 수. scene을 세우기 전에 configureLiveTracking이 실제 값으로 바꾼다
