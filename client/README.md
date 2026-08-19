@@ -224,7 +224,16 @@ Windows Qt Creator에서는 **Projects > Run > Environment**에 환경 변수를
 
 `video.receiver.latencyMs`는 RTSP/RTP 네트워크 지터 흡수량이고, `video.receiver.alignmentDelayMs`는
 AI/MQTT 처리 결과와 맞추기 위한 의도적 영상 표시 지연입니다. 서로 목적이 다르므로 독립적으로 조정합니다.
-블러는 영상 프레임의 UTC와 MQTT `ts`를 비교해 가장 가까운 메타데이터를 적용합니다. TopView는 영상
+블러는 영상 프레임의 UTC와 MQTT `ts`를 비교해 가장 가까운 메타데이터를 적용합니다.
+
+블러 쪽 정합은 `video.receiver.blur`의 두 값으로 조정합니다. `syncOffsetMs`는 RTCP sender clock이 없어
+PTS 기준점으로 프레임 시각을 추정할 때만 걸리는 보정이고, `alignmentOffsetMs`는 **RTCP 유무와 무관하게
+항상 걸리는 수동 보정**입니다(기본 `0`, 범위 -5000~5000). 영상 쪽 `alignmentDelayMs`가 파이프라인을 통째로
+늦추는 것과 달리 이 값은 표시 시점을 건드리지 않고 **어느 시각의 메타데이터를 프레임에 붙일지만** 옮깁니다.
+양수면 그만큼 과거의 메타데이터를, 음수면 더 최근의 메타데이터를 씁니다. 블러가 객체보다 일관되게 뒤처져
+보이면 음수로, 앞서 보이면 양수로 조금씩 옮기며 맞춥니다. 없는 키로 두면 `0`이라 기존 설정 파일도 그대로 읽힙니다.
+
+TopView는 영상
 프레임과 직접 동기화하지 않고 최신 `RiskFrame`을 수신 순서대로 반영하며, 객체 위치만
 `digitalTwin.positionTransitionMs` 동안 부드럽게 전환합니다.
 

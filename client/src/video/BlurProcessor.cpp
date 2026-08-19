@@ -583,8 +583,11 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
         return;
     }
 
+    // syncOffsetMs는 RTCP sender clock이 없어 PTS 기준점으로 추정할 때만 걸리는 보정이고,
+    // alignmentOffsetMs는 어느 경우든 항상 걸리는 수동 보정이다. 영상 쪽 alignmentDelayMs가
+    // 파이프라인을 통째로 늦추는 것과 달리 이쪽은 metadata를 고르는 시각만 옮긴다.
     const qint64 fallbackOffset = frameTimestamp->senderClock ? 0 : config_.syncOffsetMsec;
-    const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset;
+    const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset - config_.alignmentOffsetMsec;
     const QVector<QRectF> regions = regionsFor(targetTimestamp);
     if (regions.isEmpty()) {
         return;

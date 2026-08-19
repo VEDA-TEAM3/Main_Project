@@ -32,6 +32,10 @@ struct VideoAreaConfig {
 
 struct BlurProcessorConfig {
     qint64 syncOffsetMsec = 0;
+    // 영상 쪽 alignmentDelayMs와 짝을 이루는 블러 전용 수동 보정값. syncOffsetMs가 RTCP sender
+    // clock이 없을 때만 걸리는 것과 달리 이 값은 항상 더해진다. 양수면 더 과거의 metadata를,
+    // 음수면 더 최근의 metadata를 프레임에 맞춘다. 0이면 아무 영향이 없다.
+    qint64 alignmentOffsetMsec = 0;
     qint64 historyMsec = 0;
     qint64 matchToleranceMsec = 0;
     qint64 holdLastMetadataMsec = 0;

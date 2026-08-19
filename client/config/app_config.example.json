@@ -28,7 +28,7 @@
         "diagnosticsIntervalMs": 1000,
         "icons": {
             "vehiclePx": 42,
-            "pedestrianPx": 38
+            "pedestrianPx": 40
         },
         "world": {
             "fixedBoundsEnabled": true,
@@ -105,6 +105,7 @@
             },
             "blur": {
                 "syncOffsetMs": 300,
+                "alignmentOffsetMs": 0,
                 "historyMs": 10000,
                 "matchToleranceMs": 250,
                 "holdLastMetadataMs": 1000,

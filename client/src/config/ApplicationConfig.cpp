@@ -483,8 +483,17 @@ bool parseVideoAreas(const QJsonObject& video, const QVector<StreamConfig>& stre
 bool parseBlurConfig(const QJsonObject& receiver, BlurProcessorConfig& config, QString& error) {
     QJsonObject blur;
     qint64 maximumHistorySize = 0;
-    return readObject(receiver, QStringLiteral("blur"), blur, error) &&
-           readInteger(blur, QStringLiteral("syncOffsetMs"), 0, 10000, config.syncOffsetMsec, error) &&
+    if (!readObject(receiver, QStringLiteral("blur"), blur, error)) {
+        return false;
+    }
+
+    // 나중에 추가된 선택 키다. 없으면 0이라 기존 설정 파일도 그대로 읽힌다
+    if (blur.contains(QStringLiteral("alignmentOffsetMs")) &&
+        !readInteger(blur, QStringLiteral("alignmentOffsetMs"), -5000, 5000, config.alignmentOffsetMsec, error)) {
+        return false;
+    }
+
+    return readInteger(blur, QStringLiteral("syncOffsetMs"), 0, 10000, config.syncOffsetMsec, error) &&
            readInteger(blur, QStringLiteral("historyMs"), 100, 120000, config.historyMsec, error) &&
            readInteger(blur, QStringLiteral("matchToleranceMs"), 0, 10000, config.matchToleranceMsec, error) &&
            readInteger(blur, QStringLiteral("holdLastMetadataMs"), 0, 10000, config.holdLastMetadataMsec, error) &&

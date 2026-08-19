@@ -178,6 +178,10 @@ endif()
 # 재구성 때마다 무조건 덮으면 사용자가 추가한 구역과 RTSP 계정이 조용히 사라진다.
 # 원본이 더 새로울 때만(= 개발자가 직접 고쳤을 때만) 다시 복사한다.
 set(QTCCTV_RUNTIME_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/config/app_config.json")
+# configure_file은 "실행됐을 때만" 원본을 재구성 의존성으로 등록한다. 사본이 최신이라 아래 if가
+# 거짓이면 등록이 통째로 빠지고, 그 뒤로는 원본을 고쳐도 재구성이 걸리지 않아 사본이 영원히
+# 낡은 채로 남는다(설정을 고쳐도 앱이 안 바뀌는 원인). 등록만 항상 해 둔다.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${QTCCTV_CONFIG_SOURCE}")
 if(NOT EXISTS "${QTCCTV_RUNTIME_CONFIG}" OR "${QTCCTV_CONFIG_SOURCE}" IS_NEWER_THAN "${QTCCTV_RUNTIME_CONFIG}")
     configure_file("${QTCCTV_CONFIG_SOURCE}" "${QTCCTV_RUNTIME_CONFIG}" COPYONLY)
 endif()
