@@ -202,7 +202,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: "?"
-                color: helpHoverHandler.hovered ? Theme.text : Theme.cyan
+                color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: 22
                 font.weight: Font.Bold
