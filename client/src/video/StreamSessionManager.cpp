@@ -1,5 +1,6 @@
 #include "video/StreamSessionManager.h"
 
+#include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QThread>
@@ -9,6 +10,11 @@
 #include "network/realtime/LatestBlurFrameBuffer.h"
 #include "video/StreamReceiver.h"
 #include "video/StreamReceiverFactory.h"
+
+namespace {
+/// 정해 둔 출처 채널이 이만큼 조용하면 다시 뽑는다. 서버가 발행 토픽을 바꿔도 블러가 죽지 않게 한다
+constexpr qint64 blurSourceReelectGapMsec = 3000;
+}  // namespace
 
 /**
  * @brief                  스트림 세션 관리자를 생성합니다.
@@ -90,6 +96,26 @@ void StreamSessionManager::submitBlurFrame(BlurFrameData frame) {
     if (sourceUrl.isEmpty()) {
         return;
     }
+
+    // 같은 카메라를 여러 구역이 공유하면 채널이 달라도 URL이 같다. 아래 fan-out은 그때 한쪽
+    // 채널로만 오는 metadata를 공유 수신기 전체에 나눠 주려고 있는 것인데, 서버가 두 채널
+    // 토픽에 모두 발행하면 같은 수신기가 서로 다른 두 metadata 흐름을 함께 받게 된다.
+    // BlurProcessor의 이력에는 채널 구분이 없어서 두 흐름이 섞이고, 조회가 그 사이를 오가며
+    // 검출이 튄다. URL마다 처음 받은 채널 하나만 출처로 삼는다.
+    //
+    // 그 채널이 조용해지면 다시 뽑는다. 서버가 어느 토픽으로 내든 하나는 잡히게 하려는 것이고,
+    // 고정해 두면 발행 토픽이 바뀌었을 때 블러가 조용히 꺼진다
+    const qint64 arrivalMsec = QDateTime::currentMSecsSinceEpoch();
+    const auto sourceIterator = blurSourceChannelByUrl_.constFind(sourceUrl);
+    const bool hasSource = sourceIterator != blurSourceChannelByUrl_.cend();
+    const qint64 lastArrivalMsec = blurSourceArrivalMsecByUrl_.value(sourceUrl, 0);
+    const bool sourceWentQuiet = hasSource && arrivalMsec - lastArrivalMsec > blurSourceReelectGapMsec;
+    if (hasSource && !sourceWentQuiet && sourceIterator.value() != frame.channelIndex) {
+        return;
+    }
+
+    blurSourceChannelByUrl_.insert(sourceUrl, frame.channelIndex);
+    blurSourceArrivalMsecByUrl_.insert(sourceUrl, arrivalMsec);
 
     for (const ReceiverWorker& worker : receiverWorkers_) {
         if (worker.config.url != sourceUrl || !worker.receiver || !worker.thread || !worker.thread->isRunning()) {
@@ -374,6 +400,8 @@ void StreamSessionManager::startReceiverSequentially(qsizetype receiverIndex) {
  */
 void StreamSessionManager::stopWorkers() {
     startRequested_ = false;
+    blurSourceChannelByUrl_.clear();
+    blurSourceArrivalMsecByUrl_.clear();
 
     if (receiverWorkers_.isEmpty()) {
         return;

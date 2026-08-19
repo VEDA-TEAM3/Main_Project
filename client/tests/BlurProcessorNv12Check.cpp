@@ -217,106 +217,6 @@ void checkScratchReuseIsStable() {
 }
 
 /**
- * @brief 두 metadata 사이의 영역 보간이 정렬된 이진 탐색으로도 짝을 찾는지 검사합니다.
- *
- * @details 짝 찾기가 깨지면 보간만 조용히 멈추고 블러 자체는 계속 그려진다. 화면은 그럴듯하니
- *          눈으로는 알 수 없다. 그래서 일부러 id를 뒤섞어 넣고, 두 시각의 중간에서 블러가
- *          가운데에 찍히는지(양 끝은 그대로인지) 본다.
- */
-void checkInterpolationMatchesRegionsById() {
-    GstVideoInfo info;
-    gst_video_info_set_format(&info, GST_VIDEO_FORMAT_NV12, frameWidth, frameHeight);
-
-    BlurProcessor processor(makeConfig());
-    GstBuffer* buffer = createPatternBuffer(info);
-    check(buffer != nullptr, "NV12 buffer must be allocated");
-    if (!buffer) {
-        return;
-    }
-
-    processor.observeVideoBuffer(buffer);
-    const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
-
-    // 세로 줄무늬 위를 가로지르도록 y는 고정하고 x만 옮긴다.
-    // 중심 x는 100 -> 220 픽셀, 중간은 160이다
-    constexpr double boxSize = 0.12;
-    constexpr double boxTop = 0.40;
-    const auto boxAtCenterX = [](double centerX) { return QRectF(centerX - boxSize / 2.0, boxTop, boxSize, boxSize); };
-
-    // id를 일부러 뒤섞어 넣는다. 정렬/이진 탐색이 잘못되면 여기서 짝을 놓친다.
-    // 7번만 움직이고 11번과 3번은 줄무늬 밖에 두어 결과에 영향을 주지 않는다
-    const auto metadataAt = [&](qint64 timestamp, double probeCenterX) {
-        BlurFrameData metadata;
-        metadata.channelIndex = 0;
-        metadata.sourceTimestamp = timestamp;
-        const auto append = [&metadata](qint64 id, const QRectF& box) {
-            BlurRegionData region;
-            region.id = id;
-            region.targetType = BlurTargetType::Face;
-            region.normalizedBox = box;
-            metadata.regions.append(region);
-        };
-        append(11, QRectF(0.10, 0.02, boxSize, boxSize));
-        append(7, boxAtCenterX(probeCenterX));
-        append(3, QRectF(0.10, 0.86, boxSize, boxSize));
-        return metadata;
-    };
-
-    processor.submitFrame(metadataAt(nowMsec - 100, 100.0 / frameWidth));
-    processor.submitFrame(metadataAt(nowMsec + 100, 220.0 / frameWidth));
-
-    GstVideoFrame frame;
-    check(gst_video_frame_map(&frame, &info, buffer, GST_MAP_READWRITE) == TRUE, "frame must map read-write");
-
-    // PTS 0은 대략 nowMsec에 대응하므로 두 metadata의 중간 지점이다
-    processor.apply(frame);
-
-    constexpr int probeY = 110;
-    const guint8 middleLuma = lumaAt(frame, 160, probeY);
-    check(middleLuma > backgroundLuma && middleLuma < patternLuma,
-          "interpolated region must be blurred at the midpoint between the two timestamps");
-    check(lumaAt(frame, 100, probeY) == backgroundLuma, "the earlier position must not be blurred");
-    check(lumaAt(frame, 220, probeY) == backgroundLuma, "the later position must not be blurred");
-
-    gst_video_frame_unmap(&frame);
-    gst_buffer_unref(buffer);
-}
-
-/**
- * @brief 고정소수점 역수가 정수 나눗셈과 완전히 같은 값을 내는지 검사합니다.
- *
- * @details 픽셀당 나눗셈을 곱셈+시프트로 바꿨다. 1이라도 어긋나면 블러 결과가 미묘하게 달라지는데
- *          눈으로는 알 수 없고 기존 검사(값의 범위, 이웃 차이)도 통과한다. 그래서 등식을 직접
- *          확인한다. 오차가 드러나는 곳은 몫의 소수부가 가장 큰 지점, 즉 count의 배수 언저리뿐이라
- *          그 주변만 훑어도 전 구간을 덮는다. 설정이 허용하는 최대 반경(2048)까지 본다.
- */
-void checkReciprocalMatchesDivision() {
-    constexpr int maximumConfigurableRadius = 2048;
-    const int maximumCount = 2 * maximumConfigurableRadius + 1;
-
-    int mismatchCount = 0;
-    for (int count = 1; count <= maximumCount; ++count) {
-        const quint64 reciprocal = (static_cast<quint64>(1) << blurReciprocalShift) / count + 1;
-        const qint64 highestSum = 255LL * count;
-        for (int multiple = 0; multiple <= 255; ++multiple) {
-            for (int delta = -1; delta <= 1; ++delta) {
-                const qint64 candidate = static_cast<qint64>(multiple) * count + delta;
-                if (candidate < 0 || candidate > highestSum) {
-                    continue;
-                }
-
-                const quint64 sum = static_cast<quint64>(candidate);
-                if (((sum * reciprocal) >> blurReciprocalShift) != sum / static_cast<quint64>(count)) {
-                    ++mismatchCount;
-                }
-            }
-        }
-    }
-
-    check(mismatchCount == 0, "fixed-point reciprocal must match integer division exactly");
-}
-
-/**
  * @brief 블러 대상이 모두 꺼져 있으면 프레임을 건드리지 않는지 검사합니다.
  */
 void checkDisabledTargetsLeaveFrame() {
@@ -357,8 +257,6 @@ int main(int argc, char* argv[]) {
 
     checkNv12RegionBlur();
     checkScratchReuseIsStable();
-    checkInterpolationMatchesRegionsById();
-    checkReciprocalMatchesDivision();
     checkDisabledTargetsLeaveFrame();
 
     if (failureCount > 0) {

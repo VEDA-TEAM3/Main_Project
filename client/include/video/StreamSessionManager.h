@@ -137,6 +137,9 @@ private:
     VideoPreprocessingSettings preprocessingSettings_;
     QHash<int, VideoPreprocessingSettings> preprocessingSettingsByChannel_;
     QHash<int, bool> presentationActiveByChannel_;
+    /// URL별로 blur metadata를 받아들이기로 정한 채널과 마지막 수신 시각
+    QHash<QString, int> blurSourceChannelByUrl_;
+    QHash<QString, qint64> blurSourceArrivalMsecByUrl_;
 
     QVector<StreamOutputBinding> bindings_;
     QVector<ReceiverWorker> receiverWorkers_;

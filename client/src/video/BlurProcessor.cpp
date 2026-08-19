@@ -70,6 +70,43 @@ bool isInsideHorizontalRange(int x, double centerX, double distanceLimit) {
     return deltaX * deltaX <= distanceLimit;
 }
 
+/** @brief 곱셈 역수의 소수 비트 수. 아래 오차 한계 계산이 이 값에 기대고 있다 */
+constexpr int blurReciprocalShift = 32;
+
+/** @brief 한 픽셀에서 블러할 성분 수의 상한. 휘도 1개, 색차(U,V) 2개다 */
+constexpr int maximumComponentCount = 2;
+
+/**
+ * @brief        정수 나눗셈을 곱셈으로 바꿀 역수를 구합니다.
+ * @param count  나눌 값(창 안의 샘플 수)
+ * @return       2^32을 count로 나눈 값의 올림
+ */
+quint64 blurReciprocal(int count) {
+    constexpr quint64 scale = Q_UINT64_C(1) << blurReciprocalShift;
+    const quint64 divisor = static_cast<quint64>(count);
+    return scale / divisor + (scale % divisor != 0 ? 1 : 0);
+}
+
+/**
+ * @brief                 창 합을 샘플 수로 나눈 평균을 구합니다.
+ * @param sum             창 안 샘플의 합
+ * @param count           창 안 샘플 수
+ * @param fullCount       창이 잘리지 않았을 때의 샘플 수
+ * @param fullReciprocal  fullCount에 대한 blurReciprocal() 값
+ * @return                평균값
+ *
+ * @details 창이 잘리는 것은 영역 양 끝 radius칸뿐이고 나머지는 전부 fullCount다. 그 구간의
+ *          픽셀당 정수 나눗셈을 곱셈과 시프트로 바꾼다. 올림 역수를 쓰면 결과가 커질 수 있지만
+ *          그 오차는 255*(count-1)/2^32 이하이고 sum/count의 소수부 간격 1/count보다 항상
+ *          작으므로(count <= 2*2048+1) 내림 결과는 나눗셈과 완전히 같다.
+ */
+guint8 averagedSample(quint64 sum, int count, int fullCount, quint64 fullReciprocal) {
+    if (count == fullCount) {
+        return static_cast<guint8>((sum * fullReciprocal) >> blurReciprocalShift);
+    }
+    return static_cast<guint8>(sum / static_cast<quint64>(count));
+}
+
 /**
  * @brief        실수 픽셀 좌표를 내림한 뒤 영상 범위로 제한합니다.
  * @param value  실수 픽셀 좌표
@@ -118,41 +155,6 @@ int normalizedCeilPixel(double normalized, int extent) {
     return boundedCeilPixel(normalized * static_cast<double>(extent), extent);
 }
 
-/// 성분 수 상한. NV12 색차 평면의 U, V 두 개다
-constexpr int maximumComponentCount = 2;
-
-/**
- * @brief          블러 영역을 (대상 종류, id) 순으로 세우는 비교자입니다.
- * @param first    비교할 영역
- * @param second   비교 대상 영역
- * @return         first가 앞서면 true
- */
-bool blurRegionOrder(const BlurRegionData& first, const BlurRegionData& second) {
-    if (first.targetType != second.targetType) {
-        return first.targetType < second.targetType;
-    }
-    return first.id < second.id;
-}
-
-/**
- * @brief          정렬된 영역 목록에서 같은 대상을 이진 탐색합니다.
- * @param regions  blurRegionOrder로 정렬된 영역 목록
- * @param key      찾을 대상(대상 종류와 id만 본다)
- * @return         찾은 영역, 없으면 nullptr
- *
- * @details 이 탐색은 영상 스레드가 프레임마다 락을 쥔 채 도는 자리다. 선형 탐색이면 영역 수의
- *          제곱에 비례해(상한 64면 프레임당 최대 8192회 비교) 임계 구역이 길어지고, 그동안
- *          metadata를 넣는 dispatcher 스레드가 같은 락에서 대기한다. 정렬은 넣을 때 한 번만
- *          하므로 그 비용은 영상 스레드 밖으로 빠진다.
- */
-const BlurRegionData* findSortedRegion(const QVector<BlurRegionData>& regions, const BlurRegionData& key) {
-    const auto position = std::lower_bound(regions.cbegin(), regions.cend(), key, blurRegionOrder);
-    if (position == regions.cend() || position->targetType != key.targetType || position->id != key.id) {
-        return nullptr;
-    }
-    return &*position;
-}
-
 /**
  * @brief         이동 중인 객체의 두 블러 영역 사이를 지정 비율로 보간합니다.
  * @param first   이전 메타데이터의 영역
@@ -164,6 +166,58 @@ QRectF interpolatedRect(const QRectF& first, const QRectF& second, double ratio)
     const QPointF topLeft = first.topLeft() + (second.topLeft() - first.topLeft()) * ratio;
     const QPointF bottomRight = first.bottomRight() + (second.bottomRight() - first.bottomRight()) * ratio;
     return QRectF(topLeft, bottomRight);
+}
+
+/**
+ * @brief         두 블러 영역을 (id, 대상 유형) 순서로 비교합니다.
+ * @param left    왼쪽 영역
+ * @param right   오른쪽 영역
+ * @return        left가 앞서면 true
+ */
+bool blurRegionKeyLess(const BlurRegionData& left, const BlurRegionData& right) {
+    if (left.id != right.id) {
+        return left.id < right.id;
+    }
+    return static_cast<int>(left.targetType) < static_cast<int>(right.targetType);
+}
+
+/**
+ * @brief          블러 영역 목록을 (id, 대상 유형) 순서로 정렬한 색인을 만듭니다.
+ * @param regions  원본 영역 목록
+ * @return         정렬된 영역 포인터 목록
+ *
+ * @details 보간은 선택한 프레임의 영역마다 이전·다음 프레임에서 같은 id를 찾는다. 선형 탐색으로
+ *          하면 객체 수의 제곱이 되고, 이 탐색은 metadata를 넣는 스레드와 같은 뮤텍스 안에서 돈다.
+ *          프레임당 한 번 정렬해 두고 이진 탐색으로 찾으면 n log n으로 줄어든다.
+ */
+std::vector<const BlurRegionData*> blurRegionOrder(const QVector<BlurRegionData>& regions) {
+    std::vector<const BlurRegionData*> order;
+    order.reserve(static_cast<size_t>(regions.size()));
+    for (const BlurRegionData& region : regions) {
+        order.push_back(&region);
+    }
+    // find_if와 같은 원소를 고르도록 안정 정렬. 같은 id가 두 번 오면 먼저 온 쪽이 앞에 남는다
+    std::stable_sort(order.begin(), order.end(), [](const BlurRegionData* left, const BlurRegionData* right) {
+        return blurRegionKeyLess(*left, *right);
+    });
+    return order;
+}
+
+/**
+ * @brief        정렬된 색인에서 같은 (id, 대상 유형)의 영역을 찾습니다.
+ * @param order  blurRegionOrder()가 만든 색인
+ * @param key    찾을 영역
+ * @return       찾으면 해당 영역, 없으면 nullptr
+ */
+const BlurRegionData* findSortedRegion(const std::vector<const BlurRegionData*>& order, const BlurRegionData& key) {
+    const auto position = std::lower_bound(order.cbegin(), order.cend(), key,
+                                           [](const BlurRegionData* candidate, const BlurRegionData& target) {
+                                               return blurRegionKeyLess(*candidate, target);
+                                           });
+    if (position == order.cend() || (*position)->id != key.id || (*position)->targetType != key.targetType) {
+        return nullptr;
+    }
+    return *position;
 }
 
 /** @brief 평면 좌표계로 환산한 원형 블러 영역 */
@@ -243,18 +297,19 @@ BlurRegionGeometry chromaRegionGeometry(const BlurRegionGeometry& luma) {
  *          평면(성분 1개, 간격 1바이트)과 색차 평면(U,V 2개, 간격 2바이트)을 각각 호출한다.
  */
 void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentCount, const BlurRegionGeometry& region,
-                     int radius, BlurScratch& scratch) {
-    if (!pixels || region.width < 2 || region.height < 2 || radius < 1 || componentCount > maximumComponentCount) {
+                     int radius, std::vector<guint8>& scratch) {
+    if (!pixels || region.width < 2 || region.height < 2 || radius < 1) {
         return;
     }
 
     const size_t scratchSize = static_cast<size_t>(region.width) * region.height * componentCount;
-    if (scratch.samples.size() < scratchSize) {
-        scratch.samples.resize(scratchSize);
+    if (scratch.size() < scratchSize) {
+        scratch.resize(scratchSize);
     }
 
-    std::vector<guint8>& samples = scratch.samples;
-    const quint64* reciprocals = scratch.reciprocals.data();
+    // 창이 잘리지 않은 구간에서 쓸 역수를 한 번만 구한다
+    const int fullCount = 2 * radius + 1;
+    const quint64 fullReciprocal = blurReciprocal(fullCount);
 
     // 가로 패스도 세로 패스가 실제로 읽어 갈 칸만 채운다. 상자 전체를 채우면 원 바깥 모서리까지
     // 계산하는데, 그 값은 아무도 읽지 않는다. scratch는 프레임 사이에 재사용되지만 세로 패스가
@@ -281,36 +336,30 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
             ++lastNeededX;
         }
 
-        // 성분 루프를 픽셀 루프 안으로 넣는다. 색차 평면은 U와 V가 한 바이트씩 번갈아 놓여 있어서,
-        // 성분마다 따로 훑으면 같은 캐시 라인을 두 번 읽는다
         const guint8* sourceRow = pixels + (region.top + localY) * stride + region.left * pixelStride;
-        quint32 runningSum[maximumComponentCount] = {0, 0};
-        const int initialStart = std::max(0, firstNeededX - radius);
-        const int initialEnd = std::min(region.width - 1, firstNeededX + radius);
-        for (int x = initialStart; x <= initialEnd; ++x) {
+        quint64 sum[maximumComponentCount] = {0, 0};
+        int windowStart = std::max(0, firstNeededX - radius);
+        int windowEnd = std::min(region.width - 1, firstNeededX + radius);
+        for (int x = windowStart; x <= windowEnd; ++x) {
             for (int component = 0; component < componentCount; ++component) {
-                runningSum[component] += sourceRow[x * pixelStride + component];
+                sum[component] += sourceRow[x * pixelStride + component];
             }
         }
 
         for (int x = firstNeededX; x <= lastNeededX; ++x) {
-            const int windowStart = std::max(0, x - radius);
-            const int windowEnd = std::min(region.width - 1, x + radius);
-            // 나눗셈 대신 고정소수점 역수를 곱한다. 결과는 나눗셈과 완전히 같다(blurReciprocalShift 참고)
-            const quint64 reciprocal = reciprocals[windowEnd - windowStart + 1];
-            const size_t sampleBase = (static_cast<size_t>(localY) * region.width + x) * componentCount;
-
+            windowStart = std::max(0, x - radius);
+            windowEnd = std::min(region.width - 1, x + radius);
+            const int count = windowEnd - windowStart + 1;
+            guint8* targetSample = &scratch[(static_cast<size_t>(localY) * region.width + x) * componentCount];
             const int removeX = x - radius;
             const int addX = x + radius + 1;
             for (int component = 0; component < componentCount; ++component) {
-                samples[sampleBase + component] = static_cast<guint8>(
-                    (static_cast<quint64>(runningSum[component]) * reciprocal) >> blurReciprocalShift);
-
+                targetSample[component] = averagedSample(sum[component], count, fullCount, fullReciprocal);
                 if (removeX >= 0) {
-                    runningSum[component] -= sourceRow[removeX * pixelStride + component];
+                    sum[component] -= sourceRow[removeX * pixelStride + component];
                 }
                 if (addX < region.width) {
-                    runningSum[component] += sourceRow[addX * pixelStride + component];
+                    sum[component] += sourceRow[addX * pixelStride + component];
                 }
             }
         }
@@ -350,35 +399,36 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
             ++lastInsideY;
         }
 
-        const size_t columnBase = static_cast<size_t>(localX) * componentCount;
-        const size_t rowStride = static_cast<size_t>(region.width) * componentCount;
-
-        quint32 runningSum[maximumComponentCount] = {0, 0};
-        const int initialStart = std::max(0, firstInsideY - radius);
-        const int initialEnd = std::min(region.height - 1, firstInsideY + radius);
-        for (int y = initialStart; y <= initialEnd; ++y) {
+        quint64 sum[maximumComponentCount] = {0, 0};
+        int windowStart = std::max(0, firstInsideY - radius);
+        int windowEnd = std::min(region.height - 1, firstInsideY + radius);
+        for (int y = windowStart; y <= windowEnd; ++y) {
+            const guint8* scratchSample = &scratch[(static_cast<size_t>(y) * region.width + localX) * componentCount];
             for (int component = 0; component < componentCount; ++component) {
-                runningSum[component] += samples[static_cast<size_t>(y) * rowStride + columnBase + component];
+                sum[component] += scratchSample[component];
             }
         }
 
         for (int localY = firstInsideY; localY <= lastInsideY; ++localY) {
-            const int windowStart = std::max(0, localY - radius);
-            const int windowEnd = std::min(region.height - 1, localY + radius);
-            const quint64 reciprocal = reciprocals[windowEnd - windowStart + 1];
+            windowStart = std::max(0, localY - radius);
+            windowEnd = std::min(region.height - 1, localY + radius);
+            const int count = windowEnd - windowStart + 1;
             guint8* targetPixel = pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
-
             const int removeY = localY - radius;
             const int addY = localY + radius + 1;
+            const guint8* removeSample =
+                removeY >= 0 ? &scratch[(static_cast<size_t>(removeY) * region.width + localX) * componentCount]
+                             : nullptr;
+            const guint8* addSample =
+                addY < region.height ? &scratch[(static_cast<size_t>(addY) * region.width + localX) * componentCount]
+                                     : nullptr;
             for (int component = 0; component < componentCount; ++component) {
-                targetPixel[component] = static_cast<guint8>(
-                    (static_cast<quint64>(runningSum[component]) * reciprocal) >> blurReciprocalShift);
-
-                if (removeY >= 0) {
-                    runningSum[component] -= samples[static_cast<size_t>(removeY) * rowStride + columnBase + component];
+                targetPixel[component] = averagedSample(sum[component], count, fullCount, fullReciprocal);
+                if (removeSample) {
+                    sum[component] -= removeSample[component];
                 }
-                if (addY < region.height) {
-                    runningSum[component] += samples[static_cast<size_t>(addY) * rowStride + columnBase + component];
+                if (addSample) {
+                    sum[component] += addSample[component];
                 }
             }
         }
@@ -394,7 +444,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
  * @details 디코더가 내는 NV12를 그대로 처리해 BGRA 변환을 없앤다. 같은 영역이라도 다루는
  *          바이트가 4바이트/픽셀에서 1.5바이트/픽셀로 줄어 연산량도 함께 줄어든다.
  */
-void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, BlurScratch& scratch,
+void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<guint8>& scratch,
                    const BlurProcessorConfig& config) {
     BlurRegionGeometry luma;
     if (!blurRegionGeometry(sourceBox, GST_VIDEO_FRAME_WIDTH(&frame), GST_VIDEO_FRAME_HEIGHT(&frame), config, luma)) {
@@ -403,17 +453,6 @@ void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, BlurScratch& s
 
     const int lumaRadius = std::clamp(std::min(luma.width, luma.height) / config.radiusDivisor, config.minimumRadius,
                                       config.maximumRadius);
-
-    // 색차 반경은 휘도의 절반이라 창 크기도 더 작다. 휘도 기준으로 만들어 두면 둘 다 덮는다.
-    // 영역이 작아졌다는 이유로 다시 만들지는 않는다
-    const size_t neededReciprocals = static_cast<size_t>(2 * lumaRadius + 1) + 1;
-    if (scratch.reciprocals.size() < neededReciprocals) {
-        const size_t previousSize = scratch.reciprocals.size();
-        scratch.reciprocals.resize(neededReciprocals);
-        for (size_t count = std::max<size_t>(1, previousSize); count < neededReciprocals; ++count) {
-            scratch.reciprocals[count] = (static_cast<quint64>(1) << blurReciprocalShift) / count + 1;
-        }
-    }
     blurPlaneRegion(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)),
                     GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0), 1, 1, luma, lumaRadius, scratch);
 
@@ -448,10 +487,6 @@ void BlurProcessor::submitFrame(BlurFrameData frame) {
     if (frame.channelIndex < 0 || frame.sourceTimestamp <= 0) {
         return;
     }
-
-    // 락을 잡기 전에 정렬해 둔다. 조회(regionsFor)는 영상 스레드가 프레임마다 락을 쥔 채
-    // 도는 자리라, 짝을 찾는 비용을 그쪽에 두면 임계 구역이 영역 수의 제곱으로 길어진다
-    std::sort(frame.regions.begin(), frame.regions.end(), blurRegionOrder);
 
     const qint64 arrivalTimeMsec = qMax<qint64>(1, metadataClock_.elapsed());
     QMutexLocker locker(&mutex_);
@@ -631,6 +666,14 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
                        0.0, 1.0);
     }
 
+    // 보간할 때만 색인을 만든다. 만들지 않으면 아래 탐색도 돌지 않는다
+    std::vector<const BlurRegionData*> previousOrder;
+    std::vector<const BlurRegionData*> nextOrder;
+    if (canInterpolate) {
+        previousOrder = blurRegionOrder(previousFrame->regions);
+        nextOrder = blurRegionOrder(nextFrame->regions);
+    }
+
     QVector<QRectF> regions;
     regions.reserve(selectedFrame->regions.size());
     for (const BlurRegionData& region : selectedFrame->regions) {
@@ -643,9 +686,8 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
 
         QRectF normalizedBox = region.normalizedBox;
         if (canInterpolate) {
-            // submitFrame이 넣을 때 정렬해 두었으므로 이진 탐색으로 짝을 찾는다
-            const BlurRegionData* previousRegion = findSortedRegion(previousFrame->regions, region);
-            const BlurRegionData* nextRegion = findSortedRegion(nextFrame->regions, region);
+            const BlurRegionData* previousRegion = findSortedRegion(previousOrder, region);
+            const BlurRegionData* nextRegion = findSortedRegion(nextOrder, region);
             if (previousRegion && nextRegion) {
                 normalizedBox =
                     interpolatedRect(previousRegion->normalizedBox, nextRegion->normalizedBox, interpolationRatio);

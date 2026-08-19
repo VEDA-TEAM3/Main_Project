@@ -105,10 +105,10 @@
             },
             "blur": {
                 "syncOffsetMs": 300,
-                "historyMs": 2000,
+                "historyMs": 10000,
                 "matchToleranceMs": 250,
                 "holdLastMetadataMs": 1000,
-                "maximumHistorySize": 60,
+                "maximumHistorySize": 300,
                 "sourceRestartGapMs": 5000,
                 "sourceTimestampRestartThresholdMs": 2000,
                 "paddingRatio": 0.18,
