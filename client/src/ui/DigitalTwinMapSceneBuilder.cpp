@@ -74,6 +74,8 @@ const QColor colorAccessibleGlyph(QStringLiteral("#4e9dc4"));
 const QColor colorCore(QStringLiteral("#2a5c78"));
 const QColor colorReserved(QStringLiteral("#1d3f55"));
 const QColor colorTextDim(QStringLiteral("#7ba3bd"));
+const QColor colorFloorMark(QStringLiteral("#477895"));
+const QColor colorPedestrian(QStringLiteral("#59b9d8"));
 const QColor colorEntry(QStringLiteral("#5cff80"));
 const QColor colorExit(QStringLiteral("#ff9d5c"));
 
@@ -205,6 +207,23 @@ void appendAccessibleGlyph(QPainterPath& path, const QPointF& center) {
     path.addEllipse(center + QPointF(0.0, 1.5), 3.6, 3.6);
 }
 
+/** @brief 바닥 주행 방향 화살표 하나를 path에 추가합니다. */
+void appendFloorArrow(QPainterPath& path, const QPointF& center, const QPointF& direction) {
+    constexpr double shaftHalfLength = 14.0;
+    constexpr double headLength = 7.0;
+    constexpr double headHalfWidth = 5.0;
+    const QPointF perpendicular(-direction.y(), direction.x());
+    const QPointF tip = center + direction * shaftHalfLength;
+    const QPointF tail = center - direction * shaftHalfLength;
+    const QPointF headBase = tip - direction * headLength;
+
+    path.moveTo(tail);
+    path.lineTo(tip);
+    path.moveTo(headBase + perpendicular * headHalfWidth);
+    path.lineTo(tip);
+    path.lineTo(headBase - perpendicular * headHalfWidth);
+}
+
 /** @brief 승강기·장애인 주차 코어가 들어가는 사분면인지 확인합니다. */
 bool isServiceQuadrant(int cellIndex, int quadrantIndex) {
     // 실측 도면과 같이 마지막 구역의 우하단을 서비스 코어로 비워 둔다
@@ -291,9 +310,11 @@ void addParkingField(QGraphicsScene* scene) {
             const bool hugBottom = quadrantIndex < 2;
             appendQuadrantStalls(stallPath, quadrant, hugBottom);
 
-            // 장애인 주차: 승강기·계단 코어에서 가까운 구역의 통로 쪽 구획 두 자리
-            if (cellIndex == 2 && quadrantIndex == 0) {
-                for (int column = 0; column < 2; ++column) {
+            // 기존 규격은 유지하고 승강기 코어에서 가장 가까운 두 칸만 표식한다
+            if (cellIndex == coverageCellCount - 1 && quadrantIndex == 2) {
+                const int columns = quadrantStallColumns(quadrant);
+                for (int offset = 0; offset < 2; ++offset) {
+                    const int column = columns - 1 - offset;
                     const QRectF stall = quadrantStallRect(quadrant, hugBottom, 0, column);
                     accessiblePath.addRect(stall);
                     appendAccessibleGlyph(accessibleGlyphPath, stall.center());
@@ -332,17 +353,89 @@ void addParkingField(QGraphicsScene* scene) {
 
     scene->addPath(accessiblePath, QPen(colorAccessibleEdge, 1.0), QBrush(colorAccessibleFill))->setZValue(1.15);
     scene->addPath(accessibleGlyphPath, QPen(colorAccessibleGlyph, 0.9), Qt::NoBrush)->setZValue(1.2);
+}
 
-    // 계단·승강기 코어
-    QPainterPath corePath;
-    appendHatch(corePath, QRectF(wallLeft + 12.0, wallBottom - 62.0, 74.0, 48.0), 9.0);
-    appendHatch(corePath, QRectF(fieldRight + 8.0, 150.0, 24.0, 42.0), 8.0);
-    appendHatch(corePath, QRectF(fieldRight + 8.0, 250.0, 24.0, 42.0), 8.0);
+/** @brief 승강기 홀, 비상계단과 설비 샤프트를 실제 평면도 표기처럼 그립니다. */
+void addServiceFacilities(QGraphicsScene* scene) {
+    const QRectF emergencyStair(wallLeft + 12.0, wallBottom - 62.0, 74.0, 48.0);
+    const QRectF epsShaft(fieldRight + 8.0, 150.0, 24.0, 42.0);
+    const QRectF pipeShaft(fieldRight + 8.0, 250.0, 24.0, 42.0);
     const QRectF serviceQuadrant = cellQuadrant(coverageCell(coverageCellCount - 1), 3);
-    appendHatch(corePath, serviceQuadrant.adjusted(8.0, 8.0, -8.0, -8.0), 9.0);
+    const QRectF serviceCore = serviceQuadrant.adjusted(8.0, 8.0, -8.0, -8.0);
+    const QRectF elevator(serviceCore.left() + 5.0, serviceCore.top() + 5.0, 25.0, 27.0);
+    const QRectF stair(serviceCore.right() - 25.0, serviceCore.top() + 5.0, 20.0, 38.0);
+    const QRectF lobby(serviceCore.left() + 5.0, serviceCore.bottom() - 16.0, serviceCore.width() - 10.0, 11.0);
+
+    QPainterPath corePath;
+    appendHatch(corePath, emergencyStair, 9.0);
+    appendHatch(corePath, epsShaft, 8.0);
+    appendHatch(corePath, pipeShaft, 8.0);
+    corePath.addRect(serviceCore);
+    corePath.addRect(elevator);
+    corePath.addRect(stair);
+    corePath.addRect(lobby);
+
+    // 승강기 양개문과 계단 단판은 작은 축척에서도 시설 종류를 구분해 준다
+    corePath.moveTo(elevator.center().x(), elevator.top());
+    corePath.lineTo(elevator.center().x(), elevator.bottom());
+    for (double y = stair.top() + 5.0; y < stair.bottom(); y += 5.0) {
+        corePath.moveTo(stair.left() + 3.0, y);
+        corePath.lineTo(stair.right() - 3.0, y);
+    }
+    corePath.moveTo(stair.left() + 3.0, stair.bottom() - 3.0);
+    corePath.lineTo(stair.right() - 3.0, stair.top() + 3.0);
+
     scene->addPath(corePath, QPen(colorCore, 1.0), Qt::NoBrush)->setZValue(1.1);
-    addCenteredLabel(scene, QStringLiteral("EV"), sceneFont(7.0, QFont::DemiBold), colorTextDim, 0.6,
-                     serviceQuadrant.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("E/V"), sceneFont(6.5, QFont::DemiBold), colorTextDim, 0.82,
+                     elevator.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("STAIR"), sceneFont(4.8, QFont::DemiBold), colorTextDim, 0.72,
+                     stair.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("LOBBY"), sceneFont(4.8, QFont::DemiBold), colorPedestrian, 0.76,
+                     lobby.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("EXIT / STAIR"), sceneFont(5.5, QFont::DemiBold), colorTextDim, 0.65,
+                     emergencyStair.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("EPS"), sceneFont(5.0, QFont::DemiBold), colorTextDim, 0.62,
+                     epsShaft.center(), 1.4);
+    addCenteredLabel(scene, QStringLiteral("P/S"), sceneFont(5.0, QFont::DemiBold), colorTextDim, 0.62,
+                     pipeShaft.center(), 1.4);
+}
+
+/** @brief 차로 방향, 정지선과 승강기 앞 보행 횡단부를 바닥 표식으로 추가합니다. */
+void addFloorWayfinding(QGraphicsScene* scene) {
+    QPainterPath arrowPath;
+    const double topAisleY = coverageCell(0).center().y();
+    const double bottomAisleY = coverageCell(coverageColumnCount).center().y();
+    appendFloorArrow(arrowPath, QPointF(fieldLeft + coverageColumnWidth() * 1.35, topAisleY), QPointF(1.0, 0.0));
+    appendFloorArrow(arrowPath, QPointF(fieldLeft + coverageColumnWidth() * 3.35, topAisleY), QPointF(1.0, 0.0));
+    appendFloorArrow(arrowPath, QPointF(fieldLeft + coverageColumnWidth() * 0.65, bottomAisleY), QPointF(-1.0, 0.0));
+    appendFloorArrow(arrowPath, QPointF(fieldLeft + coverageColumnWidth() * 2.65, bottomAisleY), QPointF(-1.0, 0.0));
+    QColor arrowColor = colorFloorMark;
+    arrowColor.setAlpha(175);
+    QPen arrowPen(arrowColor, 1.8);
+    arrowPen.setCapStyle(Qt::RoundCap);
+    arrowPen.setJoinStyle(Qt::RoundJoin);
+    scene->addPath(arrowPath, arrowPen, Qt::NoBrush)->setZValue(1.35);
+
+    // 서비스 코어 앞 횡단부. 기존 십자 통로 폭 안에만 그려 통로 기하를 바꾸지 않는다
+    const QRectF serviceQuadrant = cellQuadrant(coverageCell(coverageCellCount - 1), 3);
+    QPainterPath crosswalkPath;
+    const double crossingLeft = serviceQuadrant.center().x() - 22.0;
+    for (int stripe = 0; stripe < 5; ++stripe) {
+        crosswalkPath.addRect(QRectF(crossingLeft, bottomAisleY - 17.0 + stripe * 7.0, 44.0, 2.4));
+    }
+    QColor crossingColor = colorPedestrian;
+    crossingColor.setAlpha(95);
+    scene->addPath(crosswalkPath, QPen(Qt::NoPen), QBrush(crossingColor))->setZValue(1.3);
+
+    // 출차 정지선과 입구 제한 높이, 정산 부스 표식
+    scene->addLine(fieldRight + 5.0, bottomAisleY - 17.0, fieldRight + 5.0, bottomAisleY + 17.0, QPen(colorExit, 1.8))
+        ->setZValue(1.4);
+    addCenteredLabel(scene, QStringLiteral("STOP"), sceneFont(5.5, QFont::Bold), colorExit, 0.72,
+                     QPointF(fieldRight - 17.0, bottomAisleY + 13.0), 1.4);
+    addCenteredLabel(scene, QStringLiteral("H 2.3m"), sceneFont(5.5, QFont::DemiBold), colorTextDim, 0.75,
+                     QPointF((wallLeft + fieldLeft) * 0.5, 101.0), 1.4);
+    addCenteredLabel(scene, QStringLiteral("PAY"), sceneFont(5.0, QFont::DemiBold), colorTextDim, 0.65,
+                     QPointF(wallLeft + 27.0, 261.0), 1.4);
 }
 
 /** @brief 기둥 그리드 번호를 도면 네 변에 표시합니다. */
@@ -475,6 +568,8 @@ DigitalTwinMapSceneLayout DemoParkingMapSceneBuilder::build(QGraphicsScene* scen
 
     addShell(scene);
     addParkingField(scene);
+    addServiceFacilities(scene);
+    addFloorWayfinding(scene);
     addColumnGridMarkers(scene);
 
     for (int cellIndex = 0; cellIndex < coverageCellCount; ++cellIndex) {

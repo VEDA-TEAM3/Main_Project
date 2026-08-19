@@ -140,7 +140,7 @@
             "blur": { "filter": "veda/ch/+/blur", "qos": 0 }
         },
         "dispatcher": {
-            "blurFlushIntervalMs": 5,
+            "blurFlushIntervalMs": 10,
             "blurSourceRestartGapMs": 5000,
             "blurTimestampRestartThresholdMs": 2000,
             "riskFlushIntervalMs": 5,

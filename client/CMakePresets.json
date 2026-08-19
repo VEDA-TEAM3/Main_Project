@@ -13,6 +13,7 @@
             "binaryDir": "${sourceDir}/build/debug-ninja",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS_DEBUG": "-O2 -g",
                 "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
                 "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
                 "CMAKE_PREFIX_PATH": "C:/Qt/6.11.1/mingw_64",
@@ -27,6 +28,7 @@
             "binaryDir": "${sourceDir}/build/fast-debug-ninja",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS_DEBUG": "-O2 -g",
                 "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
                 "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
                 "CMAKE_PREFIX_PATH": "C:/Qt/6.11.1/mingw_64",
