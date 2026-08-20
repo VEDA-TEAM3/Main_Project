@@ -315,7 +315,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
 
         const auto predictPosition = [this, motionFrame](const TrackedEntity& tracked) {
             domain::WorldPoint predicted = tracked.rawPos;
-            if (motionFrame <= tracked.lastMotionFrame || !std::isfinite(tracked.motionDelta.x) ||
+            if (!tracked.hasMotion || motionFrame <= tracked.lastMotionFrame || !std::isfinite(tracked.motionDelta.x) ||
                 !std::isfinite(tracked.motionDelta.y)) {
                 return predicted;
             }
@@ -349,11 +349,8 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         }
 
         // 1순위: 명확한 구간은 source id를 쓰되 이동 방향과 모순되면 fallback에 맡긴다.
-        // 모호 구간은 source id를 건너뛰어 아래 이동 방향 매칭을 우선한다.
+        // 모호 구간도 이동 이력이 없으면 source id를 우선한다.
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
-            if (ambiguousMatches[c]) {
-                continue;
-            }
             for (const auto& sourceId : fusedSourceIds[c]) {
                 if (sourceId.second == 0) {
                     continue;
@@ -370,6 +367,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls) {
                     continue;
                 }
+                if (ambiguousMatches[c] && trackIt->second.hasMotion) {
+                    continue;
+                }
                 const double rawDistance = metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos);
                 const double predictedDistance =
                     metric_->calculate(fusedObjects[c].pos, predictPosition(trackIt->second));
@@ -381,6 +381,9 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 bool contradictedByMotion = false;
                 for (const auto& [otherGid, otherTrack] : byGid_) {
                     if (otherGid == gid || claimedGids.count(otherGid) || otherTrack.cls != fusedObjects[c].cls) {
+                        continue;
+                    }
+                    if (!trackIt->second.hasMotion || !otherTrack.hasMotion) {
                         continue;
                     }
                     const double otherRawDistance = metric_->calculate(fusedObjects[c].pos, otherTrack.rawPos);
@@ -479,6 +482,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                     const double elapsedFrames = static_cast<double>(motionFrame - entity.lastMotionFrame);
                     entity.motionDelta.x = (rawPosition.x - entity.rawPos.x) / elapsedFrames;
                     entity.motionDelta.y = (rawPosition.y - entity.rawPos.y) / elapsedFrames;
+                    entity.hasMotion = true;
                 }
                 entity.cls = object.cls;
                 entity.rawPos = rawPosition;
