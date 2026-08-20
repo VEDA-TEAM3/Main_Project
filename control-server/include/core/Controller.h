@@ -7,7 +7,7 @@
  * @par [ 처리 흐름 ]
  * @code
  * ChannelReceiver → IFrameAggregator →
- * CrossChannelFuser → ZoneMapper → RiskPolicy
+ * CrossChannelFuser → ParkingPolicy → ZoneMapper → RiskPolicy
  * --+-- risk → HwEventDispatcher  → Sink
  *   +-- none ---------------------→ Sink
  * @endcode
@@ -27,6 +27,7 @@
 #include "interfaces/IFrameAggregator.h"
 #include "interfaces/IHwEventDispatcher.h"
 #include "interfaces/ILocalToWorldTransform.h"
+#include "interfaces/IParkingPolicy.h"
 #include "interfaces/IRiskPolicy.h"
 #include "interfaces/ISink.h"
 #include "interfaces/IZoneMapper.h"
@@ -38,7 +39,8 @@ public:
      */
     Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
-               std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
+               std::shared_ptr<IParkingPolicy> parkingPolicy, std::shared_ptr<IZoneMapper> zoneMapper,
+               std::shared_ptr<IRiskPolicy> riskPolicy,
                std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink,
                std::shared_ptr<IClock> clock, int channelCount);
 
@@ -71,6 +73,7 @@ private:
     std::shared_ptr<IFrameAggregator> aggregator_;
     std::shared_ptr<ILocalToWorldTransform> transform_;
     std::shared_ptr<ICrossChannelFuser> fuser_;
+    std::shared_ptr<IParkingPolicy> parkingPolicy_;
     std::shared_ptr<IZoneMapper> zoneMapper_;
     std::shared_ptr<IRiskPolicy> riskPolicy_;
     std::shared_ptr<IHwEventDispatcher> dispatcher_;

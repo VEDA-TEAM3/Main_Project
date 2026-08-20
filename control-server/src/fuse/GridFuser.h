@@ -12,7 +12,6 @@
  * GridFuser 는 그 '가까운 쌍'만 그리드로 수집한 뒤, (i<j) 로 정렬해 ConcatFuser 와 완전히
  * 동일한 union-find + 채널중복 제약을 같은 순서로 적용한다 -> 같은 입력에 같은 클러스터/gid.
  * positionJitterRadius > 0이면 최종 위치에 공간 히스테리시스를 적용한다.
- * 또한 trackMaxDistance > 0에서 관측이 잠깐 끊기면 GridFuser만 최대 5윈도우 coast하므로
  * 전체 출력은 ConcatFuser와 다를 수 있다.
  *
  * [ Principle #3 (할당 최소화) / #6 (캐시 지역성) ]
@@ -60,11 +59,14 @@ private:
         domain::WorldPoint pos;
     };
 
-    /// @brief gid 하나의 최근 추적 상태. 원시 매칭 좌표와 안정화 출력 좌표를 분리해 저장
+    /// @brief gid 하나의 최근 추적 상태.
+    /// @details 원시 좌표의 이동 방향과 안정화 출력 좌표를 분리해 저장한다.
     struct TrackedEntity {
         veda::ObjectClass cls = veda::ObjectClass::Unknown;
-        domain::WorldPoint rawPos;  ///< 마지막 원시 융합 좌표. gid 거리 매칭은 이 좌표로 수행
-        domain::WorldPoint pos;     ///< UI/zone/risk에 전달한 안정화 좌표
+        domain::WorldPoint rawPos;      ///< 마지막 원시 융합 좌표
+        domain::WorldPoint motionDelta;  ///< 융합 윈도우당 평균 이동량(m)
+        domain::WorldPoint pos;         ///< UI/zone/risk에 전달한 안정화 좌표
+        std::uint64_t lastMotionFrame = 0;
         int missedWindows = 0;
     };
 
@@ -77,7 +79,8 @@ private:
         }
     };
 
-    static constexpr int kMaxMissedWindows = 5;
+    /// @brief Retain a track through 10 consecutive missed windows.
+    static constexpr int kMaxMissedWindows = 10;
 
     /// @brief 공간 해시 버킷 개수 (2의 거듭제곱 -> 마스크로 인덱싱). 부하율 N/kBucketCount 가 k 를 좌우
     static constexpr std::uint32_t kBucketCount = 1u << 14;  // 16384
@@ -90,6 +93,7 @@ private:
     double cellSize_;  ///< 그리드 셀 한 변 = max(dedupMergeDistance_, eps)
     double trackMaxDistance_;
     double positionJitterRadius_;
+    std::uint64_t motionFrame_ = 0;
     std::atomic<veda::GlobalId> nextGlobalId_;
 
     /// @brief (channel, ObjectId) -> gid. 같은 채널의 같은 ObjectId 는 항상 같은 gid (ConcatFuser 와 동일)

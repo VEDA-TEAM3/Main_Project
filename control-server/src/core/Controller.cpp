@@ -10,13 +10,15 @@ constexpr const char* kIface = "Controller";
 
 Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                        std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
-                       std::shared_ptr<IZoneMapper> zoneMapper, std::shared_ptr<IRiskPolicy> riskPolicy,
+                       std::shared_ptr<IParkingPolicy> parkingPolicy, std::shared_ptr<IZoneMapper> zoneMapper,
+                       std::shared_ptr<IRiskPolicy> riskPolicy,
                        std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink,
                        std::shared_ptr<IClock> clock, int channelCount)
     : receiver_(std::move(receiver)),
       aggregator_(std::move(aggregator)),
       transform_(std::move(transform)),
       fuser_(std::move(fuser)),
+      parkingPolicy_(std::move(parkingPolicy)),
       zoneMapper_(std::move(zoneMapper)),
       riskPolicy_(std::move(riskPolicy)),
       dispatcher_(std::move(dispatcher)),
@@ -144,6 +146,8 @@ void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) 
     transform_->transform(frames, observations_);
 
     auto worldFrame = fuser_->fuse(observations_);
+
+    parkingPolicy_->apply(worldFrame);
 
     zoneMapper_->assign(worldFrame);
 

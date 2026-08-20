@@ -107,6 +107,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         frames.begin(), frames.end(),
         [](const domain::ObservationFrame& a, const domain::ObservationFrame& b) { return a.ts < b.ts; });
     worldFrame.timestamp = maxTimestampIt->ts;
+    const std::uint64_t motionFrame = ++motionFrame_;
 
     // --- 후보 수집 (재사용 버퍼) ---
     candidates_.clear();
@@ -306,12 +307,53 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         fusedSourceIds.push_back(std::move(sourceIds));
     }
 
+    std::vector<bool> ambiguousMatches;
     if (trackMaxDistance_ > 0.0) {
         std::vector<bool> curMatched(fusedObjects.size(), false);
+        ambiguousMatches.resize(fusedObjects.size(), false);
         std::unordered_set<veda::GlobalId> claimedGids;
 
-        // 1순위: (channel, ObjectId) 가 idIndex_ 에 있으면 그 gid 를 그대로 물려받음
+        const auto predictPosition = [this, motionFrame](const TrackedEntity& tracked) {
+            domain::WorldPoint predicted = tracked.rawPos;
+            if (motionFrame <= tracked.lastMotionFrame || !std::isfinite(tracked.motionDelta.x) ||
+                !std::isfinite(tracked.motionDelta.y)) {
+                return predicted;
+            }
+
+            const double elapsedFrames = static_cast<double>(motionFrame - tracked.lastMotionFrame);
+            double dx = tracked.motionDelta.x * elapsedFrames;
+            double dy = tracked.motionDelta.y * elapsedFrames;
+            const double displacement = std::hypot(dx, dy);
+            if (displacement > trackMaxDistance_) {
+                const double scale = trackMaxDistance_ / displacement;
+                dx *= scale;
+                dy *= scale;
+            }
+            predicted.x += dx;
+            predicted.y += dy;
+            return predicted;
+        };
+
+        const double ambiguityMargin = std::max(positionJitterRadius_, 1.0e-6);
+        for (std::size_t lhs = 0; lhs < fusedObjects.size(); ++lhs) {
+            for (std::size_t rhs = lhs + 1; rhs < fusedObjects.size(); ++rhs) {
+                if (fusedObjects[lhs].cls != fusedObjects[rhs].cls) {
+                    continue;
+                }
+                const double distance = metric_->calculate(fusedObjects[lhs].pos, fusedObjects[rhs].pos);
+                if (std::isfinite(distance) && distance <= ambiguityMargin) {
+                    ambiguousMatches[lhs] = true;
+                    ambiguousMatches[rhs] = true;
+                }
+            }
+        }
+
+        // 1순위: 명확한 구간은 source id를 쓰되 이동 방향과 모순되면 fallback에 맡긴다.
+        // 모호 구간은 source id를 건너뛰어 아래 이동 방향 매칭을 우선한다.
         for (std::size_t c = 0; c < fusedObjects.size(); ++c) {
+            if (ambiguousMatches[c]) {
+                continue;
+            }
             for (const auto& sourceId : fusedSourceIds[c]) {
                 if (sourceId.second == 0) {
                     continue;
@@ -328,7 +370,30 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 if (trackIt == byGid_.end() || trackIt->second.cls != fusedObjects[c].cls) {
                     continue;
                 }
-                if (metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos) > trackMaxDistance_) {
+                const double rawDistance = metric_->calculate(fusedObjects[c].pos, trackIt->second.rawPos);
+                const double predictedDistance =
+                    metric_->calculate(fusedObjects[c].pos, predictPosition(trackIt->second));
+                if (!std::isfinite(rawDistance) || !std::isfinite(predictedDistance) ||
+                    rawDistance > trackMaxDistance_) {
+                    continue;
+                }
+
+                bool contradictedByMotion = false;
+                for (const auto& [otherGid, otherTrack] : byGid_) {
+                    if (otherGid == gid || claimedGids.count(otherGid) || otherTrack.cls != fusedObjects[c].cls) {
+                        continue;
+                    }
+                    const double otherRawDistance = metric_->calculate(fusedObjects[c].pos, otherTrack.rawPos);
+                    const double otherPredictedDistance =
+                        metric_->calculate(fusedObjects[c].pos, predictPosition(otherTrack));
+                    if (std::isfinite(otherRawDistance) && std::isfinite(otherPredictedDistance) &&
+                        otherRawDistance <= trackMaxDistance_ &&
+                        otherPredictedDistance + ambiguityMargin < predictedDistance) {
+                        contradictedByMotion = true;
+                        break;
+                    }
+                }
+                if (contradictedByMotion) {
                     continue;
                 }
                 fusedObjects[c].gid = gid;
@@ -338,7 +403,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             }
         }
 
-        // 2순위(fallback): 못 찾은 나머지만, 아직 안 쓰인 gid 들과 거리순 전역 그리디 매칭
+        // 2순위(fallback): 최근 이동 방향으로 예측한 좌표를 기준으로 전역 그리디 매칭
         struct MatchCandidate {
             double dist;
             std::size_t curIdx;
@@ -353,15 +418,25 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 if (claimedGids.count(gid) || tracked.cls != fusedObjects[c].cls) {
                     continue;
                 }
-                const double dist = metric_->calculate(fusedObjects[c].pos, tracked.rawPos);
-                if (dist > trackMaxDistance_) {
+                const double rawDistance = metric_->calculate(fusedObjects[c].pos, tracked.rawPos);
+                const double predictedDistance = metric_->calculate(fusedObjects[c].pos, predictPosition(tracked));
+                if (!std::isfinite(rawDistance) || !std::isfinite(predictedDistance) ||
+                    rawDistance > trackMaxDistance_) {
                     continue;
                 }
-                matchCandidates.push_back({dist, c, gid});
+                matchCandidates.push_back({predictedDistance, c, gid});
             }
         }
         std::sort(matchCandidates.begin(), matchCandidates.end(),
-                  [](const MatchCandidate& a, const MatchCandidate& b) { return a.dist < b.dist; });
+                  [](const MatchCandidate& a, const MatchCandidate& b) {
+                      if (a.dist != b.dist) {
+                          return a.dist < b.dist;
+                      }
+                      if (a.curIdx != b.curIdx) {
+                          return a.curIdx < b.curIdx;
+                      }
+                      return a.gid < b.gid;
+                  });
 
         for (const auto& match : matchCandidates) {
             if (curMatched[match.curIdx] || claimedGids.count(match.gid)) {
@@ -395,15 +470,28 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 }
             }
 
-            TrackedEntity& entity = byGid_[object.gid];
-            entity.cls = object.cls;
-            entity.rawPos = rawPosition;
-            entity.pos = object.pos;
+            auto [entityIt, inserted] = byGid_.try_emplace(object.gid);
+            TrackedEntity& entity = entityIt->second;
+            if (inserted || !ambiguousMatches[i]) {
+                if (!inserted && motionFrame > entity.lastMotionFrame && std::isfinite(entity.rawPos.x) &&
+                    std::isfinite(entity.rawPos.y) && std::isfinite(rawPosition.x) &&
+                    std::isfinite(rawPosition.y)) {
+                    const double elapsedFrames = static_cast<double>(motionFrame - entity.lastMotionFrame);
+                    entity.motionDelta.x = (rawPosition.x - entity.rawPos.x) / elapsedFrames;
+                    entity.motionDelta.y = (rawPosition.y - entity.rawPos.y) / elapsedFrames;
+                }
+                entity.cls = object.cls;
+                entity.rawPos = rawPosition;
+                entity.pos = object.pos;
+                entity.lastMotionFrame = motionFrame;
+            }
             entity.missedWindows = 0;
             touchedGids.insert(object.gid);
-            for (const auto& sourceId : fusedSourceIds[i]) {
-                if (sourceId.second != 0) {
-                    idIndex_[sourceId] = object.gid;
+            if (inserted || !ambiguousMatches[i]) {
+                for (const auto& sourceId : fusedSourceIds[i]) {
+                    if (sourceId.second != 0) {
+                        idIndex_[sourceId] = object.gid;
+                    }
                 }
             }
         }

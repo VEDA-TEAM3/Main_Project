@@ -1,10 +1,13 @@
 #include "core/AppContext.h"
 
+#include <string>
+
 #include "Logger.h"
 #include "aggregate/TimeWindowAggregatorV2.h"
 #include "dispatch/SerialHwEventDispatcher.h"
 #include "fuse/GridFuser.h"
 #include "metric/EuclideanMetric.h"
+#include "parking/StationaryParkingPolicy.h"
 #include "receive/MqttChannelReceiver.h"
 #include "risk/ThresholdRiskPolicy.h"
 #include "sink/MqttTransport.h"
@@ -36,6 +39,7 @@ std::shared_ptr<Controller> AppContext::buildController() {
     auto fuser =
         std::make_shared<GridFuser>(metric, config_.risk.dedupMergeDistance, config_.risk.trackMaxDistance,
                                     config_.risk.positionJitterRadius);
+    auto parkingPolicy = std::make_shared<StationaryParkingPolicy>(config_.parking);
     auto zoneMapper = std::make_shared<SpatialZoneMapper>(config_.zones, config_.hysteresisMargin,
                                                           config_.cameraCalibrations,
                                                           config_.directionalZoneMapping);
@@ -47,10 +51,15 @@ std::shared_ptr<Controller> AppContext::buildController() {
         config_.hwHealthCheck.missedBeatsForTimeout, config_.hwHealthCheck.mismatchRetryCount,
         config_.hwHealthCheck.mismatchEscalateAfterRetries);
 
+    logSuccess(kIface, "주차 정책 적용 (spaces=" + std::to_string(config_.parking.spaces.size()) +
+                           ", stationaryDurationMs=" + std::to_string(config_.parking.stationaryDurationMs) +
+                           ", maxObservationGapMs=" + std::to_string(config_.parking.maxObservationGapMs) +
+                           ", movementToleranceM=" + std::to_string(config_.parking.movementToleranceM) + ")");
+
     logSuccess(kIface,
                "파이프라인 조립 완료 (receiver=MqttChannelReceiver, transform=AffineLocalToWorldTransform, "
                "zoneMapper=SpatialZoneMapper, sink=MqttTransport, dispatcher=SerialHwEventDispatcher)");
 
-    return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
-                                        sink, clock, config_.channelCount);
+    return std::make_shared<Controller>(receiver, aggregator, transform, fuser, parkingPolicy, zoneMapper, riskPolicy,
+                                        dispatcher, sink, clock, config_.channelCount);
 }
