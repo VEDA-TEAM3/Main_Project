@@ -83,19 +83,6 @@ Item {
             height: parent.height
             spacing: 0
 
-            Item {
-                id: nativeClockSlot
-                objectName: "nativeClockSlot"
-                width: 170
-                height: parent.height
-            }
-
-            Rectangle {
-                width: 1
-                height: parent.height
-                color: Theme.border
-            }
-
             StatusLabel {
                 title: "Network"
                 status: root.systemStatusText

@@ -3,11 +3,9 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QEvent>
-#include <QFont>
 #include <QFrame>
 #include <QGridLayout>
 #include <QKeySequence>
-#include <QLabel>
 #include <QMessageBox>
 #include <QQuickItem>
 #include <QQuickWidget>
@@ -91,7 +89,6 @@ MainWindow::MainWindow(std::shared_ptr<StreamReceiverFactory> streamReceiverFact
     setupQuickDialogOverlay();
     setupQuickGuideDialog();
     setupTopBarStatuses();
-    setupClock();
     setupWindowShortcuts();
     setupDashboardPanels();
     setupDashboardPanelCoordinator();
@@ -327,42 +324,6 @@ void MainWindow::setupQuickTopBar() {
     connect(rootObject, SIGNAL(areaRequested()), this, SLOT(openVideoAreaSelectionDialog()));
     connect(rootObject, SIGNAL(settingsRequested()), this, SLOT(openMapSettingsDialog()));
     connect(rootObject, SIGNAL(guideRequested()), this, SLOT(openGuideDialog()));
-
-    auto* rootItem = qobject_cast<QQuickItem*>(rootObject);
-    auto* clockSlot = rootObject->findChild<QQuickItem*>(QStringLiteral("nativeClockSlot"));
-    auto* statusRow = rootObject->findChild<QQuickItem*>(QStringLiteral("topStatusRow"));
-    if (!rootItem || !clockSlot || !statusRow) {
-        qWarning().noquote() << QStringLiteral("[UI] Native top-bar clock slot is unavailable");
-        return;
-    }
-
-    clockLabel_ = new QLabel(quickTopBar_);
-    clockLabel_->setAlignment(Qt::AlignCenter);
-    clockLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    clockLabel_->setAttribute(Qt::WA_OpaquePaintEvent);
-    clockLabel_->setAutoFillBackground(true);
-    clockLabel_->setStyleSheet(
-        QStringLiteral("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #29333b, stop:1 #1a2129);"
-                       "border: none; color: #f5f9fe; padding: 0;"));
-
-    QFont clockFont(QStringLiteral("Noto Sans KR"));
-    clockFont.setPixelSize(13);
-    clockFont.setWeight(QFont::DemiBold);
-    clockLabel_->setFont(clockFont);
-
-    const auto syncClockGeometry = [this, rootItem, clockSlot]() {
-        const QPointF position = clockSlot->mapToItem(rootItem, QPointF());
-        clockLabel_->setGeometry(qRound(position.x()), qRound(position.y()), qRound(clockSlot->width()),
-                                 qRound(clockSlot->height()));
-        clockLabel_->raise();
-    };
-    connect(rootItem, &QQuickItem::widthChanged, this, syncClockGeometry);
-    connect(rootItem, &QQuickItem::heightChanged, this, syncClockGeometry);
-    connect(statusRow, &QQuickItem::xChanged, this, syncClockGeometry);
-    connect(statusRow, &QQuickItem::yChanged, this, syncClockGeometry);
-    connect(clockSlot, &QQuickItem::widthChanged, this, syncClockGeometry);
-    connect(clockSlot, &QQuickItem::heightChanged, this, syncClockGeometry);
-    syncClockGeometry();
 }
 
 /** @brief CCTV 조작부와 상태 범례를 공통 Qt Quick 테마로 교체합니다. */
@@ -590,27 +551,6 @@ void MainWindow::setupTopBarStatuses() {
     updateSystemStatus(false);
     streamChannelReady_.fill(false, streamConfigs_.size());
     updateStreamConnectionStatus();
-}
-
-/**
- * @brief 상단 시계를 실제 시스템 시각과 1초 주기로 동기화합니다.
- */
-void MainWindow::setupClock() {
-    clockTimer_.setInterval(1000);
-    clockTimer_.setTimerType(Qt::CoarseTimer);
-    connect(&clockTimer_, &QTimer::timeout, this, &MainWindow::updateCurrentDateTime);
-    updateCurrentDateTime();
-    clockTimer_.start();
-}
-
-/**
- * @brief 현재 로컬 날짜와 시각을 상단 표시줄에 반영합니다.
- */
-void MainWindow::updateCurrentDateTime() {
-    const QString dateTime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
-    if (clockLabel_) {
-        clockLabel_->setText(dateTime);
-    }
 }
 
 /**

@@ -2,7 +2,6 @@
 
 #include <QMainWindow>
 #include <QString>
-#include <QTimer>
 #include <QVector>
 #include <memory>
 
@@ -24,7 +23,6 @@ class ObjectListPanel;
 class QEvent;
 class QFrame;
 class QGridLayout;
-class QLabel;
 class QBoxLayout;
 class QQuickWidget;
 class MapSettingsDialog;
@@ -77,7 +75,6 @@ private:
     void setupDashboardPanelCoordinator();
     void setupDeviceStatusService();
     void setupTopBarStatuses();
-    void setupClock();
     void setupWindowShortcuts();
     void setupStreamSessionManager(std::shared_ptr<StreamReceiverFactory> receiverFactory);
     void setupVideoViewEvents();
@@ -110,7 +107,6 @@ private:
     void updateSystemStatus(bool connected);
     void updateStreamConnectionStatus();
     void updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& riskLevels);
-    void updateCurrentDateTime();
     void setQuickTopBarProperty(const char* name, const QVariant& value);
     void setQuickDialogProperty(const char* name, const QVariant& value);
     void showQuickDialog(const QString& mode, const QString& title, const QString& message);
@@ -144,8 +140,6 @@ private:
     ObjectListPanel* objectListPanel_ = nullptr;
     MapSettingsDialog* mapSettingsDialog_ = nullptr;
     QWidget* expandedWidget_ = nullptr;
-    QTimer clockTimer_;
-    QLabel* clockLabel_ = nullptr;
     QQuickWidget* quickTopBar_ = nullptr;
     QQuickWidget* quickCctvToolbar_ = nullptr;
     QQuickWidget* quickLegend_ = nullptr;
