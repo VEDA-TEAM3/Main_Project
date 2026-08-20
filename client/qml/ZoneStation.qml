@@ -27,9 +27,6 @@ Item {
 
     signal clicked
 
-    readonly property real iconSize: 26
-    readonly property real iconGap: 5
-
     x: zone.x
     y: zone.y
     width: zone.w
@@ -124,6 +121,36 @@ Item {
         opacity: 0.5
     }
 
+    // ── 채널 이름표 ────────────────────────────────────────────────────
+    // 주차장 바닥에 칠한 유도 문자처럼 크게 두되 농도를 낮춥니다. 대각선·카메라·객체보다
+    // 먼저 그려지므로 그 위를 지나는 것들을 가리지 않고 바닥에 깔린 것으로 읽힙니다.
+    //
+    // 자리는 사분면 삼각형 안쪽입니다. 좌우 이름표는 h/2 높이라 가운데 카메라 기호와
+    // 겹치기 쉬우므로 w/5, 4w/5까지 바깥으로 밀어 둡니다.
+    Repeater {
+        model: root.active ? 4 : 0
+
+        Text {
+            id: channelMark
+
+            required property int index
+            readonly property var spots: [[root.width / 2, root.height / 6],
+                                          [root.width * 4 / 5, root.height / 2],
+                                          [root.width / 2, root.height * 5 / 6],
+                                          [root.width / 5, root.height / 2]]
+
+            x: channelMark.spots[channelMark.index][0] - width / 2
+            y: channelMark.spots[channelMark.index][1] - height / 2
+            text: "CH" + (channelMark.index + 1 < 10 ? "0" : "") + (channelMark.index + 1)
+            color: Theme.mapPaper
+            opacity: 0.18
+            font.family: Theme.fontFamily
+            font.pixelSize: 28
+            font.weight: Font.Bold
+            font.letterSpacing: 2
+        }
+    }
+
     // ── 채널 경계 ──────────────────────────────────────────────────────
     // 구역 테두리는 긋지 않습니다. 도면에 이미 벽·구획선이 촘촘한데 그 위에 사각형을 하나 더
     // 얹으면 선이 겹쳐 어느 것이 건물이고 어느 것이 표기인지 흐려집니다. 구역의 범위는
@@ -167,79 +194,6 @@ Item {
         x: root.width / 2 - width / 2
         y: root.height / 2 - height / 2
         visible: root.showCctv && root.active
-    }
-
-    // ── 채널별 이름표와 장치 상태 ──────────────────────────────────────
-    // 배경 판은 깔지 않습니다. 구획은 속을 비워 두므로 이 자리는 거의 다 어두운 바닥이고,
-    // 판을 깔면 그 아래의 구획선과 지나가는 객체가 사라집니다.
-    Repeater {
-        model: root.active ? 4 : 0
-
-        Item {
-            id: chip
-
-            required property int index
-            readonly property var spots: [[root.width / 2, 36], [root.width - 44, root.height / 2],
-                                          [root.width / 2, root.height - 36], [44, root.height / 2]]
-
-            x: chip.spots[chip.index][0] - width / 2
-            y: chip.spots[chip.index][1] - height / 2
-            width: root.iconSize * 2 + root.iconGap
-            height: 42
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                y: 0
-                text: "CH" + (chip.index + 1 < 10 ? "0" : "") + (chip.index + 1)
-                color: Theme.mapPaper
-                opacity: 0.95
-                font.family: Theme.fontFamily
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-            }
-
-            Image {
-                x: 0
-                y: parent.height - root.iconSize
-                width: root.iconSize
-                height: root.iconSize
-                visible: root.showLed
-                mipmap: true
-                source: {
-                    var state = root.channelLed[chip.index] !== undefined ? root.channelLed[chip.index] : 0;
-                    if (state === 3)
-                        return "qrc:/icons/led_danger.png";
-                    if (state === 2)
-                        return "qrc:/icons/led_waring.png";
-                    if (state === 1)
-                        return "qrc:/icons/led_safe.png";
-                    return "qrc:/icons/led_off.png";
-                }
-                sourceSize: Qt.size(64, 64)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-            }
-
-            Image {
-                x: parent.width - root.iconSize
-                y: parent.height - root.iconSize
-                width: root.iconSize
-                height: root.iconSize
-                visible: root.showAlertDevice
-                mipmap: true
-                source: {
-                    var state = root.channelAlert[chip.index] !== undefined ? root.channelAlert[chip.index] : 0;
-                    if (state === 2)
-                        return "qrc:/icons/sensor_danger.png";
-                    if (state === 1)
-                        return "qrc:/icons/sensor_safe.png";
-                    return "qrc:/icons/sensor_off.png";
-                }
-                sourceSize: Qt.size(64, 64)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-            }
-        }
     }
 
     MouseArea {

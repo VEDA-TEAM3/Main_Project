@@ -31,8 +31,7 @@ var STALL_ROWS = 4;
 var AISLE_ROWS = 2;
 
 var HALL_H = STALL_ROWS * STALL_D + AISLE_ROWS * AISLE;
-/// 홀 가로세로비는 커버리지 격자가 정합니다. 4열 x 2행이므로 2:1이어야 셀이 정사각형입니다
-var HALL_W = HALL_H * 2.0;
+var HALL_W = HALL_H * 1.5;
 
 /// 도면 바깥 여백. 위험 테두리 광채가 나갈 자리만 둡니다
 var EDGE = 6.0;
@@ -47,13 +46,11 @@ var PLAN_H = Y1 + EDGE;
 var BUILDING_W = X1 - X0;
 var BUILDING_H = Y1 - Y0;
 
-/// 커버리지 격자. 3열 x 2행 = 여섯 칸이고, C++의 digitalTwinMaximumZoneCount와 같아야 합니다.
-///
-/// 홀이 2:1이라 3열에서는 셀 자체가 4:3입니다(정사각형은 4열일 때). 그래도 객체 배율은
-/// 어긋나지 않습니다 — objectArea()가 셀 안에서 짧은 변 기준으로 **정사각 영역**을 다시 잡고
-/// C++이 정사각 월드 상자를 거기에 늘려 맞추기 때문입니다. 셀이 좌우로 넓어지는 것뿐입니다.
-/// 셀까지 정사각형으로 맞추려면 HALL_W를 HALL_H * 1.5로 바꿔야 하는데, 그러면 주차구획·기둥·
-/// 램프가 전부 다시 배치되므로 도면을 새로 그릴 각오가 아니면 건드리지 마세요.
+/// 커버리지 격자. 홀이 3:2라 3열 x 2행이 정확히 정사각형 여섯 칸으로 떨어집니다.
+/// 칸 수는 C++의 digitalTwinMaximumZoneCount와 같아야 합니다.
+/// 객체는 구역 안의 정사각 영역에만 그려지므로 셀이 정사각형이 아니면 가로·세로 배율이 어긋납니다.
+/// 열 수를 바꾸면 HALL_W의 배수(ZONE_COLS / ZONE_ROWS)도 함께 바꿔야 하는데, 그러면
+/// 주차구획·기둥·램프가 전부 다시 배치됩니다.
 var ZONE_COLS = 3;
 var ZONE_ROWS = 2;
 var ZONE_MAX = ZONE_COLS * ZONE_ROWS;

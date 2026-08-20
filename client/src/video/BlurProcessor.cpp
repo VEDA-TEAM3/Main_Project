@@ -182,42 +182,22 @@ bool blurRegionKeyLess(const BlurRegionData& left, const BlurRegionData& right) 
 }
 
 /**
- * @brief          블러 영역 목록을 (id, 대상 유형) 순서로 정렬한 색인을 만듭니다.
- * @param regions  원본 영역 목록
- * @return         정렬된 영역 포인터 목록
+ * @brief          같은 (id, 대상 유형)의 영역을 이진 탐색으로 찾습니다.
+ * @param regions  submitFrame()에서 이미 정렬해 둔 영역 목록
+ * @param key      찾을 영역
+ * @return         찾으면 해당 영역, 없으면 nullptr
  *
- * @details 보간은 선택한 프레임의 영역마다 이전·다음 프레임에서 같은 id를 찾는다. 선형 탐색으로
- *          하면 객체 수의 제곱이 되고, 이 탐색은 metadata를 넣는 스레드와 같은 뮤텍스 안에서 돈다.
- *          프레임당 한 번 정렬해 두고 이진 탐색으로 찾으면 n log n으로 줄어든다.
+ * @details 목록은 **수신할 때 한 번** 정렬됩니다. 예전에는 화면 프레임마다 포인터 색인을 새로
+ *          만들어 정렬했는데, 그 자리가 하필 metadata를 넣는 스레드와 같은 뮤텍스 안이라
+ *          영상 스레드가 프레임마다 락을 쥔 채 힙 할당 두 번과 정렬 두 번을 했습니다.
+ *          채널 넷이면 초당 수백 번이라 그대로 영상이 끊깁니다.
  */
-std::vector<const BlurRegionData*> blurRegionOrder(const QVector<BlurRegionData>& regions) {
-    std::vector<const BlurRegionData*> order;
-    order.reserve(static_cast<size_t>(regions.size()));
-    for (const BlurRegionData& region : regions) {
-        order.push_back(&region);
-    }
-    // find_if와 같은 원소를 고르도록 안정 정렬. 같은 id가 두 번 오면 먼저 온 쪽이 앞에 남는다
-    std::stable_sort(order.begin(), order.end(), [](const BlurRegionData* left, const BlurRegionData* right) {
-        return blurRegionKeyLess(*left, *right);
-    });
-    return order;
-}
-
-/**
- * @brief        정렬된 색인에서 같은 (id, 대상 유형)의 영역을 찾습니다.
- * @param order  blurRegionOrder()가 만든 색인
- * @param key    찾을 영역
- * @return       찾으면 해당 영역, 없으면 nullptr
- */
-const BlurRegionData* findSortedRegion(const std::vector<const BlurRegionData*>& order, const BlurRegionData& key) {
-    const auto position = std::lower_bound(order.cbegin(), order.cend(), key,
-                                           [](const BlurRegionData* candidate, const BlurRegionData& target) {
-                                               return blurRegionKeyLess(*candidate, target);
-                                           });
-    if (position == order.cend() || (*position)->id != key.id || (*position)->targetType != key.targetType) {
+const BlurRegionData* findSortedRegion(const QVector<BlurRegionData>& regions, const BlurRegionData& key) {
+    const auto position = std::lower_bound(regions.cbegin(), regions.cend(), key, blurRegionKeyLess);
+    if (position == regions.cend() || position->id != key.id || position->targetType != key.targetType) {
         return nullptr;
     }
-    return *position;
+    return &*position;
 }
 
 /** @brief 평면 좌표계로 환산한 원형 블러 영역 */
@@ -488,6 +468,11 @@ void BlurProcessor::submitFrame(BlurFrameData frame) {
         return;
     }
 
+    // 영역을 (id, 대상 유형)으로 여기서 정렬해 둡니다. 보간이 이전·다음 프레임에서 같은 id를
+    // 찾을 때 이진 탐색만 하면 되고, 화면 프레임마다 정렬할 일이 없어집니다.
+    // 락을 잡기 전에 하므로 이 정렬은 락 구간을 늘리지 않습니다.
+    std::stable_sort(frame.regions.begin(), frame.regions.end(), blurRegionKeyLess);
+
     const qint64 arrivalTimeMsec = qMax<qint64>(1, metadataClock_.elapsed());
     QMutexLocker locker(&mutex_);
 
@@ -666,14 +651,6 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
                        0.0, 1.0);
     }
 
-    // 보간할 때만 색인을 만든다. 만들지 않으면 아래 탐색도 돌지 않는다
-    std::vector<const BlurRegionData*> previousOrder;
-    std::vector<const BlurRegionData*> nextOrder;
-    if (canInterpolate) {
-        previousOrder = blurRegionOrder(previousFrame->regions);
-        nextOrder = blurRegionOrder(nextFrame->regions);
-    }
-
     QVector<QRectF> regions;
     regions.reserve(selectedFrame->regions.size());
     for (const BlurRegionData& region : selectedFrame->regions) {
@@ -686,8 +663,8 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
 
         QRectF normalizedBox = region.normalizedBox;
         if (canInterpolate) {
-            const BlurRegionData* previousRegion = findSortedRegion(previousOrder, region);
-            const BlurRegionData* nextRegion = findSortedRegion(nextOrder, region);
+            const BlurRegionData* previousRegion = findSortedRegion(previousFrame->regions, region);
+            const BlurRegionData* nextRegion = findSortedRegion(nextFrame->regions, region);
             if (previousRegion && nextRegion) {
                 normalizedBox =
                     interpolatedRect(previousRegion->normalizedBox, nextRegion->normalizedBox, interpolationRatio);
