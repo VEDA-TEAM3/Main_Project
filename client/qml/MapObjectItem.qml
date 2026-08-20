@@ -8,11 +8,13 @@ import "Theme.js" as Theme
 // 배열에 QVariantMap을 담으면 그 목록이 소멸하는 자리에서 heap이 깨지므로 순서로만 주고받습니다
 // (CLAUDE.md의 DeviceStatusPanel 항목 참고).
 //
-//   0 id · 1 아이콘 · 2 x · 3 y · 4 크기 · 5 회전 · 6 투명도 · 7 이름표색 · 8 경로색 · 9.. 경로 좌표
+//   fields: 0 id · 1 아이콘 · 2 x · 3 y · 4 크기 · 5 회전 · 6 투명도 · 7 이름표색 · 8 경로색
+//   trailFields: 0 id · 1.. 경로 좌표
 Item {
     id: root
 
     required property var fields
+    required property var trailFields
     property bool showTrail: true
 
     readonly property string objectId: fields[0]
@@ -26,8 +28,11 @@ Item {
     // 이동 경로. 점이 둘 미만이면 그릴 것이 없습니다
     readonly property var trailPoints: {
         var points = [];
-        for (var i = 9; i + 1 < fields.length; i += 2) {
-            points.push(Qt.point(fields[i], fields[i + 1]));
+        if (trailFields[0] !== root.objectId) {
+            return points;
+        }
+        for (var i = 1; i + 1 < trailFields.length; i += 2) {
+            points.push(Qt.point(trailFields[i], trailFields[i + 1]));
         }
         return points;
     }
@@ -44,6 +49,7 @@ Item {
         anchors.fill: parent
         visible: root.showTrail && root.trailPoints.length > 1
         opacity: 0.7
+        asynchronous: true
 
         ShapePath {
             strokeColor: root.fields[8]

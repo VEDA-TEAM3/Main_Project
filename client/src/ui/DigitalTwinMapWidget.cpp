@@ -26,6 +26,9 @@ constexpr double maximumStoredTrailPlanLength = 600.0;
 /// 경로 길이는 설정값(movementTrailLength)이 정해야 하는데, 여기를 더 낮게 잡으면 수신이
 /// 촘촘한 구간에서 점 개수가 먼저 차 버려서 설정과 무관하게 경로가 뭉텅 짧아진다
 constexpr int maxPublishedTrailPointCount = maxTrailPointCount;
+// 마커는 20Hz로 움직이되 Shape 경로는 10Hz로만 다시 만든다. 경로는 위치 판단에 쓰이지 않는
+// 시각 효과라 이 주기로도 충분하고, QQuickWidget의 GUI 스레드 삼각분할 부하는 절반으로 줄어든다.
+constexpr int trailPublishIntervalMsec = 100;
 // 아이콘 방향에 쓸 이동 벡터의 지수이동평균 가중치. 이동량은 렌더 프레임 간 차분이라
 // 저속에서 노이즈가 커서, 그대로 각도를 내면 아이콘이 제자리에서 떤다
 constexpr double headingSmoothing = 0.25;
@@ -152,7 +155,7 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     connect(&liveFrameExpiryTimer_, &QTimer::timeout, this, &DigitalTwinMapWidget::expireStaleLiveFrames);
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     liveFrameRenderTimer_.setSingleShot(false);
-    liveFrameRenderTimer_.setTimerType(Qt::PreciseTimer);
+    liveFrameRenderTimer_.setTimerType(Qt::CoarseTimer);
     connect(&liveFrameRenderTimer_, &QTimer::timeout, this, &DigitalTwinMapWidget::rebuildLiveSnapshot);
 
     setObjectName(QStringLiteral("digitalTwinMapWidget"));
@@ -191,14 +194,18 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     lastLiveSnapshotPublishMsec_ = 0;
+    lastTrailPublishMsec_ = 0;
     publishedObjectPayload_.clear();
+    publishedTrailPayload_.clear();
     hasPublishedObjectPayload_ = false;
+    hasPublishedTrailPayload_ = false;
 
     deviceChannels_.resize(liveChannelCount());
     objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(
         scaledIconConfig(liveConfig_.icons, displaySettings_.iconScalePercent));
     publishDeviceStates();
     publishObjects();
+    publishTrails(true);
 }
 
 DigitalTwinMapWidget::~DigitalTwinMapWidget() = default;
@@ -213,6 +220,7 @@ void DigitalTwinMapWidget::applyDisplaySettings(const DigitalTwinMapDisplaySetti
         scaledIconConfig(liveConfig_.icons, displaySettings_.iconScalePercent));
     publishDisplaySettings();
     publishObjects();
+    publishTrails(true);
 }
 
 /**
@@ -455,6 +463,7 @@ void DigitalTwinMapWidget::applyObjectUpdates(const DigitalTwinSnapshot& snapsho
     const QVector<DigitalTwinObject>& objects = snapshot.objects;
     trailSampleFrame_ = snapshot.sampleSequence != lastTrailSampleSequence_;
     lastTrailSampleSequence_ = snapshot.sampleSequence;
+    bool visualSetChanged = false;
 
     for (const auto& object : objects) {
         if (!visualIndexes_.contains(object.objectId)) {
@@ -463,6 +472,7 @@ void DigitalTwinMapWidget::applyObjectUpdates(const DigitalTwinSnapshot& snapsho
             visuals_.append(visual);
             visualIndexes_.insert(object.objectId, visuals_.size() - 1);
             updateObjectVisual(&visuals_.last());
+            visualSetChanged = true;
             continue;
         }
 
@@ -475,8 +485,9 @@ void DigitalTwinMapWidget::applyObjectUpdates(const DigitalTwinSnapshot& snapsho
         updateObjectVisual(&visuals_[visualIndex]);
     }
 
-    removeMissingVisuals(objects);
+    visualSetChanged = removeMissingVisuals(objects) || visualSetChanged;
     publishObjects();
+    publishTrails(visualSetChanged);
 }
 
 /** @brief QML 구역 클릭을 받아 다시 알립니다. */
@@ -541,7 +552,7 @@ void DigitalTwinMapWidget::updateObjectVisual(ObjectVisual* visual) {
  *          오버로드가 골라져 통째로 펼쳐진다.
  *
  *          자리: 0 id · 1 아이콘 · 2 x · 3 y · 4 크기 · 5 회전 · 6 투명도 ·
- *                7 이름표색 · 8 경로색 · 9.. 경로 좌표
+ *                7 이름표색 · 8 경로색. 이동 경로 좌표는 publishTrails()가 낮은 주기로 보냅니다.
  */
 void DigitalTwinMapWidget::publishObjects() {
     QVariantList payload;
@@ -561,6 +572,35 @@ void DigitalTwinMapWidget::publishObjects() {
         fields.append(style.labelColor.name());
         fields.append(style.trailColor.name());
 
+        payload.append(QVariant(fields));
+    }
+
+    if (hasPublishedObjectPayload_ && payload == publishedObjectPayload_) {
+        return;
+    }
+
+    publishedObjectPayload_ = payload;
+    hasPublishedObjectPayload_ = true;
+    setMapProperty("mapObjects", publishedObjectPayload_);
+}
+
+/**
+ * @brief        이동 경로만 객체 위치보다 낮은 주기로 QML에 게시합니다.
+ * @param force  객체 추가·삭제 또는 설정 변경으로 즉시 동기화해야 하는지 여부
+ */
+void DigitalTwinMapWidget::publishTrails(bool force) {
+    const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
+    if (!force && (!trailSampleFrame_ ||
+                   (lastTrailPublishMsec_ > 0 && currentTimeMsec - lastTrailPublishMsec_ < trailPublishIntervalMsec))) {
+        return;
+    }
+
+    QVariantList payload;
+    payload.reserve(visuals_.size());
+    for (const ObjectVisual& visual : visuals_) {
+        QVariantList fields;
+        fields.append(visual.object.objectId);
+
         if (displaySettings_.showMovementTrails) {
             const QVector<QPointF> trail = visibleTrail(visual.recentPositions);
             for (const QPointF& point : trail) {
@@ -572,13 +612,14 @@ void DigitalTwinMapWidget::publishObjects() {
         payload.append(QVariant(fields));
     }
 
-    if (hasPublishedObjectPayload_ && payload == publishedObjectPayload_) {
+    lastTrailPublishMsec_ = currentTimeMsec;
+    if (hasPublishedTrailPayload_ && payload == publishedTrailPayload_) {
         return;
     }
 
-    publishedObjectPayload_ = payload;
-    hasPublishedObjectPayload_ = true;
-    setMapProperty("mapObjects", publishedObjectPayload_);
+    publishedTrailPayload_ = payload;
+    hasPublishedTrailPayload_ = true;
+    setMapProperty("mapTrails", publishedTrailPayload_);
 }
 
 /**
@@ -639,7 +680,7 @@ void DigitalTwinMapWidget::setMapProperty(const char* name, const QVariant& valu
  * @brief          worker 목록에서 사라진 객체의 표시 항목을 제거합니다.
  * @param objects  현재 살아있는 객체 목록
  */
-void DigitalTwinMapWidget::removeMissingVisuals(const QVector<DigitalTwinObject>& objects) {
+bool DigitalTwinMapWidget::removeMissingVisuals(const QVector<DigitalTwinObject>& objects) {
     QSet<QString> activeObjectIds;
 
     for (const auto& object : objects) {
@@ -658,6 +699,8 @@ void DigitalTwinMapWidget::removeMissingVisuals(const QVector<DigitalTwinObject>
     if (removedItem) {
         rebuildVisualIndexes();
     }
+
+    return removedItem;
 }
 
 /** @brief 표시 항목 제거 이후 객체 ID와 인덱스 매핑을 다시 구성합니다. */

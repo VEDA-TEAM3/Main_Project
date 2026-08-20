@@ -88,6 +88,7 @@ private:
     void applyObjectUpdates(const DigitalTwinSnapshot& snapshot);
     void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
     void publishObjects();
+    void publishTrails(bool force);
     void publishDeviceStates();
     void publishDisplaySettings();
     void setMapProperty(const char* name, const QVariant& value);
@@ -98,7 +99,7 @@ private:
     void setDangerActive(bool active);
     void expireStaleLiveFrames();
     void updateObjectVisual(ObjectVisual* visual);
-    void removeMissingVisuals(const QVector<DigitalTwinObject>& objects);
+    bool removeMissingVisuals(const QVector<DigitalTwinObject>& objects);
     void rebuildVisualIndexes();
     void refreshObjectAreas();
     QPointF planPointForObject(const QPointF& position, int channelIndex) const;
@@ -120,10 +121,13 @@ private:
     QTimer liveFrameRenderTimer_;
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
     QVariantList publishedObjectPayload_;
+    QVariantList publishedTrailPayload_;
     bool hasPublishedObjectPayload_ = false;
+    bool hasPublishedTrailPayload_ = false;
     /// 구역별 객체 표시 영역. QML의 ParkingPlan.js가 원본이라 거기서 읽어 온다
     QVector<QRectF> objectAreaRects_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
+    qint64 lastTrailPublishMsec_ = 0;
     /// 이동 경로에는 마지막으로 점을 찍은 수신 샘플 번호. 렌더 보간 프레임을 걸러 내는 기준이다
     qint64 lastTrailSampleSequence_ = -1;
     /// 지금 처리 중인 스냅샷이 새 수신 샘플인지. applyObjectUpdates가 한 번 정하고 함께 읽는다

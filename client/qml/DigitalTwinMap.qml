@@ -20,9 +20,12 @@ Item {
     property int zoneCount: 2
     /** 객체 목록. 원소 하나가 MapObjectItem이 읽는 평평한 배열입니다 */
     property var mapObjects: []
+    /** 이동 경로 목록. 마커 좌표보다 낮은 주기로 갱신하며 mapObjects와 같은 순서입니다 */
+    property var mapTrails: []
     /// 객체가 줄어드는 프레임에 delegate가 아직 살아 있으면 mapObjects[index]가 undefined가 된다.
     /// 그 한 프레임 때문에 경고가 초당 수십 줄씩 쏟아지므로 자리 수가 맞는 빈 값을 대신 넘긴다
     readonly property var emptyObjectFields: ["", "", 0, 0, 0, 0, 0, "transparent", "transparent"]
+    readonly property var emptyTrailFields: [""]
     /** 채널별 위험 단계 (0=정상, 1=주의, 2=위험). 구역 순서로 CH01~CH04씩 이어 붙입니다 */
     property var channelRisk: []
     /** 채널별 LED 상태 (0=꺼짐, 1=안전, 2=주의, 3=위험) */
@@ -434,6 +437,7 @@ Item {
                 required property int index
 
                 fields: root.mapObjects[index] !== undefined ? root.mapObjects[index] : root.emptyObjectFields
+                trailFields: root.mapTrails[index] !== undefined ? root.mapTrails[index] : root.emptyTrailFields
                 showTrail: root.showMovementTrails
             }
         }
