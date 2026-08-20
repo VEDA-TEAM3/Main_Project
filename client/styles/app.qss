@@ -1,9 +1,9 @@
-﻿* {
+* {
     font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 14px;
-    color: #f5f9ff;
-    background-color: #06101b;
-    selection-background-color: #1681a6;
+    color: #f5f9fe;
+    background-color: #101419;
+    selection-background-color: #536b75;
     selection-color: #ffffff;
 }
 
@@ -11,7 +11,7 @@ QMainWindow,
 QWidget,
 QWidget#centralwidget {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #0a1a2d, stop:0.55 #071426, stop:1 #050e1b);
+                                      stop:0 #181d24, stop:0.55 #13181e, stop:1 #0e1218);
 }
 
 QLabel {
@@ -35,10 +35,10 @@ QFrame#eventLogCard,
 QFrame#deviceStatusCard,
 QFrame#objectListCard {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #143b56, stop:0.1 #102f48,
-                                      stop:0.68 #0b2237, stop:1 #081a2b);
-    border: 1px solid #397391;
-    border-top-color: #58b6da;
+                                      stop:0 #2a343d, stop:0.1 #222a32,
+                                      stop:0.68 #181e26, stop:1 #171c23);
+    border: 1px solid #5a6871;
+    border-top-color: #84a6b5;
     border-radius: 6px;
 }
 
@@ -53,14 +53,14 @@ QDialog#informationDialog {
 
 QFrame#informationPanel {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #123651, stop:0.42 #0c273d, stop:1 #071928);
-    border: 1px solid #50c8ee;
-    border-top-color: #79ddff;
+                                      stop:0 #273038, stop:0.42 #1b232a, stop:1 #151b21);
+    border: 1px solid #88b3c3;
+    border-top-color: #a8ccda;
     border-radius: 8px;
 }
 
 QLabel#informationTitle {
-    color: #eafaff;
+    color: #f0f7fc;
     background-color: transparent;
     border: 0;
     font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
@@ -69,9 +69,9 @@ QLabel#informationTitle {
 }
 
 QLabel#informationMessage {
-    color: #f4fbff;
-    background-color: #081d2e;
-    border: 1px solid #2f6685;
+    color: #f6fafe;
+    background-color: #181f25;
+    border: 1px solid #4f5c65;
     border-radius: 5px;
     font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 16px;
@@ -91,14 +91,14 @@ QPushButton#informationConfirmButton {
 
 QPushButton#informationConfirmButton {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                      stop:0 #1a88b4, stop:1 #106085);
-    border: 1px solid #69ddff;
+                                      stop:0 #5a727e, stop:1 #3e505b);
+    border: 1px solid #9fc9d7;
     color: #ffffff;
 }
 
 QPushButton#informationConfirmButton:hover {
-    background-color: #20a2d3;
-    border-color: #a3efff;
+    background-color: #6b8794;
+    border-color: #c5e1ea;
 }
 
 QPushButton#informationConfirmButton:pressed {
@@ -108,8 +108,8 @@ QPushButton#informationConfirmButton:pressed {
 QFrame#eventLogBodyFrame,
 QFrame#deviceStatusBodyFrame,
 QFrame#objectListBodyFrame {
-    background-color: #071827;
-    border: 1px solid #2d566f;
+    background-color: #151a20;
+    border: 1px solid #444e56;
     border-radius: 6px;
 }
 
@@ -127,34 +127,34 @@ QWidget#videoAreaPage2 {
 
 
 QToolTip {
-    color: #eef3f5;
-    background-color: #102936;
-    border: 1px solid #4c8aa3;
+    color: #eef2f6;
+    background-color: #1d242a;
+    border: 1px solid #6f7d85;
     border-radius: 3px;
     padding: 5px 8px;
 }
 
 DigitalTwinMapWidget#digitalTwinMapWidget {
-    background-color: #06121f;
-    border: 1px solid #2c5672;
+    background-color: #11151b;
+    border: 1px solid #444f57;
     border-radius: 4px;
 }
 
 ClickableVideoWidget {
     background-color: #000000;
-    border: 1px solid #294754;
+    border: 1px solid #394147;
     border-radius: 4px;
 }
 
 ClickableVideoWidget[loading="true"] {
-    border: 1px solid #3a7187;
+    border: 1px solid #59666d;
 }
 
 QLabel#videoChannelLabel {
-    background-color: #061d2e;
-    border: 1px solid #45bde2;
+    background-color: #171e24;
+    border: 1px solid #7da8b8;
     border-radius: 0;
-    color: #dff6ff;
+    color: #e8f2f8;
     font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI";
     font-size: 12px;
     font-weight: 700;
@@ -168,14 +168,14 @@ QLabel#videoChannelLabel[expanded="true"] {
 }
 
 QFrame#videoTileFrame {
-    background-color: #0c2539;
-    border: 2px solid #0c2539;
+    background-color: #1a2128;
+    border: 2px solid #1a2128;
     border-radius: 4px;
 }
 
 QFrame#videoTileFrame[hovered="true"] {
-    background-color: #45bde2;
-    border-color: #45bde2;
+    background-color: #7da8b8;
+    border-color: #7da8b8;
 }
 
 QFrame#videoLoadingOverlay {
@@ -188,7 +188,7 @@ QWidget#videoLoadingSpinner {
 }
 
 QLabel#videoLoadingLabel {
-    color: #b9dfec;
+    color: #cad8e0;
     font-size: 13px;
     font-weight: 700;
     letter-spacing: 0px;
@@ -196,13 +196,13 @@ QLabel#videoLoadingLabel {
 
 QStatusBar,
 QMenuBar {
-    background-color: #03070d;
-    color: #9eb7c7;
+    background-color: #090c10;
+    color: #a9b3bc;
 }
 
 QScrollBar:vertical,
 QScrollBar:horizontal {
-    background-color: #030a10;
+    background-color: #0a0e12;
     border: 0;
     width: 10px;
     height: 10px;
@@ -210,14 +210,14 @@ QScrollBar:horizontal {
 
 QScrollBar::handle:vertical,
 QScrollBar::handle:horizontal {
-    background-color: #356e91;
-    border: 1px solid #519abe;
+    background-color: #56646e;
+    border: 1px solid #7b8c96;
     border-radius: 5px;
 }
 
 QScrollBar::handle:vertical:hover,
 QScrollBar::handle:horizontal:hover {
-    background-color: #49add7;
+    background-color: #789cae;
 }
 
 QScrollBar::add-line,

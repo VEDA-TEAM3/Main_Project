@@ -15,7 +15,7 @@
 /// 메시지 전체를 버린다 (잘라 쓰면 안전 판단에서 객체가 조용히 빠진다)
 inline constexpr qsizetype maximumMqttPayloadBytes = 256 * 1024;
 
-/// 한 RiskFrame이 실을 수 있는 융합 객체 수. 구역 8개 x 채널 4개 기준 실사용은 수십 개다
+/// 한 RiskFrame이 실을 수 있는 융합 객체 수. 구역 6개 x 채널 4개 기준 실사용은 수십 개다
 inline constexpr qsizetype maximumRiskObjectsPerFrame = 256;
 
 /// payload의 ts가 로컬 UTC보다 이만큼 앞서면 거부한다.

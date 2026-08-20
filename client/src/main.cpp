@@ -159,6 +159,15 @@ int main(int argc, char* argv[]) {
             QObject::connect(&login, &LoginWindow::authenticated, &window, &MainWindow::beginSession);
             QObject::connect(&login, &LoginWindow::fullScreenToggleRequested, &window, &MainWindow::toggleFullScreen);
 
+            // 로그인 창은 메인 창을 부모로 둔 Qt::Dialog다. Windows는 "소유된 창"을 언제나
+            // 소유자 위에 유지하는데, 그 소유 관계는 **부모의 네이티브 창이 이미 있을 때만**
+            // 맺어진다. 여기서 미리 만들어 두지 않으면 로그인 창이 주인 없는 창으로 떠서,
+            // 뒤에 showMaximized()가 대시보드를 Z-order 맨 위로 올리는 순간 한 프레임 드러난다
+            window.createWinId();
+
+            // 메인 창이 focus를 가져가지 않게 한다. focus는 로그인 창이 사라질 때 넘긴다
+            window.setAttribute(Qt::WA_ShowWithoutActivating, true);
+
             // 로그인 화면을 먼저 띄운다. 메인 창을 먼저 보이면 패널이 다 그려지기 전의
             // 반쯤 칠해진 대시보드가 그대로 노출된다
             login.setGeometry(QGuiApplication::primaryScreen()->availableGeometry());

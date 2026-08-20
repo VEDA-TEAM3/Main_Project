@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(ProcessorCount)
 
-find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickControls2 QuickWidgets Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickControls2 QuickShapes QuickWidgets Widgets)
 
 set(GSTREAMER_ROOT "C:/Program Files/gstreamer/1.0/mingw_x86_64" CACHE PATH
     "GStreamer MinGW x86_64 runtime root")
@@ -58,8 +58,6 @@ qt_add_executable(Qtcctvclient
     include/ui/TableModelRoles.h
     include/ui/DigitalTwinMapWidget.h
     src/ui/DigitalTwinMapWidget.cpp
-    include/ui/DigitalTwinMapSceneBuilder.h
-    src/ui/DigitalTwinMapSceneBuilder.cpp
     include/ui/DigitalTwinObjectStyleProvider.h
     src/ui/DigitalTwinObjectStyleProvider.cpp
     include/ui/DigitalTwinHeading.h
@@ -71,12 +69,6 @@ qt_add_executable(Qtcctvclient
     include/ui/VideoRiskBorderFrame.h
     src/ui/VideoRiskBorderFrame.cpp
 
-    include/overlays/DangerBorderOverlay.h
-    src/overlays/DangerBorderOverlay.cpp
-    include/overlays/ChannelRiskOverlay.h
-    src/overlays/ChannelRiskOverlay.cpp
-    include/overlays/DeviceStatusMapOverlay.h
-    src/overlays/DeviceStatusMapOverlay.cpp
 
     include/video/StreamReceiver.h
     include/video/StreamReceiverFactory.h
@@ -100,6 +92,7 @@ qt_add_executable(Qtcctvclient
     include/model/MqttRealtimeData.h
     include/model/RiskObjectTracker.h
     src/model/RiskObjectTracker.cpp
+    include/model/DigitalTwinDemoZoneMap.h
     include/model/DigitalTwinObjectSpawner.h
     src/model/RandomEdgeObjectSpawner.cpp
     include/model/DigitalTwinRiskPolicy.h
@@ -198,6 +191,15 @@ qt_add_resources(Qtcctvclient "qml_resources"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/Theme.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/ParkingPlan.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/DigitalTwinMap.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PlanRoom.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PlanWalls.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PlanWheelStop.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/PlanDoor.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/ZoneStation.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/MapObjectItem.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml/MapCamera.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/NeonButton.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/PanelFrame.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/qml/PanelHeader.qml"
@@ -327,6 +329,7 @@ target_link_libraries(Qtcctvclient PRIVATE
     Qt6::Network
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::QuickShapes
     Qt6::QuickWidgets
 
     gstreamer-1.0
@@ -349,6 +352,16 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
+
+    add_executable(demo_zone_channel_check
+        tests/DemoZoneChannelCheck.cpp
+    )
+
+    target_include_directories(demo_zone_channel_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(demo_zone_channel_check PRIVATE Qt6::Core)
 
     add_executable(digital_twin_heading_check
         tests/DigitalTwinHeadingCheck.cpp

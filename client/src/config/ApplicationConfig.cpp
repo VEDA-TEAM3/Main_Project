@@ -487,12 +487,6 @@ bool parseBlurConfig(const QJsonObject& receiver, BlurProcessorConfig& config, Q
         return false;
     }
 
-    // 나중에 추가된 선택 키다. 없으면 0이라 기존 설정 파일도 그대로 읽힌다
-    if (blur.contains(QStringLiteral("alignmentOffsetMs")) &&
-        !readInteger(blur, QStringLiteral("alignmentOffsetMs"), -5000, 5000, config.alignmentOffsetMsec, error)) {
-        return false;
-    }
-
     return readInteger(blur, QStringLiteral("syncOffsetMs"), 0, 10000, config.syncOffsetMsec, error) &&
            readInteger(blur, QStringLiteral("historyMs"), 100, 120000, config.historyMsec, error) &&
            readInteger(blur, QStringLiteral("matchToleranceMs"), 0, 10000, config.matchToleranceMsec, error) &&

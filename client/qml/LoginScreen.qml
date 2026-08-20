@@ -64,7 +64,7 @@ Rectangle {
         }
 
         if (passwordField.text !== confirmField.text) {
-            root.errorText = "비밀번호가 서로 다릅니다.";
+            root.errorText = "Passwords do not match.";
             return;
         }
         root.bootstrapRequested();
@@ -76,16 +76,16 @@ Rectangle {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#04101c" }
+            GradientStop { position: 0.0; color: "#0b1015" }
             GradientStop { position: 0.55; color: Theme.background }
-            GradientStop { position: 1.0; color: "#03293f" }
+            GradientStop { position: 1.0; color: "#101a21" }
         }
     }
 
     // 옅은 격자. 관제 화면의 결을 배경에도 얹는다
     Item {
         anchors.fill: parent
-        opacity: 0.4
+        opacity: 0.3
 
         Repeater {
             model: Math.ceil(root.width / 64)
@@ -94,7 +94,7 @@ Rectangle {
                 x: index * 64
                 width: 1
                 height: root.height
-                color: "#0d3247"
+                color: "#1d2830"
             }
         }
         Repeater {
@@ -104,7 +104,7 @@ Rectangle {
                 y: index * 64
                 width: root.width
                 height: 1
-                color: "#0d3247"
+                color: "#1d2830"
             }
         }
     }
@@ -120,16 +120,16 @@ Rectangle {
         height: 760
         opacity: 0.0
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0016455f" }
-            GradientStop { position: 0.5; color: "#ff16455f" }
-            GradientStop { position: 1.0; color: "#0016455f" }
+            GradientStop { position: 0.0; color: "#001b2f3a" }
+            GradientStop { position: 0.5; color: "#ff1b2f3a" }
+            GradientStop { position: 1.0; color: "#001b2f3a" }
         }
 
         SequentialAnimation on opacity {
             running: !exitAnimation.running
             loops: Animation.Infinite
-            NumberAnimation { to: 0.85; duration: 3200; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.55; duration: 3200; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.32; duration: 3200; easing.type: Easing.InOutSine }
         }
     }
 
@@ -172,20 +172,25 @@ Rectangle {
             anchors.rightMargin: 40
             spacing: 0
 
+            // 원본 300px을 54px로 줄여 그립니다. sourceSize가 없으면 300px 텍스처를 그대로
+            // 올려 놓고 GPU가 5.5배로 줄이느라 가장자리가 깨집니다. 디코드 단계에서 2배
+            // 크기로 미리 줄이고(고해상도 화면 몫), 나머지는 mipmap이 매끄럽게 받습니다
             Image {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: 54
                 height: 54
                 source: "qrc:/icons/main.png"
+                sourceSize: Qt.size(108, 108)
                 fillMode: Image.PreserveAspectFit
                 smooth: true
+                mipmap: true
             }
 
             Item { width: 1; height: 18 }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "Wise AI"
+                text: "PARKING VMS"
                 color: Theme.cyan
                 font.family: Theme.fontFamily
                 font.pixelSize: 30
@@ -197,7 +202,7 @@ Rectangle {
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "주차장 디지털 트윈 관제 시스템"
+                text: "Video Management System"
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: 14
@@ -219,7 +224,7 @@ Rectangle {
             Text {
                 visible: root.bootstrapMode
                 width: parent.width
-                text: "이 컴퓨터에는 아직 관제 계정이 없습니다.\n사용할 관리자 계정을 먼저 만드세요."
+                text: "No operator account exists on this machine yet.\nCreate an administrator account to continue."
                 color: Theme.cyan
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -231,7 +236,7 @@ Rectangle {
             Item { visible: root.bootstrapMode; width: 1; height: 22 }
 
             Text {
-                text: "아이디"
+                text: "Username"
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -245,7 +250,7 @@ Rectangle {
                 width: parent.width
                 height: 42
                 enabled: !root.busy
-                placeholderText: "관제 계정"
+                placeholderText: "Operator account"
                 onAccepted: passwordField.forceActiveFocus()
                 onTextChanged: root.errorText = ""
             }
@@ -253,7 +258,7 @@ Rectangle {
             Item { width: 1; height: 16 }
 
             Text {
-                text: "비밀번호"
+                text: "Password"
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -268,7 +273,7 @@ Rectangle {
                 height: 42
                 enabled: !root.busy
                 echoMode: TextInput.Password
-                placeholderText: "비밀번호"
+                placeholderText: "Password"
                 onAccepted: root.bootstrapMode ? confirmField.forceActiveFocus() : root.submit()
                 onTextChanged: root.errorText = ""
             }
@@ -277,7 +282,7 @@ Rectangle {
 
             Text {
                 visible: root.bootstrapMode
-                text: "비밀번호 확인"
+                text: "Confirm password"
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -293,7 +298,7 @@ Rectangle {
                 height: 42
                 enabled: !root.busy
                 echoMode: TextInput.Password
-                placeholderText: "비밀번호 다시 입력"
+                placeholderText: "Re-enter password"
                 onAccepted: root.submit()
                 onTextChanged: root.errorText = ""
             }
@@ -325,7 +330,7 @@ Rectangle {
                 enabled: !root.busy && userField.text.trim().length > 0 && passwordField.text.length > 0 &&
                          (!root.bootstrapMode || confirmField.text.length > 0)
                 selected: enabled
-                text: root.busy ? "확인 중..." : (root.bootstrapMode ? "관리자 계정 만들기" : "로그인")
+                text: root.busy ? "Signing in..." : (root.bootstrapMode ? "Create administrator" : "Sign in")
                 onClicked: root.submit()
             }
 
@@ -335,8 +340,8 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                text: root.bootstrapMode ? "계정은 이 폴더의 config/users.json에 저장되어 함께 옮겨집니다"
-                                         : "로그인해야 영상과 장비 상태 수신이 시작됩니다"
+                text: root.bootstrapMode ? "Accounts are stored in config/users.json next to the program"
+                                         : "Sign in to start receiving video and device status"
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: 11

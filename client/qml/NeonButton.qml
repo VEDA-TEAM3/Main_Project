@@ -35,8 +35,10 @@ Rectangle {
             height: 20
             visible: root.iconSource.toString().length > 0
             source: root.iconSource
+            sourceSize: Qt.size(40, 40)
             fillMode: Image.PreserveAspectFit
             smooth: true
+            mipmap: true
         }
 
         Text {

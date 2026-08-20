@@ -27,8 +27,8 @@
         "maximumHistorySize": 2,
         "diagnosticsIntervalMs": 1000,
         "icons": {
-            "vehiclePx": 42,
-            "pedestrianPx": 40
+            "vehiclePx": 60,
+            "pedestrianPx": 45
         },
         "world": {
             "fixedBoundsEnabled": true,
@@ -71,7 +71,7 @@
             "processingWidth": 1280,
             "processingHeight": 720,
             "busPollIntervalMs": 200,
-            "latencyMs": 250,
+            "latencyMs": 350,
             "dropOnLatency": true,
             "initialPacketTimeoutMs": 10000,
             "initialFrameTimeoutMs": 10000,
@@ -87,7 +87,7 @@
             "addReferenceTimestampMeta": true,
             "decodeQueueMaximumBuffers": 8,
             "decodeQueueMaximumTimeMs": 100,
-            "alignmentDelayMs": 100,
+            "alignmentDelayMs": 300,
             "alignmentQueueMaximumTimeMs": 450,
             "renderQueueMaximumBuffers": 8,
             "renderQueueMaximumTimeMs": 200,
@@ -104,8 +104,7 @@
                 "gamma": 1.0
             },
             "blur": {
-                "syncOffsetMs": 300,
-                "alignmentOffsetMs": 0,
+                "syncOffsetMs": 100,
                 "historyMs": 10000,
                 "matchToleranceMs": 250,
                 "holdLastMetadataMs": 1000,

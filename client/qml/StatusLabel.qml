@@ -8,10 +8,12 @@ Item {
     required property string status
     required property color statusColor
 
-    width: 200
+    width: Math.max(184, statusRow.implicitWidth + 32)
     height: 62
 
     Row {
+        id: statusRow
+
         anchors.centerIn: parent
         spacing: 8
 

@@ -4,6 +4,7 @@
 #include <QtGlobal>
 #include <algorithm>
 
+#include "model/DigitalTwinDemoZoneMap.h"
 #include "model/DigitalTwinObjectSpawner.h"
 #include "model/DigitalTwinRiskPolicy.h"
 
@@ -28,9 +29,6 @@ constexpr double minimumHorizontalVelocity = minimumHorizontalVelocityPerSecond 
 constexpr double horizontalVelocityJitter = horizontalVelocityJitterPerSecond * secondsPerUpdate;
 constexpr double verticalVelocityJitter = verticalVelocityJitterPerSecond * secondsPerUpdate;
 constexpr double opacityIncrementPerTick = static_cast<double>(updateIntervalMsec) / fadeInDurationMsec;
-
-/** @brief 데모 객체를 8개 서버 채널에 안정적으로 분산합니다. */
-int demoChannelIndex(const QString& objectId) { return static_cast<int>(qHash(objectId) % 8U); }
 
 /**
  * @brief               지정 범위 안의 난수를 생성합니다.
@@ -196,6 +194,65 @@ void DigitalTwinSimulationWorker::start() {
 }
 
 /**
+ * @brief            데모가 객체를 돌아다니게 할 활성 구역 수를 정합니다.
+ * @param zoneCount  활성 구역 수
+ */
+void DigitalTwinSimulationWorker::setZoneCount(int zoneCount) { zoneCount_ = std::max(1, zoneCount); }
+
+/**
+ * @brief         객체가 들고 있는 (구역, 구역 안 x)에서 띠 전체 기준 x를 복원합니다.
+ * @param object  대상 객체
+ * @return        띠 전체 기준 x
+ *
+ * @details 전역 좌표를 따로 들고 다니지 않습니다. 구역 여백까지 양 끝 구역에 붙여 두었기
+ *          때문에 구역 번호와 구역 안 x를 더하면 언제나 전역 x와 정확히 같습니다.
+ */
+double DigitalTwinSimulationWorker::globalXForObject(const DigitalTwinObject& object) const {
+    const int zoneIndex = object.channelIndex < 0 ? 0 : object.channelIndex / digitalTwinChannelsPerZone;
+
+    return static_cast<double>(zoneIndex) + object.position.x();
+}
+
+/**
+ * @brief          띠 전체 기준 x를 구역과 구역 안 좌표로 쪼개 객체에 씁니다.
+ * @param object   대상 객체
+ * @param globalX  띠 전체 기준 x
+ *
+ * @details 채널은 구역 안 사분면까지 보고 정하므로 **y가 확정된 뒤에** 부르세요.
+ *          이 한 곳이 "객체가 있는 채널 = 지금 서 있는 자리"를 만듭니다.
+ */
+void DigitalTwinSimulationWorker::applyGlobalX(DigitalTwinObject* object, double globalX) const {
+    if (!object) {
+        return;
+    }
+
+    const int zoneIndex = digitalTwinDemoZoneForGlobalX(globalX, zoneCount_);
+    object->position.setX(globalX - static_cast<double>(zoneIndex));
+    object->channelIndex = zoneIndex * digitalTwinChannelsPerZone +
+                           digitalTwinDemoSectorForLocalPoint(object->position.x(), object->position.y());
+}
+
+/**
+ * @brief           스포너가 준 0~1 좌표를 활성 구역 전체 띠 기준으로 늘립니다.
+ * @param spawnerX  스포너가 준 x
+ * @return          띠 전체 기준 x
+ *
+ * @details 경계 **바깥 여백은 늘리지 않습니다.** 같이 늘리면 진입·이탈 판정 거리가 구역 수만큼
+ *          벌어져, 새 객체가 한참 투명한 채로 들어옵니다.
+ */
+double DigitalTwinSimulationWorker::globalXFromSpawnerX(double spawnerX) const {
+    if (spawnerX < 0.0) {
+        return spawnerX;
+    }
+
+    if (spawnerX > 1.0) {
+        return static_cast<double>(zoneCount_) + (spawnerX - 1.0);
+    }
+
+    return spawnerX * static_cast<double>(zoneCount_);
+}
+
+/**
  * @brief   주기적인 상태 계산을 중지합니다.
  */
 void DigitalTwinSimulationWorker::stop() {
@@ -224,7 +281,7 @@ void DigitalTwinSimulationWorker::updateObjects() {
 void DigitalTwinSimulationWorker::setupDemoObjects() {
     objects_ = objectSpawner_->createInitialObjects(initialObjectCount);
     for (DigitalTwinObject& object : objects_) {
-        object.channelIndex = demoChannelIndex(object.objectId);
+        applyGlobalX(&object, globalXFromSpawnerX(object.position.x()));
         object.opacity = 1.0;
     }
 
@@ -267,23 +324,29 @@ void DigitalTwinSimulationWorker::updateObjectMotion(DigitalTwinObject* object) 
                     object->velocity.y() + randomRange(-verticalVelocityJitter, verticalVelocityJitter)));
     }
 
-    QPointF nextPosition = object->position + object->velocity;
+    // x는 활성 구역을 가로로 이어 붙인 띠 위에서 움직인다. 구역 경계를 넘으면 채널과
+    // 구역이 함께 바뀌므로, 객체가 한 구역에 갇히지 않고 옆 구역으로 건너간다
+    const double nextGlobalX = globalXForObject(*object) + object->velocity.x();
+    double nextY = object->position.y() + object->velocity.y();
 
-    if (nextPosition.y() < objectMinY || nextPosition.y() > objectMaxY) {
+    if (nextY < objectMinY || nextY > objectMaxY) {
         object->velocity.setY(-object->velocity.y());
-        nextPosition.setY(std::clamp(nextPosition.y(), objectMinY, objectMaxY));
+        nextY = std::clamp(nextY, objectMinY, objectMaxY);
     }
 
-    object->position = nextPosition;
+    // 채널은 사분면까지 보고 정하므로 y를 먼저 확정한 뒤에 자리를 쓴다
+    object->position.setY(nextY);
+    applyGlobalX(object, nextGlobalX);
 
     const double fadeInOpacity = std::min(1.0, object->opacity + opacityIncrementPerTick);
+    const double spanEndX = static_cast<double>(zoneCount_);
     double edgeOpacity = 1.0;
-    if (object->position.x() < 0.0) {
+    if (nextGlobalX < 0.0) {
+        edgeOpacity =
+            std::clamp((nextGlobalX + horizontalEdgeTransitionPadding) / horizontalEdgeTransitionPadding, 0.0, 1.0);
+    } else if (nextGlobalX > spanEndX) {
         edgeOpacity = std::clamp(
-            (object->position.x() + horizontalEdgeTransitionPadding) / horizontalEdgeTransitionPadding, 0.0, 1.0);
-    } else if (object->position.x() > 1.0) {
-        edgeOpacity = std::clamp(
-            (1.0 + horizontalEdgeTransitionPadding - object->position.x()) / horizontalEdgeTransitionPadding, 0.0, 1.0);
+            (spanEndX + horizontalEdgeTransitionPadding - nextGlobalX) / horizontalEdgeTransitionPadding, 0.0, 1.0);
     }
     object->opacity = std::min(fadeInOpacity, edgeOpacity);
 }
@@ -294,10 +357,11 @@ void DigitalTwinSimulationWorker::updateObjectMotion(DigitalTwinObject* object) 
 void DigitalTwinSimulationWorker::removeExitedObjects() {
     for (qsizetype index = objects_.size() - 1; index >= 0; --index) {
         const DigitalTwinObject& object = objects_[index];
-        const double x = object.position.x();
+        const double x = globalXForObject(object);
         const double velocityX = object.velocity.x();
         const bool leftExit = x <= -horizontalEdgeTransitionPadding && velocityX < 0.0;
-        const bool rightExit = x >= 1.0 + horizontalEdgeTransitionPadding && velocityX > 0.0;
+        const bool rightExit =
+            x >= static_cast<double>(zoneCount_) + horizontalEdgeTransitionPadding && velocityX > 0.0;
 
         if (leftExit || rightExit) {
             objects_.removeAt(index);
@@ -316,7 +380,7 @@ void DigitalTwinSimulationWorker::spawnObjectIfNeeded() {
     }
 
     DigitalTwinObject object = objectSpawner_->createEnteringObject();
-    object.channelIndex = demoChannelIndex(object.objectId);
+    applyGlobalX(&object, globalXFromSpawnerX(object.position.x()));
     object.opacity = 0.0;
     objects_.append(std::move(object));
     scheduleNextSpawn();
@@ -357,7 +421,8 @@ void DigitalTwinSimulationWorker::updateRiskLevels() {
         for (int secondIndex = firstIndex + 1; secondIndex < objects_.size(); ++secondIndex) {
             const int firstChannelIndex = objects_[firstIndex].channelIndex;
             const int secondChannelIndex = objects_[secondIndex].channelIndex;
-            if (firstChannelIndex < 0 || secondChannelIndex < 0 || firstChannelIndex / 4 != secondChannelIndex / 4) {
+            if (firstChannelIndex < 0 || secondChannelIndex < 0 ||
+                firstChannelIndex / digitalTwinChannelsPerZone != secondChannelIndex / digitalTwinChannelsPerZone) {
                 continue;
             }
 

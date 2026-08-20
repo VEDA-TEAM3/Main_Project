@@ -404,7 +404,7 @@
   </customwidget>
   <customwidget>
    <class>DigitalTwinMapWidget</class>
-   <extends>QGraphicsView</extends>
+   <extends>QWidget</extends>
    <header>ui/DigitalTwinMapWidget.h</header>
   </customwidget>
  </customwidgets>

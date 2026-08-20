@@ -6,19 +6,18 @@ import "Theme.js" as Theme
 Item {
     id: root
 
-    property string titleText: "CCTV 실시간 모니터링"
+    property string titleText: "CCTV Live Monitoring"
     property bool reportEnabled: true
     signal reportRequested(int channelNumber)
 
     implicitHeight: 36
     clip: true
 
-    // 다른 카드 제목과 같은 높이에 놓이도록 위쪽에 붙입니다.
     PanelHeader {
         anchors.left: parent.left
         anchors.right: actionRow.left
         anchors.rightMargin: 12
-        anchors.top: parent.top
+        anchors.verticalCenter: parent.verticalCenter
         titleText: root.titleText
     }
 
@@ -30,7 +29,9 @@ Item {
         spacing: 7
 
         Rectangle {
-            width: 82
+            // 폭은 내용에 맞춰 늘립니다. 숫자로 박아 두면 글꼴이 조금만 넓어져도 "Report"가
+            // 잘려 나가는데, 눈에는 글자가 아니라 여백이 없는 것으로 보입니다
+            width: reportContent.width + 24
             height: 34
             radius: 5
             color: Theme.surfaceRaised
@@ -38,8 +39,10 @@ Item {
             border.color: Theme.borderStrong
 
             Row {
+                id: reportContent
+
                 anchors.centerIn: parent
-                spacing: 5
+                spacing: 6
 
                 Image {
                     anchors.verticalCenter: parent.verticalCenter
@@ -49,11 +52,12 @@ Item {
                     sourceSize: Qt.size(40, 40)
                     fillMode: Image.PreserveAspectFit
                     smooth: true
+                    mipmap: true
                 }
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "신고"
+                    text: "Report"
                     color: Theme.text
                     font.family: Theme.fontFamily
                     font.pixelSize: 14

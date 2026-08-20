@@ -14,7 +14,7 @@ PanelFrame {
         spacing: 18
 
         Text {
-            text: "상태 색상 범례"
+            text: "Status Legend"
             color: Theme.text
             font.family: Theme.fontFamily
             font.pixelSize: 14
@@ -23,18 +23,18 @@ PanelFrame {
         }
 
         Rectangle { width: 1; height: 18; color: Theme.border }
-        LegendItem { statusText: "● 정상"; description: ": 안전 상태"; statusColor: Theme.safe }
+        LegendItem { statusText: "● NORMAL"; description: "Safe"; statusColor: Theme.safe }
         Rectangle { width: 1; height: 18; color: Theme.border }
-        LegendItem { statusText: "● 주의"; description: ": 유의 필요"; statusColor: Theme.warning }
+        LegendItem { statusText: "● WARNING"; description: "Caution"; statusColor: Theme.warning }
         Rectangle { width: 1; height: 18; color: Theme.border }
-        LegendItem { statusText: "● 위험"; description: ": 즉시 대응 필요"; statusColor: Theme.danger }
+        LegendItem { statusText: "● DANGER"; description: "Act now"; statusColor: Theme.danger }
     }
 
     component LegendItem: Row {
         required property string statusText
         required property string description
         required property color statusColor
-        spacing: 5
+        spacing: 8
 
         Text {
             text: parent.statusText

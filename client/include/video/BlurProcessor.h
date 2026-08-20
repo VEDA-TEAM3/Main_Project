@@ -29,16 +29,8 @@ public:
     void clear();
     void apply(GstVideoFrame& frame);
 
-    /** @brief 프레임 시각과 실제로 고른 metadata 시각의 어긋남을 모은 진단값 */
-    struct MatchStatistics {
-        qint64 meanDeltaMsec = 0;  ///< metadata ts - 프레임 시각의 평균. 양수면 metadata가 더 미래다
-        qint64 matchedCount = 0;   ///< 맞는 metadata를 찾은 프레임 수
-        qint64 missedCount = 0;    ///< 못 찾아 블러를 건너뛴 프레임 수
-    };
-
 private:
     QVector<QRectF> regionsFor(qint64 sourceTimestamp) const;
-    MatchStatistics takeMatchStatistics() const;
 
     BlurProcessorConfig config_;
     QElapsedTimer metadataClock_;
@@ -47,10 +39,6 @@ private:
     QVector<BlurFrameData> history_;
     qint64 latestSourceTimestamp_ = 0;
     qint64 lastMetadataArrivalMsec_ = 0;
-    // 아래 셋은 regionsFor()가 이미 잡고 있는 mutex_로 보호한다
-    mutable qint64 matchDeltaSumMsec_ = 0;
-    mutable qint64 matchedFrameCount_ = 0;
-    mutable qint64 missedFrameCount_ = 0;
     std::vector<guint8> scratch_;
     std::atomic_int channelIndex_{-1};
     std::atomic_bool faceEnabled_{true};

@@ -213,7 +213,17 @@ void LoginWindow::completeSignIn(const AuthenticatedUser& user) {
  *
  *          close()가 아니라 hide()입니다. close()는 마지막 창 닫힘 판정을 타서 앱이 종료됩니다.
  */
-void LoginWindow::handleExitFinished() { hide(); }
+void LoginWindow::handleExitFinished() {
+    hide();
+
+    // 메인 창은 로그인 화면에서 focus를 뺏지 않으려고 WA_ShowWithoutActivating으로 떴다.
+    // 로그인 창이 사라지는 지금이 focus를 넘길 자리다 — 넘기지 않으면 사용자가 대시보드를
+    // 한 번 클릭해야 키 입력이 들어간다
+    if (QWidget* owner = parentWidget()) {
+        owner->raise();
+        owner->activateWindow();
+    }
+}
 
 void LoginWindow::setQmlValue(const char* name, const QVariant& value) {
     if (loginView_ && loginView_->rootObject()) {

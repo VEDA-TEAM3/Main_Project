@@ -4,12 +4,12 @@ import "Theme.js" as Theme
 Item {
     id: root
 
-    property string titleText: "<font color=\"#a8d4ff\">Wise AI</font> 기반 주차장 디지털 트윈 관제 시스템"
-    property string areaText: "제 1구역"
+    property string titleText: "Parking <font color=\"#6fb9d6\">VMS</font>"
+    property string areaText: "Zone 1"
     property string dateTimeText: ""
-    property string systemStatusText: "● 연결 중"
+    property string systemStatusText: "● Connecting"
     property color systemStatusColor: "#ff4b4b"
-    property string cctvStatusText: "● 연결 중"
+    property string cctvStatusText: "● Connecting"
     property color cctvStatusColor: "#ff4b4b"
 
     property alias areaTapHandler: areaTapHandler
@@ -23,8 +23,7 @@ Item {
         anchors.fill: parent
         radius: 6
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#174b69" }
-            GradientStop { position: 0.38; color: Theme.surfaceRaised }
+            GradientStop { position: 0.0; color: Theme.surfaceRaised }
             GradientStop { position: 1.0; color: Theme.surface }
         }
         border.width: 1
@@ -102,7 +101,7 @@ Item {
             }
 
             StatusLabel {
-                title: "통신 상태"
+                title: "Network"
                 status: root.systemStatusText
                 statusColor: root.systemStatusColor
             }
@@ -114,7 +113,7 @@ Item {
             }
 
             StatusLabel {
-                title: "CCTV 상태"
+                title: "CCTV"
                 status: root.cctvStatusText
                 statusColor: root.cctvStatusColor
             }

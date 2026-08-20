@@ -250,62 +250,6 @@ void checkDisabledTargetsLeaveFrame() {
     gst_video_frame_unmap(&frame);
     gst_buffer_unref(buffer);
 }
-/**
- * @brief 블러 정합 보정값이 옳은 방향으로 걸리는지 검사합니다.
- *
- * @details alignmentOffsetMs는 부호를 뒤집어도 컴파일이 되고 조용히 어긋나기만 한다. 보정값보다
- *          좁은 허용 오차를 주고, 같은 시각의 metadata는 빗나가고 보정값만큼 과거의 metadata가
- *          맞는지 확인해 방향을 못 박는다.
- */
-void checkAlignmentOffsetShiftsMatch() {
-    GstVideoInfo info;
-    gst_video_info_set_format(&info, GST_VIDEO_FORMAT_NV12, frameWidth, frameHeight);
-
-    constexpr qint64 alignmentOffsetMsec = 400;
-    BlurProcessorConfig config = makeConfig();
-    config.alignmentOffsetMsec = alignmentOffsetMsec;
-    config.matchToleranceMsec = 250;
-    // 이 경로가 열려 있으면 빗나간 metadata도 직전 값으로 유지돼 방향 검사가 무의미해진다
-    config.holdLastMetadataMsec = 0;
-
-    const auto centerChangedForMetadataAt = [&](qint64 sourceTimestamp) {
-        BlurProcessor processor(config);
-        GstBuffer* buffer = createPatternBuffer(info);
-        if (!buffer) {
-            return false;
-        }
-
-        processor.observeVideoBuffer(buffer);
-        BlurFrameData metadata;
-        metadata.channelIndex = 0;
-        metadata.sourceTimestamp = sourceTimestamp;
-        BlurRegionData region;
-        region.id = 1;
-        region.targetType = BlurTargetType::Face;
-        region.normalizedBox = QRectF(0.375, 0.375, 0.25, 0.25);
-        metadata.regions.append(region);
-        processor.submitFrame(metadata);
-
-        bool changed = false;
-        GstVideoFrame frame;
-        if (gst_video_frame_map(&frame, &info, buffer, GST_MAP_READWRITE) == TRUE) {
-            const guint8 centerBefore = lumaAt(frame, frameWidth / 2, frameHeight / 2);
-            processor.apply(frame);
-            changed = lumaAt(frame, frameWidth / 2, frameHeight / 2) != centerBefore;
-            gst_video_frame_unmap(&frame);
-        }
-
-        gst_buffer_unref(buffer);
-        return changed;
-    };
-
-    // 프레임의 UTC 시각은 PTS 0을 지금으로 잡아 추정된다
-    const qint64 frameUtcMsec = QDateTime::currentMSecsSinceEpoch();
-    check(!centerChangedForMetadataAt(frameUtcMsec),
-          "metadata at the frame time must fall outside the tolerance once the offset is applied");
-    check(centerChangedForMetadataAt(frameUtcMsec - alignmentOffsetMsec),
-          "a positive alignment offset must match metadata that far in the past");
-}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -314,7 +258,6 @@ int main(int argc, char* argv[]) {
     checkNv12RegionBlur();
     checkScratchReuseIsStable();
     checkDisabledTargetsLeaveFrame();
-    checkAlignmentOffsetShiftsMatch();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

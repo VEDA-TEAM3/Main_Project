@@ -5,7 +5,9 @@
 #include <QtGlobal>
 #include <limits>
 
-/// 도면 격자가 4열 x 2행이므로 구역은 최대 8개다. 더 늘리려면 DigitalTwinMapSceneBuilder의 격자부터 바꿔야 한다
+/// 도면 격자가 4열 x 2행이므로 구역은 최대 8개다.
+/// 더 늘리려면 qml/ParkingPlan.js의 ZONE_COLS/ZONE_ROWS와 홀 가로세로비부터 바꿔야 한다
+/// (셀이 정사각형이 아니면 객체의 가로·세로 배율이 어긋난다)
 inline constexpr int digitalTwinMaximumZoneCount = 8;
 
 struct DigitalTwinWorldConfig {

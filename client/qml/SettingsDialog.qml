@@ -42,7 +42,7 @@ PanelFrame {
     property int currentZoneIndex: 0
     /// 목록에서 고른 줄. 실행 중인 구역이면 주소를 보여 주고, 빈 자리면 추가 입력을 보여 줍니다.
     property int selectedRow: 0
-    property int zoneCapacity: 8
+    property int zoneCapacity: 6
     property string zoneMessage: ""
     property bool zoneMessageError: false
     property alias zoneName: zoneNameField.text

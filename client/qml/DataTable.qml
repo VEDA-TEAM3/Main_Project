@@ -128,6 +128,7 @@ Item {
                     sourceSize: Qt.size(32, 32)
                     fillMode: Image.PreserveAspectFit
                     smooth: true
+                    mipmap: true
                 }
 
                 Text {

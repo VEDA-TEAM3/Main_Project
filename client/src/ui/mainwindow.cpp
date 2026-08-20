@@ -355,9 +355,9 @@ void MainWindow::setupQuickDashboardChrome() {
  * @details 장비 제어/상태 카드는 제목 없이 채널 카드만 보여주므로 대상에서 제외합니다.
  */
 void MainWindow::setupQuickPanelHeaders() {
-    addQuickPanelHeader(ui_->mapCardLayout, QStringLiteral("디지털 트윈 2D 맵"));
-    addQuickPanelHeader(ui_->objectListLayout, QStringLiteral("실시간 객체 목록"));
-    addQuickPanelHeader(ui_->eventLogLayout, QStringLiteral("이벤트 로그"));
+    addQuickPanelHeader(ui_->mapCardLayout, QStringLiteral("Digital Twin Map"));
+    addQuickPanelHeader(ui_->objectListLayout, QStringLiteral("Live Objects"));
+    addQuickPanelHeader(ui_->eventLogLayout, QStringLiteral("Event Log"));
 }
 
 /**
@@ -578,7 +578,7 @@ void MainWindow::updateCurrentDateTime() {
  * @param connected  MQTT broker와 정상적으로 연결되었다면 true
  */
 void MainWindow::updateSystemStatus(bool connected) {
-    setQuickTopBarProperty("systemStatusText", connected ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"));
+    setQuickTopBarProperty("systemStatusText", connected ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
     setQuickTopBarProperty("systemStatusColor", connected ? normalStatusColor : disconnectedStatusColor);
 }
 
@@ -609,7 +609,7 @@ void MainWindow::updateStreamConnectionStatus() {
 
     allStreamsReady = hasEnabledStream && allStreamsReady;
 
-    setQuickTopBarProperty("cctvStatusText", allStreamsReady ? QStringLiteral("● 정상") : QStringLiteral("● 연결 중"));
+    setQuickTopBarProperty("cctvStatusText", allStreamsReady ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
     setQuickTopBarProperty("cctvStatusColor", allStreamsReady ? normalStatusColor : disconnectedStatusColor);
 }
 
@@ -885,7 +885,7 @@ void MainWindow::setupVideoAreaSelector() {
         return;
     }
 
-    setQuickTopBarProperty("areaText", videoConfig_.areas[currentVideoAreaIndex_].name);
+    setQuickTopBarProperty("areaText", QStringLiteral("Zone %1").arg(currentVideoAreaIndex_ + 1));
     ui_->videoAreaStackedWidget->setCurrentIndex(currentVideoAreaIndex_);
 }
 
@@ -1043,7 +1043,7 @@ void MainWindow::switchVideoArea(int areaIndex) {
     currentVideoAreaIndex_ = areaIndex;
     syncStreamPresentation();
     ui_->videoAreaStackedWidget->setCurrentIndex(areaIndex);
-    setQuickTopBarProperty("areaText", videoConfig_.areas[currentVideoAreaIndex_].name);
+    setQuickTopBarProperty("areaText", QStringLiteral("Zone %1").arg(currentVideoAreaIndex_ + 1));
     if (deviceStatusPanel_) {
         deviceStatusPanel_->setAreaIndex(areaIndex);
     }

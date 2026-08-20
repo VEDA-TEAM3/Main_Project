@@ -583,11 +583,8 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
         return;
     }
 
-    // syncOffsetMs는 RTCP sender clock이 없어 PTS 기준점으로 추정할 때만 걸리는 보정이고,
-    // alignmentOffsetMs는 어느 경우든 항상 걸리는 수동 보정이다. 영상 쪽 alignmentDelayMs가
-    // 파이프라인을 통째로 늦추는 것과 달리 이쪽은 metadata를 고르는 시각만 옮긴다.
     const qint64 fallbackOffset = frameTimestamp->senderClock ? 0 : config_.syncOffsetMsec;
-    const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset - config_.alignmentOffsetMsec;
+    const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset;
     const QVector<QRectF> regions = regionsFor(targetTimestamp);
     if (regions.isEmpty()) {
         return;
@@ -610,13 +607,8 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
     qint64 lastLogMsec = lastApplyLogMsec_.load(std::memory_order_relaxed);
     if (nowMsec - lastLogMsec >= config_.debugLogIntervalMsec &&
         lastApplyLogMsec_.compare_exchange_strong(lastLogMsec, nowMsec, std::memory_order_relaxed)) {
-        // matchDeltaMs가 0에서 멀면 그만큼을 blur.alignmentOffsetMs에 부호 그대로 넣으면 맞는다.
-        // missed는 metadata가 제때 도착하지 못한 프레임 수라 video.receiver.alignmentDelayMs가
-        // 모자란지를 알려 준다. 두 값은 원인이 달라 서로 대신하지 못한다
-        const MatchStatistics statistics = takeMatchStatistics();
         qInfo().noquote() << QStringLiteral(
-                                 "[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6 "
-                                 "processingUs=%7 matchDeltaMs=%8 matched=%9 missed=%10")
+                                 "[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6 processingUs=%7")
                                  .arg(channelIndex_.load(std::memory_order_relaxed))
                                  .arg(regions.size())
                                  .arg(GST_VIDEO_FRAME_WIDTH(&frame))
@@ -624,29 +616,8 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
                                  .arg(targetTimestamp)
                                  .arg(frameTimestamp->senderClock ? QStringLiteral("rtcp")
                                                                   : QStringLiteral("pts-anchor"))
-                                 .arg(processingTimer.nsecsElapsed() / 1000)
-                                 .arg(statistics.meanDeltaMsec)
-                                 .arg(statistics.matchedCount)
-                                 .arg(statistics.missedCount);
+                                 .arg(processingTimer.nsecsElapsed() / 1000);
     }
-}
-
-/**
- * @brief   모아 둔 정합 진단값을 읽고 초기화합니다.
- * @return  직전 구간의 평균 어긋남과 성공·실패 프레임 수
- */
-BlurProcessor::MatchStatistics BlurProcessor::takeMatchStatistics() const {
-    QMutexLocker locker(&mutex_);
-    MatchStatistics statistics;
-    statistics.matchedCount = matchedFrameCount_;
-    statistics.missedCount = missedFrameCount_;
-    if (matchedFrameCount_ > 0) {
-        statistics.meanDeltaMsec = matchDeltaSumMsec_ / matchedFrameCount_;
-    }
-    matchDeltaSumMsec_ = 0;
-    matchedFrameCount_ = 0;
-    missedFrameCount_ = 0;
-    return statistics;
 }
 
 /**
@@ -657,7 +628,6 @@ BlurProcessor::MatchStatistics BlurProcessor::takeMatchStatistics() const {
 QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
     QMutexLocker locker(&mutex_);
     if (history_.isEmpty()) {
-        ++missedFrameCount_;
         return {};
     }
 
@@ -680,14 +650,7 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
     const bool canHoldPrevious = previousFrame && sourceTimestamp >= previousFrame->sourceTimestamp &&
                                  sourceTimestamp - previousFrame->sourceTimestamp <= config_.holdLastMetadataMsec;
     const BlurFrameData* selectedFrame = nearestMatches ? nearest : (canHoldPrevious ? previousFrame : nullptr);
-    // 어긋남은 "고른 metadata"가 아니라 "가장 가까운 metadata" 기준으로 잰다. 유지 경로로 넘어간
-    // 프레임까지 섞으면 평균이 holdLastMetadataMs 쪽으로 끌려가 보정값을 못 읽는다
-    if (nearest) {
-        matchDeltaSumMsec_ += nearest->sourceTimestamp - sourceTimestamp;
-        ++matchedFrameCount_;
-    }
     if (!selectedFrame) {
-        ++missedFrameCount_;
         return {};
     }
 

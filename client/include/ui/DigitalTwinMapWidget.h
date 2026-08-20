@@ -1,38 +1,40 @@
 #pragma once
 
 #include <QElapsedTimer>
-#include <QGraphicsScene>
-#include <QGraphicsView>
 #include <QHash>
+#include <QPointF>
 #include <QRectF>
 #include <QThread>
 #include <QTimer>
+#include <QVariantList>
 #include <QVector>
-#include <array>
+#include <QWidget>
 #include <memory>
 
+#include "model/DeviceStatus.h"
 #include "model/DigitalTwinMapDisplaySettings.h"
 #include "model/DigitalTwinRuntimeConfig.h"
 #include "model/DigitalTwinTypes.h"
 #include "model/MqttRealtimeData.h"
-#include "overlays/ChannelRiskOverlay.h"
-#include "overlays/DangerBorderOverlay.h"
-#include "overlays/DeviceStatusMapOverlay.h"
-#include "ui/DigitalTwinMapSceneBuilder.h"
 #include "ui/DigitalTwinZoneIndex.h"
 
 class DigitalTwinSimulationWorker;
 class DigitalTwinObjectStyleProvider;
 class RiskObjectTracker;
-class QGraphicsPathItem;
-class QGraphicsPixmapItem;
-class QGraphicsSimpleTextItem;
-class QMouseEvent;
-class QPainterPath;
-class QResizeEvent;
-class QShowEvent;
+class QQuickItem;
+class QQuickWidget;
 
-class DigitalTwinMapWidget : public QGraphicsView {
+/**
+ * @brief 디지털 트윈 2D 맵.
+ *
+ * @details 도면과 모든 표시는 qml/DigitalTwinMap.qml이 그립니다. 이 클래스는 데이터만 맡습니다 —
+ *          시뮬레이션 worker, 실시간 위험 프레임 추적, 중앙 이벤트, 장치 상태를 모아 QML 속성에
+ *          밀어 넣고, QML이 올려 보내는 구역 클릭을 다시 신호로 냅니다.
+ *
+ *          QML로 넘기는 목록에는 **QVariantMap을 담지 않습니다.** 평평한 배열을 QVariant로 감싸
+ *          넘기고 QML이 자리 순서로 읽습니다(CLAUDE.md의 DeviceStatusPanel 항목과 같은 이유).
+ */
+class DigitalTwinMapWidget : public QWidget {
     Q_OBJECT
 
 public:
@@ -57,84 +59,87 @@ signals:
     /** @brief 지도에서 CCTV가 있는 구역을 클릭했을 때 그 구역 인덱스를 알립니다. */
     void zoneSelected(int zoneIndex);
 
+private slots:
+    /** @brief QML 구역 클릭을 받아 다시 알립니다. QML 루트의 신호는 문자열로만 연결됩니다. */
+    void handleZoneClicked(int zoneIndex);
+
 protected:
-    void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
 
 private:
-    struct DemoVisualItem {
+    /// 객체 하나의 표시 상태. 위치는 전부 도면(plan) 좌표다
+    struct ObjectVisual {
         DigitalTwinObject object;
-        QGraphicsPixmapItem* marker = nullptr;
-        QGraphicsSimpleTextItem* label = nullptr;
-        QGraphicsPathItem* trail = nullptr;
         QVector<QPointF> recentPositions;
-        /// 화면상 이동 벡터의 평활값. 아이콘 방향을 여기서 낸다
-        QPointF smoothedSceneVelocity;
-        QPointF previousScenePosition;
-        /// 마커에 실제로 적용해 둔 회전 각도. 미세한 변화로 device 캐시를 깨지 않도록 비교 기준으로 쓴다
+        /// 화면상 이동 벡터의 지수이동평균. 아이콘 방향을 여기서 낸다
+        QPointF smoothedPlanVelocity;
+        QPointF planPosition;
+        QPointF previousPlanPosition;
         double visibleRotationDegrees = 0.0;
-        DigitalTwinRiskLevel visibleRiskLevel = DigitalTwinRiskLevel::Normal;
-        bool hasPreviousScenePosition = false;
+        bool hasPreviousPlanPosition = false;
         bool hasRotation = false;
     };
 
-    void ensureSceneReady();
-    void setupScene();
+    /// 채널 하나의 장치 수신 상태. 화면에는 단계 번호로만 나간다
+    struct DeviceRecord {
+        DeviceChannelStatus status;
+        bool hasStatus = false;
+        bool receivedInCurrentSession = false;
+    };
+
+    void ensureMapReady();
     void setupSimulationWorker();
     /// 현재 구역 수가 감당하는 전체 채널 수
     int liveChannelCount() const { return zoneCount_ * digitalTwinChannelsPerZone; }
     void applySimulationSnapshot(const DigitalTwinSnapshot& snapshot);
     void applyObjectUpdates(const DigitalTwinSnapshot& snapshot);
     void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
-    int zoneIndexAtScenePosition(const QPointF& scenePosition) const;
+    void publishObjects();
+    void publishDeviceStates();
+    void publishDisplaySettings();
+    void setMapProperty(const char* name, const QVariant& value);
     void rebuildLiveSnapshot();
     int activeSeverityForChannel(int channelIndex) const;
     QVector<DigitalTwinRiskLevel> channelRiskLevels(const DigitalTwinSnapshot& snapshot) const;
     bool hasActiveCentralDanger() const;
+    void setDangerActive(bool active);
     void expireStaleLiveFrames();
-    void createVisualItem(const DigitalTwinObject& object);
-    void updateVisualItem(DemoVisualItem* visualItem);
-    void updateMarkerPixmap(DemoVisualItem* visualItem);
-    void removeMissingVisualItems(const QVector<DigitalTwinObject>& objects);
-    void removeVisualItemAt(qsizetype visualIndex);
-    void rebuildVisualItemIndexes();
-    void updateObjectAreaRect();
-    QPointF scenePointForObject(const QPointF& position, int channelIndex) const;
-    QPainterPath createTrailPath(const QVector<QPointF>& positions) const;
-    void fitMapInView();
+    void updateObjectVisual(ObjectVisual* visual);
+    void removeMissingVisuals(const QVector<DigitalTwinObject>& objects);
+    void rebuildVisualIndexes();
+    void refreshObjectAreas();
+    QPointF planPointForObject(const QPointF& position, int channelIndex) const;
+    QRectF demoAreaForZone(int zoneIndex) const;
+    QVector<QPointF> visibleTrail(const QVector<QPointF>& positions) const;
 
-    QGraphicsScene scene_;
+    QQuickWidget* mapView_ = nullptr;
+    QQuickItem* mapRoot_ = nullptr;
     QThread simulationThread_;
-    // ChannelRiskOverlay는 QTimer와 unique_ptr을 들고 있어 복사도 이동도 되지 않는다
-    QVector<std::shared_ptr<ChannelRiskOverlay>> channelRiskOverlays_;
-    DeviceStatusMapOverlay deviceStatusMapOverlay_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
-    DangerBorderOverlay dangerBorderOverlay_;
-    std::shared_ptr<DigitalTwinMapSceneBuilder> sceneBuilder_;
     std::shared_ptr<DigitalTwinObjectStyleProvider> objectStyleProvider_;
     std::shared_ptr<DigitalTwinSimulationWorker> simulationWorker_;
     std::unique_ptr<RiskObjectTracker> riskObjectTracker_;
-    QVector<DemoVisualItem> demoItems_;
-    QHash<QString, qsizetype> visualItemIndexes_;
+    QVector<ObjectVisual> visuals_;
+    QHash<QString, qsizetype> visualIndexes_;
     QHash<QString, qint64> latestCentralEventSourceTimes_;
     QHash<QString, CentralEventData> activeCentralEvents_;
+    QVector<DeviceRecord> deviceChannels_;
     QElapsedTimer liveClock_;
     QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
-    qint64 lastLiveSnapshotPublishMsec_ = 0;
-    /// 이동 경로에 마지막으로 점을 남긴 수신 샘플 번호. 렌더 보간 프레임을 걸러 내는 기준이다
-    qint64 lastTrailSampleSequence_ = -1;
-    /// 지금 처리 중인 스냅샷이 새 수신 샘플인지. applyObjectUpdates가 한 번 정하고
-    /// createVisualItem/updateVisualItem이 함께 읽는다
-    bool trailSampleFrame_ = true;
-    DigitalTwinMapSceneLayout mapLayout_;
+    /// 구역별 객체 표시 영역. QML의 ParkingPlan.js가 원본이라 거기서 읽어 온다
     QVector<QRectF> objectAreaRects_;
-    /// 활성 CCTV 구역 수. scene을 세우기 전에 configureLiveTracking이 실제 값으로 바꾼다
+    qint64 lastLiveSnapshotPublishMsec_ = 0;
+    /// 이동 경로에는 마지막으로 점을 찍은 수신 샘플 번호. 렌더 보간 프레임을 걸러 내는 기준이다
+    qint64 lastTrailSampleSequence_ = -1;
+    /// 지금 처리 중인 스냅샷이 새 수신 샘플인지. applyObjectUpdates가 한 번 정하고 함께 읽는다
+    bool trailSampleFrame_ = true;
+    /// 활성 CCTV 구역 수. 지도를 세우기 전에 configureLiveTracking이 실제 값으로 바꾼다
     int zoneCount_ = 2;
-    bool sceneReady_ = false;
+    bool mapReady_ = false;
     bool liveMode_ = false;
+    bool deviceSignalAvailable_ = false;
+    bool dangerActive_ = false;
 };

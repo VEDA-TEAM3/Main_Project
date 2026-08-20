@@ -24,7 +24,9 @@ PanelFrame {
     readonly property color riskColor: root.riskText === "위험" ? Theme.danger
                                                                 : (root.riskText === "주의" ? Theme.warning : Theme.safe)
 
-    implicitWidth: root.mode === "area" ? 590 : 470
+    // 구역 선택은 4열 2행 버튼 여덟 개가 전부다. 버튼 하나가 148px이 되도록 거꾸로 잡은
+    // 크기다 (칸 164 x 4열 + 좌우 여백 68)
+    implicitWidth: root.mode === "area" ? 724 : 470
     implicitHeight: root.mode === "area" ? 280 : (root.reportMode ? 288 : 230)
     radius: 0
     color: Theme.surfaceRaised
@@ -53,6 +55,7 @@ PanelFrame {
                     sourceSize: Qt.size(60, 60)
                     fillMode: Image.PreserveAspectFit
                     smooth: true
+                    mipmap: true
                 }
 
                 Text {
@@ -204,8 +207,8 @@ PanelFrame {
                     }
                 }
 
-                // 구역 선택은 안내 문구 없이 버튼만 두고 배경 상자를 깝니다.
-                // 구역이 늘어나면 격자가 이 상자 안에서 왼쪽 위부터 계속 이어집니다.
+                // 구역은 4열 2행에 순서대로 배치하고, 미사용 칸은 비워 둡니다.
+                // 칸 수는 도면 격자(ParkingPlan.js의 ZONE_COLS x ZONE_ROWS)와 같아야 합니다.
                 Rectangle {
                     anchors.fill: parent
                     visible: root.mode === "area"
@@ -220,8 +223,8 @@ PanelFrame {
                         anchors.fill: parent
                         anchors.margins: 12
                         cellWidth: width / 4
-                        cellHeight: 48
-                        model: root.choices
+                        cellHeight: height / 2
+                        model: 8
                         currentIndex: root.selectedIndex
                         clip: true
 
@@ -229,16 +232,19 @@ PanelFrame {
                             id: choiceDelegate
 
                             required property int index
-                            required property var modelData
+                            readonly property bool available: index < root.choices.length
                             width: choiceGrid.cellWidth
                             height: choiceGrid.cellHeight
 
                             NeonButton {
                                 anchors.centerIn: parent
-                                width: parent.width - 8
-                                height: 38
-                                text: choiceDelegate.modelData
-                                selected: root.selectedIndex === choiceDelegate.index
+                                // 칸 크기를 따라가므로 창 크기를 바꾸면 버튼도 같이 조절된다.
+                                // 높이는 아래 취소·선택 버튼과 같은 38에 맞춰 한 벌로 보이게 한다
+                                width: parent.width - 16
+                                height: Math.min(38, parent.height - 12)
+                                visible: choiceDelegate.available
+                                text: choiceDelegate.available ? root.choices[choiceDelegate.index] : ""
+                                selected: choiceDelegate.available && root.selectedIndex === choiceDelegate.index
                                 animated: root.selectionAnimated
                                 onClicked: root.selectedIndex = choiceDelegate.index
                             }

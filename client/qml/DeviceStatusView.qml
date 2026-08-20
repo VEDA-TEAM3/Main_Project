@@ -78,7 +78,7 @@ Item {
                         width: parent.width
                         height: (parent.height - root.titleHeight - parent.spacing * 3) / 3
                         iconSource: "qrc:/icons/led_icon.png"
-                        tooltip: "LED 전광판"
+                        tooltip: "LED Display"
                         segments: [
                             { text: "SAFE", kind: "safe", active: card.modelData[3] },
                             { text: "WARNING", kind: "warning", active: card.modelData[4] },
@@ -90,7 +90,7 @@ Item {
                         width: parent.width
                         height: (parent.height - root.titleHeight - parent.spacing * 3) / 3
                         iconSource: "qrc:/icons/siren_icon.png"
-                        tooltip: "경광등"
+                        tooltip: "Beacon"
                         segments: [
                             { text: "OFF", kind: "off", active: card.modelData[6] },
                             { text: "ON", kind: "on", active: card.modelData[7] }
@@ -101,7 +101,7 @@ Item {
                         width: parent.width
                         height: (parent.height - root.titleHeight - parent.spacing * 3) / 3
                         iconSource: "qrc:/icons/buzzer_icon.png"
-                        tooltip: "부저"
+                        tooltip: "Buzzer"
                         segments: [
                             { text: "OFF", kind: "off", active: card.modelData[8] },
                             { text: "ON", kind: "on", active: card.modelData[9] }
@@ -145,6 +145,7 @@ Item {
             sourceSize: Qt.size(40, 40)
             fillMode: Image.PreserveAspectFit
             smooth: true
+            mipmap: true
         }
 
         Rectangle {
