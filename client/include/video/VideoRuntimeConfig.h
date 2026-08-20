@@ -35,6 +35,9 @@ struct BlurProcessorConfig {
     qint64 historyMsec = 0;
     qint64 matchToleranceMsec = 0;
     qint64 holdLastMetadataMsec = 0;
+    // 다음 metadata가 아직 오지 않은 구간에서 마지막 두 프레임의 이동량으로 위치를 예측하는
+    // 최대 시간. 0이면 예측하지 않고 마지막 위치를 그대로 유지한다
+    qint64 maximumExtrapolationMsec = 0;
     qsizetype maximumHistorySize = 0;
     qint64 sourceRestartGapMsec = 0;
     double paddingRatio = 0.0;

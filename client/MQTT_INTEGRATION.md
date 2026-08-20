@@ -127,7 +127,9 @@ VEDA_MAP_INVERT_Y=1
 박스 좌표는 0..1 정규화 값입니다. 빈 `blurs` 배열도 유효한 프레임이며 이전 블러가 계속 남지 않도록
 반드시 전달해야 합니다. 영상 프레임 UTC는 RTCP reference timestamp를 우선 사용하고, 없으면 PTS와
 초기 UTC anchor로 계산합니다. 클라이언트는 MQTT `ts`와 가장 가까운 블러 프레임을 찾아 적용하고 짧은
-메타데이터 공백에는 마지막 프레임을 제한 시간 동안 유지합니다.
+메타데이터 공백에는 마지막 프레임을 제한 시간 동안 유지합니다. 다음 프레임이 아직 도착하지 않은
+구간에서는 같은 `id`의 직전 두 프레임 이동량으로 위치를 예측해 덮습니다
+(`video.receiver.blur.maxExtrapolationMs`).
 
 `QTCCTV_BLUR_SYNC_OFFSET_MS`는 카메라 영상과 메타데이터의 실제 시간차를 보정합니다. 이 값은
 `video.receiver.latencyMs`나 `alignmentDelayMs`를 대신하지 않으며 현장 측정값으로 조정해야 합니다.

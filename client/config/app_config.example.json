@@ -104,6 +104,7 @@
                 "historyMs": 10000,
                 "matchToleranceMs": 250,
                 "holdLastMetadataMs": 1000,
+                "maxExtrapolationMs": 300,
                 "maximumHistorySize": 300,
                 "sourceRestartGapMs": 5000,
                 "paddingRatio": 0.18,

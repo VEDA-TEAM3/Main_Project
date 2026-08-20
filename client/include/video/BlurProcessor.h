@@ -30,7 +30,7 @@ public:
     void apply(GstVideoFrame& frame);
 
 private:
-    QVector<QRectF> regionsFor(qint64 sourceTimestamp) const;
+    QVector<QRectF> regionsFor(qint64 sourceTimestamp, qint64& metadataLagMsec) const;
 
     BlurProcessorConfig config_;
     QElapsedTimer metadataClock_;

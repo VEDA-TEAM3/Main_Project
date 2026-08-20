@@ -490,6 +490,7 @@ bool parseBlurConfig(const QJsonObject& receiver, BlurProcessorConfig& config, Q
            readInteger(blur, QStringLiteral("historyMs"), 100, 120000, config.historyMsec, error) &&
            readInteger(blur, QStringLiteral("matchToleranceMs"), 0, 10000, config.matchToleranceMsec, error) &&
            readInteger(blur, QStringLiteral("holdLastMetadataMs"), 0, 10000, config.holdLastMetadataMsec, error) &&
+           readInteger(blur, QStringLiteral("maxExtrapolationMs"), 0, 2000, config.maximumExtrapolationMsec, error) &&
            readInteger(blur, QStringLiteral("maximumHistorySize"), 1, 10000, maximumHistorySize, error) &&
            (config.maximumHistorySize = static_cast<qsizetype>(maximumHistorySize), true) &&
            readInteger(blur, QStringLiteral("sourceRestartGapMs"), 100, 120000, config.sourceRestartGapMsec, error) &&

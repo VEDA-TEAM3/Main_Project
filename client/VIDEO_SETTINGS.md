@@ -287,7 +287,7 @@ flowchart TD
     Mapper --> VideoUtc["영상 frame UTC"]
     Mqtt["MQTT blur ts 이력"] --> Match["가장 가까운 timestamp 검색"]
     VideoUtc --> Offset["fallback일 때 syncOffsetMs 보정"] --> Match
-    Match --> Hold["공백이면 제한 시간 동안 직전 좌표 유지"] --> Blur["NV12 평면별 box blur"]
+    Match --> Hold["공백이면 제한 시간 동안 직전 좌표 유지"] --> Predict["미래 metadata가 없으면 직전 두 프레임의 이동량으로 예측"] --> Blur["NV12 평면별 box blur"]
 ```
 
 ### 블러 설정
@@ -299,6 +299,7 @@ flowchart TD
 | `maximumHistorySize` | 300 | 시간 범위와 별개인 metadata 개수 상한 |
 | `matchToleranceMs` | 250 ms | 영상 시각과 metadata 시각을 직접 일치로 인정할 최대 차이 |
 | `holdLastMetadataMs` | 1,000 ms | metadata 공백에서 직전 box를 유지할 최대 시간 |
+| `maxExtrapolationMs` | 300 ms | 미래 쪽 metadata가 없을 때 직전 두 프레임의 이동량으로 위치를 예측할 최대 시간. 0이면 예측하지 않는다 |
 | `sourceRestartGapMs` | 5,000 ms | 정상 metadata 공백 뒤 timestamp 기준을 재동기화할 기준 |
 | (참고) `mqtt.dispatcher.blurTimestampRestartThresholdMs` | 2,000 ms | dispatcher에서 source timestamp 재시작을 판단하는 역행 기준. **`blur` 아래가 아니라 `mqtt.dispatcher` 아래에 있다.** 예전에 `blur.sourceTimestampRestartThresholdMs`라는 이름으로 JSON에 적혀 있었지만 읽는 코드가 없어 삭제했다 |
 | `paddingRatio` | 0.18 | 검출 box의 각 방향을 box 크기의 18%만큼 확대 |
@@ -315,6 +316,27 @@ flowchart TD
 `matchToleranceMs=250`은 이미 저장된 metadata 중 어떤 것을 **같은 시각으로 인정할지** 정하는 값이다.
 두 값을 무조건 같게 유지해야 하는 것은 아니지만, alignment delay를 줄이면 미래 쪽 metadata가 아직
 도착하지 않아 보간 대신 이전 box hold가 더 자주 사용될 수 있다.
+
+### 미래 metadata가 없는 구간의 예측(`maxExtrapolationMs`)
+
+`alignmentDelayMs=0`처럼 영상을 기다리지 않는 설정에서는 조회 시각이 **항상** 최신 metadata보다
+앞선다. 검출 서버의 추론·전송 지연이 영상 지연보다 길기 때문이다. 이 구간에서는 보간에 쓸 다음
+metadata가 없으므로 예전에는 마지막 box를 그대로 유지했고, 그 사이 대상이 움직이면 상자가 뒤에 남아
+진행 방향이 드러났다.
+
+`maxExtrapolationMs > 0`이면 마지막 두 metadata에서 같은 id의 box 이동량을 구해 조회 시각까지 직선으로
+연장한다. 실제로 덮는 영역은 **예측 상자와 마지막 상자의 합집합**이라, 대상이 갑자기 멈추거나 예측이
+빗나가도 이미 알고 있던 위치가 벗겨지지 않는다(직선 이동이면 합집합이 두 위치 사이 전 구간을 덮는다).
+
+- 예측은 이미 잡고 있는 뮤텍스 안에서 box 산술만 한다. 영상 경로에 프레임당 추가 비용이 없고
+  `alignmentDelayMs`/`sinkSync`를 건드리지 않으므로 재생 지연이나 끊김에 영향을 주지 않는다.
+- 두 metadata의 간격이 `matchToleranceMs`보다 벌어져 있으면 그 사이의 이동량은 현재 속도로 보지 않고
+  예측을 건너뛴다.
+- 조회 시각이 최신 metadata보다 `maxExtrapolationMs`를 넘어 앞서면 그 값에서 예측을 멈춘다.
+  선형 예측은 그 이상으로 밀면 오히려 엉뚱한 곳을 덮는다.
+
+실제로 얼마나 앞서 있는지는 `logging.blurApply=true`로 켜지는 `[BLUR APPLY]` 로그의 `metadataLagMs`가
+보여 준다. 이 값이 대체로 얼마인지 보고 `maxExtrapolationMs`를 그 근처로 맞춘다.
 
 ### 블러를 끄면 요소가 passthrough로 내려간다
 
@@ -447,7 +469,7 @@ profile4 설정에서 다시 확인해야 한다.
 4. RTSP가 안정되면 `alignmentDelayMs`를 블러 위치에 맞춘다.
 5. `alignmentDelayMs`를 바꿨으면 sink `ts-offset`과 `renderqueue` 상한이 함께 움직였는지 로그로 확인한다
    (`[GstRtspReceiver] video path=... tsOffset=...ms renderQueue=...ms`).
-6. 블러를 켜고 `syncOffsetMs`, `matchToleranceMs`, `holdLastMetadataMs` 순서로 조정한다.
+6. 블러를 켜고 `syncOffsetMs`, `matchToleranceMs`, `holdLastMetadataMs`, `maxExtrapolationMs` 순서로 조정한다.
 7. 마지막에 전처리 값을 적용하고 CPU 사용률과 frame stall을 비교한다.
 
 ### 증상별 첫 확인값
@@ -456,7 +478,7 @@ profile4 설정에서 다시 확인해야 한다.
 | --- | --- |
 | 화면이 계속 늦어짐 | `latencyMs`, `alignmentDelayMs`, render queue가 최신 frame을 leak하는지 |
 | 짧게 끊기거나 깨짐 | packet loss, `latencyMs`, `udpBufferSizeBytes`, NVR bitrate/GOV |
-| 블러가 사람 뒤를 따라감 | RTCP reference 사용 여부, `alignmentDelayMs`, `syncOffsetMs`, MQTT timestamp |
+| 블러가 사람 뒤를 따라감 | `[BLUR APPLY]`의 `metadataLagMs`, `maxExtrapolationMs`, RTCP reference 사용 여부, `alignmentDelayMs`, `syncOffsetMs`, MQTT timestamp |
 | 블러가 순간 사라짐 | `matchToleranceMs`, `holdLastMetadataMs`, metadata 누락 |
 | 전처리 ON에서 지연 증가 | brightness/contrast/gamma가 중립인지, raw frame 처리 CPU |
 | 재연결이 너무 늦음 | packet/frame/stall timeout을 구분하고 transport timeout과 혼동하지 않기 |

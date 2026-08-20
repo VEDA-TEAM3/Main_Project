@@ -33,6 +33,7 @@ BlurProcessorConfig makeConfig() {
     config.historyMsec = 10000;
     config.matchToleranceMsec = 250;
     config.holdLastMetadataMsec = 1000;
+    config.maximumExtrapolationMsec = 0;
     config.maximumHistorySize = 300;
     config.sourceRestartGapMsec = 5000;
     config.paddingRatio = 0.18;
@@ -250,6 +251,75 @@ void checkDisabledTargetsLeaveFrame() {
     gst_video_frame_unmap(&frame);
     gst_buffer_unref(buffer);
 }
+
+/**
+ * @brief 다음 metadata가 아직 없을 때 마지막 두 프레임의 이동량으로 앞쪽을 덮는지 검사합니다.
+ *
+ * @details 검출 서버가 영상보다 늦으면 조회 시각이 항상 마지막 metadata보다 앞서고, 예측이 없으면
+ *          상자가 멈춰 움직이는 대상의 진행 방향이 그대로 드러난다. 같은 metadata를 넣고 예측만
+ *          껐다 켜서, 꺼진 쪽이 손대지 않는 진행 방향 픽셀을 켠 쪽이 덮는지 본다.
+ */
+void checkExtrapolationCoversMovingObject() {
+    GstVideoInfo info;
+    gst_video_info_set_format(&info, GST_VIDEO_FORMAT_NV12, frameWidth, frameHeight);
+
+    // 진행 방향 앞쪽 픽셀. 예측이 없으면 마지막 상자의 원 밖이라 그대로 남는다
+    constexpr int probeLeft = 200;
+    constexpr int probeRight = 216;
+    constexpr int probeRow = 120;
+
+    const auto leadingEdgeChanged = [&](qint64 maximumExtrapolationMsec) {
+        BlurProcessorConfig config = makeConfig();
+        config.maximumExtrapolationMsec = maximumExtrapolationMsec;
+        BlurProcessor processor(config);
+
+        GstBuffer* buffer = createPatternBuffer(info);
+        if (!buffer) {
+            return false;
+        }
+
+        // PTS 0을 현재 시각에 묶는다. 이후 apply()의 조회 시각은 대략 지금이다
+        processor.observeVideoBuffer(buffer);
+        const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
+
+        // 100 ms 간격으로 오른쪽으로 이동하는 대상. 최신 metadata는 조회 시각보다 100 ms 뒤처져 있다
+        const auto submitBox = [&](qint64 sourceTimestamp, const QRectF& normalizedBox) {
+            BlurFrameData metadata;
+            metadata.channelIndex = 0;
+            metadata.sourceTimestamp = sourceTimestamp;
+            BlurRegionData region;
+            region.id = 1;
+            region.targetType = BlurTargetType::Face;
+            region.normalizedBox = normalizedBox;
+            metadata.regions.append(region);
+            processor.submitFrame(metadata);
+        };
+        submitBox(nowMsec - 200, QRectF(0.05, 0.40, 0.20, 0.20));
+        submitBox(nowMsec - 100, QRectF(0.30, 0.40, 0.20, 0.20));
+
+        GstVideoFrame frame;
+        bool changed = false;
+        if (gst_video_frame_map(&frame, &info, buffer, GST_MAP_READWRITE) == TRUE) {
+            std::vector<guint8> before;
+            for (int x = probeLeft; x < probeRight; ++x) {
+                before.push_back(lumaAt(frame, x, probeRow));
+            }
+
+            processor.apply(frame);
+
+            for (int x = probeLeft; x < probeRight && !changed; ++x) {
+                changed = lumaAt(frame, x, probeRow) != before[static_cast<size_t>(x - probeLeft)];
+            }
+            gst_video_frame_unmap(&frame);
+        }
+
+        gst_buffer_unref(buffer);
+        return changed;
+    };
+
+    check(!leadingEdgeChanged(0), "without extrapolation the leading edge must stay untouched");
+    check(leadingEdgeChanged(300), "extrapolation must cover the leading edge of a moving object");
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -258,6 +328,7 @@ int main(int argc, char* argv[]) {
     checkNv12RegionBlur();
     checkScratchReuseIsStable();
     checkDisabledTargetsLeaveFrame();
+    checkExtrapolationCoversMovingObject();
 
     if (failureCount > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failureCount);

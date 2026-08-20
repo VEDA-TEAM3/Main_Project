@@ -570,7 +570,8 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
 
     const qint64 fallbackOffset = frameTimestamp->senderClock ? 0 : config_.syncOffsetMsec;
     const qint64 targetTimestamp = frameTimestamp->utcMsec - fallbackOffset;
-    const QVector<QRectF> regions = regionsFor(targetTimestamp);
+    qint64 metadataLagMsec = 0;
+    const QVector<QRectF> regions = regionsFor(targetTimestamp, metadataLagMsec);
     if (regions.isEmpty()) {
         return;
     }
@@ -593,7 +594,8 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
     if (nowMsec - lastLogMsec >= config_.debugLogIntervalMsec &&
         lastApplyLogMsec_.compare_exchange_strong(lastLogMsec, nowMsec, std::memory_order_relaxed)) {
         qInfo().noquote() << QStringLiteral(
-                                 "[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6 processingUs=%7")
+                                 "[BLUR APPLY] channel=%1 regions=%2 frame=%3x%4 targetTs=%5 clock=%6 "
+                                 "metadataLagMs=%7 processingUs=%8")
                                  .arg(channelIndex_.load(std::memory_order_relaxed))
                                  .arg(regions.size())
                                  .arg(GST_VIDEO_FRAME_WIDTH(&frame))
@@ -601,20 +603,25 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
                                  .arg(targetTimestamp)
                                  .arg(frameTimestamp->senderClock ? QStringLiteral("rtcp")
                                                                   : QStringLiteral("pts-anchor"))
+                                 .arg(metadataLagMsec)
                                  .arg(processingTimer.nsecsElapsed() / 1000);
     }
 }
 
 /**
- * @brief                  지정 시각과 가장 가까운 블러 영역을 조회합니다.
- * @param sourceTimestamp  영상에 대응시킬 원본 시각
- * @return                 정규화된 블러 영역 목록
+ * @brief                   지정 시각과 가장 가까운 블러 영역을 조회합니다.
+ * @param sourceTimestamp   영상에 대응시킬 원본 시각
+ * @param metadataLagMsec   가장 최신 metadata가 이 프레임보다 얼마나 뒤처져 있는지(진단용).
+ *                          양수면 그만큼 예측으로 메워야 하는 구간이다
+ * @return                  정규화된 블러 영역 목록
  */
-QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
+QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp, qint64& metadataLagMsec) const {
     QMutexLocker locker(&mutex_);
     if (history_.isEmpty()) {
         return {};
     }
+
+    metadataLagMsec = sourceTimestamp - history_.constLast().sourceTimestamp;
 
     const auto after = std::lower_bound(
         history_.cbegin(), history_.cend(), sourceTimestamp,
@@ -651,6 +658,31 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
                        0.0, 1.0);
     }
 
+    // 다음 metadata가 아직 도착하지 않아 마지막 프레임을 그대로 쓰는 구간입니다. 검출 서버의
+    // 처리·전송 지연이 영상 지연보다 길면 정상 동작 중에도 여기가 상시 경로가 되고, 그 동안
+    // 상자가 멈춰 있어 움직이는 대상의 앞쪽이 그대로 드러납니다. 마지막 두 metadata의 이동량으로
+    // 현재 위치를 예측하되, 예측 상자와 마지막 상자의 합집합을 덮어 예측이 빗나가도 이미 알고
+    // 있던 위치가 벗겨지지 않게 합니다(직선 이동이면 두 상자의 합집합이 그 사이 전 구간을 덮습니다).
+    //
+    // 영상 지연을 늘려 metadata를 기다리는 방법이 정렬로는 정확하지만, sink 지연은 영상 끊김과
+    // 직결됩니다. 예측은 이미 잡고 있는 뮤텍스 안에서 상자 산술만 하므로 영상 경로에 비용이 없습니다.
+    const BlurFrameData* velocityFrame = nullptr;
+    double extrapolationRatio = 0.0;
+    if (nextFrame == nullptr && selectedFrame == previousFrame && config_.maximumExtrapolationMsec > 0 &&
+        history_.size() >= 2) {
+        const BlurFrameData& earlier = history_.at(history_.size() - 2);
+        const qint64 sourceGapMsec = previousFrame->sourceTimestamp - earlier.sourceTimestamp;
+        // 두 metadata가 너무 벌어져 있으면 그 사이의 이동량은 현재 속도가 아니다
+        if (sourceGapMsec > 0 && sourceGapMsec <= config_.matchToleranceMsec) {
+            const qint64 aheadMsec =
+                std::min(sourceTimestamp - previousFrame->sourceTimestamp, config_.maximumExtrapolationMsec);
+            if (aheadMsec > 0) {
+                velocityFrame = &earlier;
+                extrapolationRatio = static_cast<double>(aheadMsec) / static_cast<double>(sourceGapMsec);
+            }
+        }
+    }
+
     QVector<QRectF> regions;
     regions.reserve(selectedFrame->regions.size());
     for (const BlurRegionData& region : selectedFrame->regions) {
@@ -668,6 +700,12 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp) const {
             if (previousRegion && nextRegion) {
                 normalizedBox =
                     interpolatedRect(previousRegion->normalizedBox, nextRegion->normalizedBox, interpolationRatio);
+            }
+        } else if (velocityFrame) {
+            if (const BlurRegionData* earlierRegion = findSortedRegion(velocityFrame->regions, region)) {
+                // ratio > 1은 두 표본 밖으로 나가는 직선 외삽이다
+                normalizedBox = normalizedBox.united(
+                    interpolatedRect(earlierRegion->normalizedBox, normalizedBox, 1.0 + extrapolationRatio));
             }
         }
         regions.append(normalizedBox);
