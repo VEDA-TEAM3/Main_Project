@@ -1117,10 +1117,13 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
             continue;
         }
 
+        // QStyle::polish()는 모양을 다시 계산할 뿐 재도색을 보장하지 않는다(Qt 문서). 새 테두리
+        // 색이 실제로 나오려면 update()까지 불러야 한다. hover 경로도 같은 순서다
         tileFrame->setProperty("riskLevel", riskName);
         tileFrame->setProperty("hovered", hovered);
         tileFrame->style()->unpolish(tileFrame);
         tileFrame->style()->polish(tileFrame);
+        tileFrame->update();
     }
 }
 

@@ -61,7 +61,7 @@ private:
 
     static GstPadProbeReturn onPacketProbe(GstPad* pad, GstPadProbeInfo* info, gpointer userData);
 
-    static GstPadProbeReturn onPresentProbe(GstPad* pad, GstPadProbeInfo* info, gpointer userData);
+    static GstPadProbeReturn onSinkArrivalProbe(GstPad* pad, GstPadProbeInfo* info, gpointer userData);
 
     static gboolean onSelectStream(GstElement* source, guint streamNumber, GstCaps* caps, gpointer userData);
 
@@ -91,10 +91,10 @@ private:
     /// 파이프라인 세 지점의 프레임 수. 끊김이 상류(망)/디코더/하류(GPU) 중 어디에서 나는지 가른다
     std::atomic<quint64> packetCount_{0};
     std::atomic<quint64> decodedFrameCount_{0};
-    std::atomic<quint64> presentedFrameCount_{0};
+    std::atomic<quint64> sinkFrameCount_{0};
     quint64 lastReportedPacketCount_ = 0;
     quint64 lastReportedDecodedCount_ = 0;
-    quint64 lastReportedPresentedCount_ = 0;
+    quint64 lastReportedSinkCount_ = 0;
     QElapsedTimer statisticsTimer_;
     /// 체인에 실제로 들어간 디코더 factory 이름(설정값이 아니라 결과)
     QString activeDecoderName_;

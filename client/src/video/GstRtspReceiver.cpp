@@ -23,6 +23,40 @@ namespace {
 constexpr qint64 frameStatisticsIntervalMsec = 5000;
 
 /**
+ * @brief           renderqueue가 지금 들고 있는 버퍼 수를 읽습니다.
+ * @param pipeline  조회할 파이프라인
+ * @return          큐 보유량. 요소를 찾지 못하면 -1
+ *
+ * @details 디코더 뒤와 sink 앞의 개수 차이는 '버려진 프레임'과 '아직 큐에 있는 프레임'의 합이다.
+ *          큐 보유량을 빼야 드롭만 남는다. 5초에 한 번만 부르므로 조회 비용은 무시할 수 있다.
+ */
+int renderQueueBufferCount(GstElement* pipeline) {
+    if (!pipeline) {
+        return -1;
+    }
+
+    GstElement* videoChain = gst_bin_get_by_name(GST_BIN(pipeline), "videochain");
+
+    if (!videoChain) {
+        return -1;
+    }
+
+    GstElement* renderQueue =
+        GST_IS_BIN(videoChain) ? gst_bin_get_by_name(GST_BIN(videoChain), "renderqueue") : nullptr;
+    gst_object_unref(videoChain);
+
+    if (!renderQueue) {
+        return -1;
+    }
+
+    guint level = 0;
+    g_object_get(renderQueue, "current-level-buffers", &level, nullptr);
+    gst_object_unref(renderQueue);
+
+    return static_cast<int>(level);
+}
+
+/**
  * @brief             지정한 GStreamer element factory가 설치되어 있는지
  * 확인합니다.
  * @param factoryName  확인할 factory 이름
@@ -387,10 +421,10 @@ void GstRtspReceiver::startPipeline() {
 
     packetCount_.store(0, std::memory_order_relaxed);
     decodedFrameCount_.store(0, std::memory_order_relaxed);
-    presentedFrameCount_.store(0, std::memory_order_relaxed);
+    sinkFrameCount_.store(0, std::memory_order_relaxed);
     lastReportedPacketCount_ = 0;
     lastReportedDecodedCount_ = 0;
-    lastReportedPresentedCount_ = 0;
+    lastReportedSinkCount_ = 0;
     statisticsTimer_.start();
 
     startupTimer_.restart();
@@ -587,7 +621,7 @@ void GstRtspReceiver::startPipeline() {
     gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(sink), windowHandle_);
 
     if (GstPad* sinkPad = gst_element_get_static_pad(sink, "sink")) {
-        gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_BUFFER, &GstRtspReceiver::onPresentProbe, this, nullptr);
+        gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_BUFFER, &GstRtspReceiver::onSinkArrivalProbe, this, nullptr);
         gst_object_unref(sinkPad);
     }
 
@@ -786,12 +820,14 @@ void GstRtspReceiver::markFirstFrame() {
  *
  * @details 끊김의 원인 후보는 처방이 서로 반대라 추측으로 고를 수 없다(GPU/전력 포화, 망 손실,
  *          소프트웨어 디코더 fallback). 파이프라인 세 지점의 개수를 한 줄에 같이 찍으면 갈린다:
- *            rtp가 함께 줄어듦          -> 상류(망/카메라)
- *            rtp는 정상, decoded가 줄어듦 -> 디코더(특히 avdec fallback. decoder= 값을 같이 본다)
- *            decoded는 정상, gap이 자람   -> 하류. renderqueue(leaky=downstream)가 버리는 중이라
- *                                          GPU/전력 포화 쪽이다
- *          gap은 decoded - presented 누적값이다. renderqueue에 머무는 분량만큼은 정상 상태에서도
- *          0이 아니지만 그 깊이는 일정하므로, **자라는 gap만이 드롭**이다.
+ *            rtp가 함께 줄어듦            -> 상류(망/카메라)
+ *            rtp는 정상, decoded가 줄어듦   -> 디코더(특히 avdec fallback. decoder= 값을 같이 본다)
+ *            decoded는 정상, dropped가 자람 -> 하류. renderqueue(leaky=downstream)가 버리는 중이라
+ *                                            GPU/전력 포화 쪽이다
+ *          dropped는 (디코더 뒤 개수 - sink 도착 개수 - 지금 큐 보유량)이다. 큐 보유량을 빼지
+ *          않으면 시작 직후 큐가 차는 동안과 채널을 다시 표시한 직후에 드롭이 없는데도 값이
+ *          올라간다. 전처리 요소가 순간적으로 들고 있는 한두 장 때문에 오차가 ±2 정도 있으므로
+ *          한 자리 수는 무시하고 **계속 자라는지**를 본다.
  */
 void GstRtspReceiver::reportFrameStatistics() {
     // 숨은 채널은 presentationvalve가 프레임을 막으므로 0이 찍힌다. 통계는 보이는 채널만 남긴다
@@ -799,7 +835,7 @@ void GstRtspReceiver::reportFrameStatistics() {
         statisticsTimer_.start();
         lastReportedPacketCount_ = packetCount_.load(std::memory_order_relaxed);
         lastReportedDecodedCount_ = decodedFrameCount_.load(std::memory_order_relaxed);
-        lastReportedPresentedCount_ = presentedFrameCount_.load(std::memory_order_relaxed);
+        lastReportedSinkCount_ = sinkFrameCount_.load(std::memory_order_relaxed);
         return;
     }
 
@@ -809,20 +845,25 @@ void GstRtspReceiver::reportFrameStatistics() {
 
     const quint64 packets = packetCount_.load(std::memory_order_relaxed);
     const quint64 decoded = decodedFrameCount_.load(std::memory_order_relaxed);
-    const quint64 presented = presentedFrameCount_.load(std::memory_order_relaxed);
+    const quint64 sinkFrames = sinkFrameCount_.load(std::memory_order_relaxed);
     const double elapsedSeconds = static_cast<double>(statisticsTimer_.restart()) / 1000.0;
 
-    qInfo().noquote() << QStringLiteral("[VIDEO STAT] %1 decoder=%2 rtp=%3/s decoded=%4fps presented=%5fps gap=%6")
+    const int queuedBuffers = renderQueueBufferCount(pipeline_);
+    const qint64 dropped = static_cast<qint64>(decoded - sinkFrames) - qMax(queuedBuffers, 0);
+
+    qInfo().noquote() << QStringLiteral(
+                             "[VIDEO STAT] %1 decoder=%2 rtp=%3/s decoded=%4fps sink=%5fps queued=%6 "
+                             "dropped=%7")
                              .arg(objectName(), activeDecoderName_)
                              .arg(static_cast<double>(packets - lastReportedPacketCount_) / elapsedSeconds, 0, 'f', 1)
                              .arg(static_cast<double>(decoded - lastReportedDecodedCount_) / elapsedSeconds, 0, 'f', 1)
-                             .arg(static_cast<double>(presented - lastReportedPresentedCount_) / elapsedSeconds, 0, 'f',
-                                  1)
-                             .arg(decoded - presented);
+                             .arg(static_cast<double>(sinkFrames - lastReportedSinkCount_) / elapsedSeconds, 0, 'f', 1)
+                             .arg(queuedBuffers)
+                             .arg(qMax(dropped, qint64(0)));
 
     lastReportedPacketCount_ = packets;
     lastReportedDecodedCount_ = decoded;
-    lastReportedPresentedCount_ = presented;
+    lastReportedSinkCount_ = sinkFrames;
 }
 
 /**
@@ -925,15 +966,19 @@ GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo*, gpoin
 }
 
 /**
- * @brief            sink에 도달한 프레임 수를 셉니다.
+ * @brief            sink pad에 도달한 프레임 수를 셉니다.
  * @param userData   GstRtspReceiver 포인터
  * @return           pad probe 처리 결과
+ *
+ * @details 세는 지점은 sink의 chain 함수 **앞**이라 "도착"이지 "표시"가 아니다. 다만 이 sink는
+ *          qos=false와 max-lateness=-1로 두었으므로(요소 기본값은 각각 true, 5 ms) 도착한
+ *          버퍼는 늦어도 버려지지 않고 그려진다. 즉 renderqueue를 통과한 수와 같다.
  */
-GstPadProbeReturn GstRtspReceiver::onPresentProbe(GstPad*, GstPadProbeInfo*, gpointer userData) {
+GstPadProbeReturn GstRtspReceiver::onSinkArrivalProbe(GstPad*, GstPadProbeInfo*, gpointer userData) {
     auto* receiver = static_cast<GstRtspReceiver*>(userData);
 
     if (receiver) {
-        receiver->presentedFrameCount_.fetch_add(1, std::memory_order_relaxed);
+        receiver->sinkFrameCount_.fetch_add(1, std::memory_order_relaxed);
     }
 
     return GST_PAD_PROBE_OK;
