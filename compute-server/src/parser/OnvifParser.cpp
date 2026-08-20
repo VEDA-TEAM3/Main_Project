@@ -1,11 +1,11 @@
 #include "parser/OnvifParser.h"
 
 #include <algorithm>
+#include <chrono>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <ctime>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -66,9 +66,10 @@ std::string sanitizeForLog(std::string_view text) {
 template <typename T>
 std::optional<T> parseNumber(std::string_view sv) {
     T value{};
-    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+    const char* const end = sv.data() + sv.size();
+    const auto [ptr, ec] = std::from_chars(sv.data(), end, value);
 
-    if (ec != std::errc{}) {
+    if (ec != std::errc{} || ptr != end) {
         return std::nullopt;
     }
 
@@ -118,36 +119,33 @@ std::optional<std::string_view> extractQuoted(std::string_view s, std::string_vi
  * @return      std::optional<veda::TimestampMs> epoch 기준 밀리초 단위 시간, 실패 시 nullopt
  */
 std::optional<veda::TimestampMs> parseUtcTimeMs(std::string_view utc) {
-    if (utc.size() < 23) {
+    if (utc.size() != 24 || utc[4] != '-' || utc[7] != '-' || utc[10] != 'T' || utc[13] != ':' ||
+        utc[16] != ':' || utc[19] != '.' || utc[23] != 'Z') {
         return std::nullopt;
     }
 
-    auto year = parseNumber<int>(utc.substr(0, 4));
-    auto mon = parseNumber<int>(utc.substr(5, 2));
-    auto day = parseNumber<int>(utc.substr(8, 2));
-    auto hour = parseNumber<int>(utc.substr(11, 2));
-    auto min = parseNumber<int>(utc.substr(14, 2));
-    auto sec = parseNumber<int>(utc.substr(17, 2));
-    auto ms = utc.size() >= 23 ? parseNumber<int>(utc.substr(20, 3)) : std::optional<int>(0);
-
+    const auto year = parseNumber<int>(utc.substr(0, 4));
+    const auto mon = parseNumber<int>(utc.substr(5, 2));
+    const auto day = parseNumber<int>(utc.substr(8, 2));
+    const auto hour = parseNumber<int>(utc.substr(11, 2));
+    const auto min = parseNumber<int>(utc.substr(14, 2));
+    const auto sec = parseNumber<int>(utc.substr(17, 2));
+    const auto ms = parseNumber<int>(utc.substr(20, 3));
     if (!year || !mon || !day || !hour || !min || !sec || !ms) {
         return std::nullopt;
     }
 
-    std::tm tm{};
-    tm.tm_year = *year - 1900;
-    tm.tm_mon = *mon - 1;
-    tm.tm_mday = *day;
-    tm.tm_hour = *hour;
-    tm.tm_min = *min;
-    tm.tm_sec = *sec;
-
-    const std::time_t epochSec = timegm(&tm);
-    if (epochSec == static_cast<std::time_t>(-1)) {
+    const std::chrono::year_month_day date{
+        std::chrono::year{*year}, std::chrono::month{static_cast<unsigned int>(*mon)},
+        std::chrono::day{static_cast<unsigned int>(*day)}};
+    if (!date.ok() || *hour < 0 || *hour > 23 || *min < 0 || *min > 59 || *sec < 0 || *sec > 59 || *ms < 0 ||
+        *ms > 999) {
         return std::nullopt;
     }
 
-    return static_cast<veda::TimestampMs>(epochSec) * 1000 + *ms;
+    const auto timestamp = std::chrono::sys_days{date} + std::chrono::hours{*hour} + std::chrono::minutes{*min} +
+                           std::chrono::seconds{*sec} + std::chrono::milliseconds{*ms};
+    return std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
 }
 
 /**
@@ -361,7 +359,7 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         // scale/translate는 곱셈 오버플로로 ±Inf를 낳는다. 하류(HomographyTransform/매퍼)에
         // isfinite 검사가 있긴 하나, 파서에서 먼저 좌표가 유한하지 않은 객체를 폐기해 방어 심층화
         if (!std::isfinite(det.box.l) || !std::isfinite(det.box.r) || !std::isfinite(det.box.t) ||
-            !std::isfinite(det.box.b)) {
+            !std::isfinite(det.box.b) || det.box.l >= det.box.r || det.box.t >= det.box.b) {
             continue;
         }
 
