@@ -145,7 +145,7 @@ Item {
             color: Theme.mapPaper
             opacity: 0.18
             font.family: Theme.fontFamily
-            font.pixelSize: 28
+            font.pixelSize: 25
             font.weight: Font.Bold
             font.letterSpacing: 2
         }

@@ -122,11 +122,13 @@ CMake는 로컬 파일이 있으면 그것을, 없으면 example을 빌드 디�
   최신값만 보관하고 `RiskFrameDispatcher`/`BlurFrameDispatcher`가 주기적으로 flush합니다. UI 갱신도
   `DashboardPanelCoordinator`에서 타이머로 배치 처리합니다. 이 버퍼링을 우회하면 UI/영상 스레드가 밀립니다.
 - **MQTT payload는 신뢰할 수 없는 입력입니다.** 공통 상한은 `include/network/parsing/MqttPayloadLimits.h`
-  한곳에 있습니다(payload 256KB, Risk 객체 256개, `ts`는 로컬 UTC 기준 -60초~+5초). 새 파서를 추가하면
-  `isFreshSourceTimestamp`를 **반드시** 부르세요. 미래 `ts`를 한 번 받아들이면 `BlurProcessor`가 최신
-  timestamp를 그쪽으로 끌어올려 뒤이어 오는 정상 metadata를 전부 과거로 보고 버리고, **블러가 조용히
-  꺼진 채 얼굴과 번호판이 그대로 나갑니다.** 그래서 미래 쪽 한계는 `blur.historyMs`보다 작아야 합니다.
-  상한을 넘긴 메시지는 잘라 쓰지 말고 통째로 거부합니다(블러 영역 64개만 예외 — 일부라도 가리는 편이 낫습니다).
+  한곳에 있습니다(payload 256KB, Risk 객체 256개). 상한을 넘긴 메시지는 잘라 쓰지 말고 통째로
+  거부합니다(블러 영역 64개만 예외 — 일부라도 가리는 편이 낫습니다).
+- **블러 metadata의 `ts`를 로컬 시계와 비교해 거르지 마세요.** `isFreshSourceTimestamp`를 블러 파서에
+  걸어 봤다가 되돌렸습니다. 관제 PC와 서버 시계가 조금만 어긋나면 정상 metadata가 전부 거부돼
+  **블러가 꺼진 채 얼굴과 번호판이 그대로 나갑니다.** 막으려던 문제(미래 `ts` 하나가
+  `BlurProcessor`의 최신 timestamp를 끌어올려 이후 metadata를 과거로 버리는 것)보다 검사 쪽 사고가
+  잦았습니다. 이 검사는 Risk 파서에만 남아 있습니다.
 - **프로토콜 오류는 `emitProtocolError`에서 초당 하나로 제한됩니다.** 오류 하나마다 스레드 경계를 넘는
   signal이 하나 나가므로, 제한을 풀면 잘못된 메시지를 쏟아붓는 것만으로 크기 상한보다 먼저 UI가 밀립니다.
 

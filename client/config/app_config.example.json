@@ -49,8 +49,8 @@
         }
     },
     "video": {
-        "initialStartDelayMs": 300,
-        "receiverStartSpacingMs": 250,
+        "initialStartDelayMs": 1000,
+        "receiverStartSpacingMs": 3000,
         "initialAreaId": "area-01",
         "areas": [
             { "areaId": "area-01", "name": "제 1구역", "streamIds": ["cam-01", "cam-02", "cam-03", "cam-04"] },
