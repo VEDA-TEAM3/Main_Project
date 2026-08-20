@@ -3,9 +3,11 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QEvent>
+#include <QFont>
 #include <QFrame>
 #include <QGridLayout>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMessageBox>
 #include <QQuickItem>
 #include <QQuickWidget>
@@ -35,6 +37,7 @@
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
 #include "ui/SharedQmlEngine.h"
+#include "ui/VideoRiskBorderFrame.h"
 #include "ui/dialogs/MapSettingsDialog.h"
 #include "ui/panels/DashboardPanelCoordinator.h"
 #include "ui/panels/DashboardPanelFactory.h"
@@ -48,24 +51,6 @@
 namespace {
 const QString normalStatusColor = QStringLiteral("#38e86a");
 const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
-
-/**
- * @brief            영상 타일 QSS 상태 선택자에 쓰는 위험 단계 이름을 반환합니다.
- * @param riskLevel  변환할 위험 단계
- * @return           app.qss의 QFrame#videoTileFrame[riskLevel=...] 값
- */
-QString videoRiskLevelName(DigitalTwinRiskLevel riskLevel) {
-    switch (riskLevel) {
-        case DigitalTwinRiskLevel::Warning:
-            return QStringLiteral("warning");
-        case DigitalTwinRiskLevel::Danger:
-            return QStringLiteral("danger");
-        case DigitalTwinRiskLevel::Normal:
-            break;
-    }
-
-    return QStringLiteral("normal");
-}
 }  // namespace
 
 /**
@@ -342,6 +327,42 @@ void MainWindow::setupQuickTopBar() {
     connect(rootObject, SIGNAL(areaRequested()), this, SLOT(openVideoAreaSelectionDialog()));
     connect(rootObject, SIGNAL(settingsRequested()), this, SLOT(openMapSettingsDialog()));
     connect(rootObject, SIGNAL(guideRequested()), this, SLOT(openGuideDialog()));
+
+    auto* rootItem = qobject_cast<QQuickItem*>(rootObject);
+    auto* clockSlot = rootObject->findChild<QQuickItem*>(QStringLiteral("nativeClockSlot"));
+    auto* statusRow = rootObject->findChild<QQuickItem*>(QStringLiteral("topStatusRow"));
+    if (!rootItem || !clockSlot || !statusRow) {
+        qWarning().noquote() << QStringLiteral("[UI] Native top-bar clock slot is unavailable");
+        return;
+    }
+
+    clockLabel_ = new QLabel(quickTopBar_);
+    clockLabel_->setAlignment(Qt::AlignCenter);
+    clockLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    clockLabel_->setAttribute(Qt::WA_OpaquePaintEvent);
+    clockLabel_->setAutoFillBackground(true);
+    clockLabel_->setStyleSheet(
+        QStringLiteral("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #29333b, stop:1 #1a2129);"
+                       "border: none; color: #f5f9fe; padding: 0;"));
+
+    QFont clockFont(QStringLiteral("Noto Sans KR"));
+    clockFont.setPixelSize(13);
+    clockFont.setWeight(QFont::DemiBold);
+    clockLabel_->setFont(clockFont);
+
+    const auto syncClockGeometry = [this, rootItem, clockSlot]() {
+        const QPointF position = clockSlot->mapToItem(rootItem, QPointF());
+        clockLabel_->setGeometry(qRound(position.x()), qRound(position.y()), qRound(clockSlot->width()),
+                                 qRound(clockSlot->height()));
+        clockLabel_->raise();
+    };
+    connect(rootItem, &QQuickItem::widthChanged, this, syncClockGeometry);
+    connect(rootItem, &QQuickItem::heightChanged, this, syncClockGeometry);
+    connect(statusRow, &QQuickItem::xChanged, this, syncClockGeometry);
+    connect(statusRow, &QQuickItem::yChanged, this, syncClockGeometry);
+    connect(clockSlot, &QQuickItem::widthChanged, this, syncClockGeometry);
+    connect(clockSlot, &QQuickItem::heightChanged, this, syncClockGeometry);
+    syncClockGeometry();
 }
 
 /** @brief CCTV 조작부와 상태 범례를 공통 Qt Quick 테마로 교체합니다. */
@@ -587,7 +608,9 @@ void MainWindow::setupClock() {
  */
 void MainWindow::updateCurrentDateTime() {
     const QString dateTime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
-    setQuickTopBarProperty("dateTimeText", dateTime);
+    if (clockLabel_) {
+        clockLabel_->setText(dateTime);
+    }
 }
 
 /**
@@ -868,12 +891,9 @@ void MainWindow::setupVideoViewEvents() {
                 areaLayout->removeWidget(widget);
             }
 
-            // 네이티브 영상 표면의 부모를 매 프레임 다시 그리지 않도록 위험 단계가 바뀔 때만
-            // QSS 속성을 교체한다.
-            auto* tileFrame = new QFrame(grid->parentWidget());
+            auto* tileFrame = new VideoRiskBorderFrame(grid->parentWidget());
             tileFrame->setObjectName(QStringLiteral("videoTileFrame"));
             tileFrame->setProperty("hovered", false);
-            tileFrame->setProperty("riskLevel", QStringLiteral("normal"));
             tileFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
             auto* tileLayout = new QVBoxLayout(tileFrame);
@@ -887,7 +907,7 @@ void MainWindow::setupVideoViewEvents() {
             connect(clickable, &ClickableVideoWidget::doubleClicked, this,
                     [this](ClickableVideoWidget* target) { toggleExpandVideo(target); });
             connect(clickable, &ClickableVideoWidget::hoverChanged, tileFrame, [tileFrame](bool hovered) {
-                const bool riskActive = tileFrame->property("riskLevel").toString() != QStringLiteral("normal");
+                const bool riskActive = tileFrame->riskLevel() != DigitalTwinRiskLevel::Normal;
                 tileFrame->setProperty("hovered", hovered && !riskActive);
                 tileFrame->style()->unpolish(tileFrame);
                 tileFrame->style()->polish(tileFrame);
@@ -1094,7 +1114,7 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
     }
 
     for (qsizetype channelIndex = 0; channelIndex < videoTileFrames_.size(); ++channelIndex) {
-        QFrame* tileFrame = videoTileFrames_[channelIndex];
+        VideoRiskBorderFrame* tileFrame = videoTileFrames_[channelIndex];
         if (!tileFrame) {
             continue;
         }
@@ -1102,20 +1122,15 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
         const DigitalTwinRiskLevel visibleRiskLevel =
             videoRiskBordersEnabled_ ? latestVideoRiskLevels_.value(channelIndex) : DigitalTwinRiskLevel::Normal;
 
-        const QString riskName = videoRiskLevelName(visibleRiskLevel);
+        tileFrame->setRiskLevel(visibleRiskLevel);
+
         const bool hovered = visibleRiskLevel == DigitalTwinRiskLevel::Normal && videoWidgets_[channelIndex] &&
                              videoWidgets_[channelIndex]->underMouse();
-
-        if (tileFrame->property("riskLevel").toString() == riskName &&
-            tileFrame->property("hovered").toBool() == hovered) {
-            continue;
+        if (tileFrame->property("hovered").toBool() != hovered) {
+            tileFrame->setProperty("hovered", hovered);
+            tileFrame->style()->unpolish(tileFrame);
+            tileFrame->style()->polish(tileFrame);
         }
-
-        tileFrame->setProperty("riskLevel", riskName);
-        tileFrame->setProperty("hovered", hovered);
-        tileFrame->style()->unpolish(tileFrame);
-        tileFrame->style()->polish(tileFrame);
-        tileFrame->update();
     }
 }
 

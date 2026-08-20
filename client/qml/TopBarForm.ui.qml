@@ -6,7 +6,6 @@ Item {
 
     property string titleText: "Parking <font color=\"#6fb9d6\">VMS</font>"
     property string areaText: "Zone 1"
-    property string dateTimeText: ""
     property string systemStatusText: "● Connecting"
     property color systemStatusColor: "#ff4b4b"
     property string cctvStatusText: "● Connecting"
@@ -76,22 +75,19 @@ Item {
         }
 
         Row {
+            id: statusRow
+            objectName: "topStatusRow"
             anchors.right: helpButton.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             height: parent.height
             spacing: 0
 
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
+            Item {
+                id: nativeClockSlot
+                objectName: "nativeClockSlot"
                 width: 170
-                text: root.dateTimeText
-                color: Theme.text
-                horizontalAlignment: Text.AlignHCenter
-                font.family: Theme.fontFamily
-                font.pixelSize: 13
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0
+                height: parent.height
             }
 
             Rectangle {

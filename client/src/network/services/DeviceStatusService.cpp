@@ -158,7 +158,7 @@ void DeviceStatusService::setupGateway() {
 }
 
 /**
- * @brief        MQTT worker에서 받은 블러 프레임을 bounded FIFO에 병합합니다.
+ * @brief        MQTT worker에서 받은 블러 프레임을 채널별 최신값으로 병합합니다.
  * @param frame  채널과 UTC timestamp 검증을 마친 블러 프레임
  */
 void DeviceStatusService::queueBlurFrame(BlurFrameData frame) {
@@ -174,8 +174,7 @@ void DeviceStatusService::queueBlurFrame(BlurFrameData frame) {
 }
 
 /**
- * @brief UI 이벤트 루프에는 채널별 도착 순서를 보존한 블러 프레임 묶음을
- * 전달합니다.
+ * @brief UI 이벤트 루프에는 대기 중인 채널별 최신 블러 프레임만 전달합니다.
  */
 void DeviceStatusService::flushPendingBlurFrames() {
     QVector<BlurFrameData> frames = blurFrameBuffer_->takeLatestFrames();

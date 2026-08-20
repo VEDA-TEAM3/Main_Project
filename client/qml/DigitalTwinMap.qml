@@ -463,17 +463,7 @@ Item {
             }
         }
 
-        // 위험 진입 시 한 번만 맥동합니다. 위험이 유지되는 동안 무한 반복하면 QQuickWidget의
-        // 추가 렌더 패스가 영상 출력과 계속 GPU·GUI 스레드를 나눠 쓰게 됩니다.
-        //
-        // Qt Quick은 장면에서 뭐라도 움직이는 동안 매 vsync마다 장면 전체를 다시 래스터화하는데,
-        // QQuickWidget은 그것을 offscreen 텍스처에 한 번 더 그린 뒤 사각형으로 합성하고(Qt 문서:
-        // "at least one additional render pass ... increased load especially for the fragment
-        // processing of the GPU") 그 렌더 루프가 GUI 스레드에 묶여 있습니다(Qt 문서: "Using
-        // QQuickWidget disables the threaded render loop on all platforms"). 도면은 CurveRenderer
-        // Shape 수십 개라 그 한 장이 싸지 않고, 같은 내장 GPU가 영상 채널을 present하고 있습니다.
-        //
-        // 한 주기가 끝나면 얇은 위험 테두리만 남고 장면은 다시 idle 상태로 돌아갑니다.
+        // 위험이 유지되는 동안 맥동하고, 해제되면 위 opacity Behavior로 부드럽게 사라집니다.
         Repeater {
             model: [
                 {"w": 13, "min": 0.0, "max": 0.30, "c": "#ff0a1e"},
@@ -496,7 +486,7 @@ Item {
 
                 SequentialAnimation on opacity {
                     running: root.dangerActive
-                    loops: 1
+                    loops: Animation.Infinite
 
                     NumberAnimation {
                         to: stroke.modelData.max

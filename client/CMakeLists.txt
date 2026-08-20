@@ -32,6 +32,8 @@ qt_add_executable(Qtcctvclient
     src/ui/mainwindow.ui
     include/ui/ClickableVideoWidget.h
     src/ui/ClickableVideoWidget.cpp
+    include/ui/VideoRiskBorderFrame.h
+    src/ui/VideoRiskBorderFrame.cpp
     include/auth/AuthGateway.h
     include/auth/LocalFileAuthGateway.h
     src/auth/LocalFileAuthGateway.cpp
@@ -333,6 +335,17 @@ target_link_libraries(Qtcctvclient PRIVATE
 )
 
 if(QTCCTV_BUILD_CHECKS)
+    add_executable(latest_blur_frame_buffer_check
+        tests/LatestBlurFrameBufferCheck.cpp
+        src/network/realtime/LatestBlurFrameBuffer.cpp
+    )
+
+    target_include_directories(latest_blur_frame_buffer_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(latest_blur_frame_buffer_check PRIVATE Qt6::Gui)
+
     add_executable(risk_object_tracker_bounds_check
         tests/RiskObjectTrackerBoundsCheck.cpp
         src/model/RiskObjectTracker.cpp

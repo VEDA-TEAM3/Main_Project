@@ -12,7 +12,7 @@ constexpr int statisticsLogIntervalMsec = 5000;
 }
 
 /**
- * @brief         채널별 블러 프레임을 짧게 모아 순서대로 전달하는 dispatcher를 생성합니다.
+ * @brief         채널별 최신 블러 프레임을 병합해 전달하는 dispatcher를 생성합니다.
  * @param config  JSON 검증을 통과한 MQTT dispatcher 설정
  * @param parent  Qt 객체 소유권을 연결할 부모 객체
  */
@@ -96,7 +96,7 @@ void BlurFrameDispatcher::submitFrame(BlurFrameData frame) {
 }
 
 /**
- * @brief 같은 주기에 수신된 각 채널의 프레임을 timestamp 손실 없이 독립적으로 전달합니다.
+ * @brief 같은 주기에 수신된 각 채널의 최신 프레임만 독립적으로 전달합니다.
  */
 void BlurFrameDispatcher::flushPendingFrames() {
     if (!frameBuffer_) {
@@ -112,10 +112,10 @@ void BlurFrameDispatcher::flushPendingFrames() {
     const qint64 nowMsec = qMax<qint64>(1, clock_.elapsed());
     if (config_.logBlurDispatch &&
         (lastStatisticsLogMsec_ == 0 || nowMsec - lastStatisticsLogMsec_ >= statisticsLogIntervalMsec)) {
-        const quint64 droppedCount = frameBuffer_->takeCoalescedFrameCount();
-        qDebug().noquote() << QStringLiteral("[MQTT BLUR DISPATCH] delivered=%1 dropped=%2")
+        const quint64 coalescedCount = frameBuffer_->takeCoalescedFrameCount();
+        qDebug().noquote() << QStringLiteral("[MQTT BLUR DISPATCH] delivered=%1 coalesced=%2")
                                   .arg(deliveredFrameCount_)
-                                  .arg(droppedCount);
+                                  .arg(coalescedCount);
         lastStatisticsLogMsec_ = nowMsec;
         deliveredFrameCount_ = 0;
     }
