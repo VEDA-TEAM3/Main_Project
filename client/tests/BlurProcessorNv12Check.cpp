@@ -253,36 +253,43 @@ void checkDisabledTargetsLeaveFrame() {
 }
 
 /**
- * @brief 다음 metadata가 아직 없을 때 마지막 두 프레임의 이동량으로 앞쪽을 덮는지 검사합니다.
+ * @brief 다음 metadata가 아직 없을 때 최근 이동 속도로 예측한 위치를 덮는지 검사합니다.
  *
  * @details 검출 서버가 영상보다 늦으면 조회 시각이 항상 마지막 metadata보다 앞서고, 예측이 없으면
- *          상자가 멈춰 움직이는 대상의 진행 방향이 그대로 드러난다. 같은 metadata를 넣고 예측만
- *          껐다 켜서, 꺼진 쪽이 손대지 않는 진행 방향 픽셀을 켠 쪽이 덮는지 본다.
+ *          마스크가 멈춰 움직이는 대상의 진행 방향이 드러난다. 같은 metadata를 넣고 예측만 껐다 켜서
+ *          가운뎃줄에서 실제로 바뀐 구간을 비교한다. 구간의 중심이 이동량만큼 통째로 앞으로 가야 한다.
+ *          예측 상자와 마지막 상자의 합집합을 덮으면 중심이 두 위치의 가운데로 끌려와 이동량의 절반만
+ *          앞서므로, 그 방식으로 되돌아가면 이 검사가 걸린다.
  */
 void checkExtrapolationCoversMovingObject() {
     GstVideoInfo info;
     gst_video_info_set_format(&info, GST_VIDEO_FORMAT_NV12, frameWidth, frameHeight);
 
-    // 진행 방향 앞쪽 픽셀. 예측이 없으면 마지막 상자의 원 밖이라 그대로 남는다
-    constexpr int probeLeft = 200;
-    constexpr int probeRight = 216;
     constexpr int probeRow = 120;
+    // 100 ms 동안 정규화 0.08(=25.6 px)만큼 오른쪽으로 이동한다
+    const QRectF earlierBox(0.20, 0.40, 0.15, 0.20);
+    const QRectF latestBox(0.28, 0.40, 0.15, 0.20);
+    constexpr double expectedShiftPixels = 0.08 * frameWidth;
 
-    const auto leadingEdgeChanged = [&](qint64 maximumExtrapolationMsec) {
+    // 가운뎃줄에서 블러가 실제로 바꾼 구간. 못 찾으면 폭이 음수인 구간을 돌려준다
+    const auto blurredSpan = [&](qint64 maximumExtrapolationMsec, int& first, int& last) {
+        first = frameWidth;
+        last = -1;
+
         BlurProcessorConfig config = makeConfig();
         config.maximumExtrapolationMsec = maximumExtrapolationMsec;
         BlurProcessor processor(config);
 
         GstBuffer* buffer = createPatternBuffer(info);
         if (!buffer) {
-            return false;
+            return;
         }
 
-        // PTS 0을 현재 시각에 묶는다. 이후 apply()의 조회 시각은 대략 지금이다
+        // PTS 0을 현재 시각에 묶는다. 이후 apply()의 조회 시각은 대략 지금이고,
+        // 최신 metadata는 그보다 100 ms 뒤처져 있다
         processor.observeVideoBuffer(buffer);
         const qint64 nowMsec = QDateTime::currentMSecsSinceEpoch();
 
-        // 100 ms 간격으로 오른쪽으로 이동하는 대상. 최신 metadata는 조회 시각보다 100 ms 뒤처져 있다
         const auto submitBox = [&](qint64 sourceTimestamp, const QRectF& normalizedBox) {
             BlurFrameData metadata;
             metadata.channelIndex = 0;
@@ -294,31 +301,53 @@ void checkExtrapolationCoversMovingObject() {
             metadata.regions.append(region);
             processor.submitFrame(metadata);
         };
-        submitBox(nowMsec - 200, QRectF(0.05, 0.40, 0.20, 0.20));
-        submitBox(nowMsec - 100, QRectF(0.30, 0.40, 0.20, 0.20));
+        submitBox(nowMsec - 200, earlierBox);
+        submitBox(nowMsec - 100, latestBox);
 
         GstVideoFrame frame;
-        bool changed = false;
         if (gst_video_frame_map(&frame, &info, buffer, GST_MAP_READWRITE) == TRUE) {
             std::vector<guint8> before;
-            for (int x = probeLeft; x < probeRight; ++x) {
+            before.reserve(frameWidth);
+            for (int x = 0; x < frameWidth; ++x) {
                 before.push_back(lumaAt(frame, x, probeRow));
             }
 
             processor.apply(frame);
 
-            for (int x = probeLeft; x < probeRight && !changed; ++x) {
-                changed = lumaAt(frame, x, probeRow) != before[static_cast<size_t>(x - probeLeft)];
+            for (int x = 0; x < frameWidth; ++x) {
+                if (lumaAt(frame, x, probeRow) != before[static_cast<size_t>(x)]) {
+                    first = std::min(first, x);
+                    last = std::max(last, x);
+                }
             }
             gst_video_frame_unmap(&frame);
         }
 
         gst_buffer_unref(buffer);
-        return changed;
     };
 
-    check(!leadingEdgeChanged(0), "without extrapolation the leading edge must stay untouched");
-    check(leadingEdgeChanged(300), "extrapolation must cover the leading edge of a moving object");
+    int heldFirst = 0;
+    int heldLast = 0;
+    blurredSpan(0, heldFirst, heldLast);
+    int predictedFirst = 0;
+    int predictedLast = 0;
+    blurredSpan(300, predictedFirst, predictedLast);
+
+    check(heldLast > heldFirst, "the held mask must cover a span on the probe row");
+    check(predictedLast > predictedFirst, "the predicted mask must cover a span on the probe row");
+    if (heldLast <= heldFirst || predictedLast <= predictedFirst) {
+        return;
+    }
+
+    // 예측은 마지막 위치가 아니라 예측 위치를 덮는다. 합집합이면 절반만 앞선다
+    const double heldCenter = (heldFirst + heldLast) / 2.0;
+    const double predictedCenter = (predictedFirst + predictedLast) / 2.0;
+    check(predictedCenter - heldCenter > expectedShiftPixels * 0.75,
+          "the predicted mask must move ahead by the full measured motion");
+
+    // 진행 방향 앞쪽은 예측이 있어야만 덮인다
+    check(predictedLast > heldLast + expectedShiftPixels * 0.5,
+          "extrapolation must cover the leading edge of a moving object");
 }
 }  // namespace
 

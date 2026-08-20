@@ -73,8 +73,8 @@ bool isInsideHorizontalRange(int x, double centerX, double distanceLimit) {
 /** @brief 곱셈 역수의 소수 비트 수. 아래 오차 한계 계산이 이 값에 기대고 있다 */
 constexpr int blurReciprocalShift = 32;
 
-/** @brief 한 픽셀에서 블러할 성분 수의 상한. 휘도 1개, 색차(U,V) 2개다 */
-constexpr int maximumComponentCount = 2;
+/** @brief 설정 로더가 허용하는 blur 반경의 상한. 역수 표의 크기가 여기에 맞춰져 있다 */
+constexpr int maximumSupportedRadius = 2048;
 
 /**
  * @brief        정수 나눗셈을 곱셈으로 바꿀 역수를 구합니다.
@@ -88,23 +88,41 @@ quint64 blurReciprocal(int count) {
 }
 
 /**
- * @brief                 창 합을 샘플 수로 나눈 평균을 구합니다.
- * @param sum             창 안 샘플의 합
- * @param count           창 안 샘플 수
- * @param fullCount       창이 잘리지 않았을 때의 샘플 수
- * @param fullReciprocal  fullCount에 대한 blurReciprocal() 값
- * @return                평균값
+ * @brief   창 크기로 색인하는 고정소수점 역수 표를 돌려줍니다.
+ * @return  index가 창 안의 샘플 수인 역수 배열
  *
- * @details 창이 잘리는 것은 영역 양 끝 radius칸뿐이고 나머지는 전부 fullCount다. 그 구간의
- *          픽셀당 정수 나눗셈을 곱셈과 시프트로 바꾼다. 올림 역수를 쓰면 결과가 커질 수 있지만
- *          그 오차는 255*(count-1)/2^32 이하이고 sum/count의 소수부 간격 1/count보다 항상
- *          작으므로(count <= 2*2048+1) 내림 결과는 나눗셈과 완전히 같다.
+ * @details 창이 잘리는 것은 영역 양 끝 radius칸뿐이지만, 반경이 상한(28)에 붙는 흔한 설정에서는
+ *          그 양 끝이 한 줄의 절반 가까이를 차지한다. 그 픽셀마다 64비트 정수 나눗셈을 하던 자리가
+ *          커널에서 가장 비싼 구간이었다.
+ *
+ *          값이 창 크기에만 달려 있어 프레임·영역·반경이 바뀌어도 그대로 쓸 수 있으므로 설정이
+ *          허용하는 최대 창까지 한 번만 채워 둔다(32 KB). 만든 뒤에는 읽기만 하므로 채널별 영상
+ *          스레드가 그대로 공유한다.
+ *
+ *          올림 역수를 쓰면 결과가 커질 수 있지만 그 오차는 255*count/2^32 이하이고 sum/count의
+ *          소수부 간격 1/count보다 항상 작으므로(255*count^2 < 2^32, 즉 count <= 4103) 내림 결과는
+ *          나눗셈과 **완전히 같다**. 창의 상한은 2*2048+1 = 4097이라 표 전체가 이 범위 안에 있다.
  */
-guint8 averagedSample(quint64 sum, int count, int fullCount, quint64 fullReciprocal) {
-    if (count == fullCount) {
-        return static_cast<guint8>((sum * fullReciprocal) >> blurReciprocalShift);
-    }
-    return static_cast<guint8>(sum / static_cast<quint64>(count));
+const quint64* blurReciprocals() {
+    static const std::vector<quint64> table = [] {
+        std::vector<quint64> values(2 * maximumSupportedRadius + 2, 0);
+        for (size_t count = 1; count < values.size(); ++count) {
+            values[count] = blurReciprocal(static_cast<int>(count));
+        }
+        return values;
+    }();
+    return table.data();
+}
+
+/**
+ * @brief               창 합을 샘플 수로 나눈 평균을 구합니다.
+ * @param sum           창 안 샘플의 합
+ * @param count         창 안 샘플 수
+ * @param reciprocals   blurReciprocals()가 돌려준 표
+ * @return              평균값. 정수 나눗셈과 완전히 같다
+ */
+guint8 averagedSample(quint64 sum, int count, const quint64* reciprocals) {
+    return static_cast<guint8>((sum * reciprocals[count]) >> blurReciprocalShift);
 }
 
 /**
@@ -166,6 +184,25 @@ QRectF interpolatedRect(const QRectF& first, const QRectF& second, double ratio)
     const QPointF topLeft = first.topLeft() + (second.topLeft() - first.topLeft()) * ratio;
     const QPointF bottomRight = first.bottomRight() + (second.bottomRight() - first.bottomRight()) * ratio;
     return QRectF(topLeft, bottomRight);
+}
+
+/**
+ * @brief          마지막 영역을 이동 방향으로 밀어 현재 위치를 예측합니다.
+ * @param earlier  기준 구간이 시작하는 시각의 영역
+ * @param latest   가장 최신 영역
+ * @param ratio    기준 구간 길이 대비 앞서 예측할 시간의 비
+ * @return         예측된 정규화 영역
+ *
+ * @details 이동만 반영하고 크기는 예측하지 않는다. 크기 변화는 이동보다 느린데 같은 비율로 밀면
+ *          상자가 사라지거나 터지는 쪽으로 먼저 어긋난다.
+ *
+ *          예측 상자와 마지막 상자의 합집합을 쓰지 않는다. 합집합은 원의 중심을 두 위치의
+ *          가운데로 끌어와 실제로 앞서는 양을 절반으로 깎는다. 대상이 이미 떠난 자리를 덮는 것은
+ *          가림에 보탬이 되지 않고, 예측이 빗나갔을 때의 여유는 원형 마스크가 padding까지 포함한
+ *          상자의 대각선 절반을 반지름으로 쓰는 데서 이미 나온다.
+ */
+QRectF extrapolatedRect(const QRectF& earlier, const QRectF& latest, double ratio) {
+    return latest.translated((latest.center() - earlier.center()) * ratio);
 }
 
 /**
@@ -265,20 +302,26 @@ BlurRegionGeometry chromaRegionGeometry(const BlurRegionGeometry& luma) {
 
 /**
  * @brief                 평면 하나의 지정 영역에 2-pass box blur를 적용합니다.
+ * @tparam componentCount 픽셀 안에서 블러할 성분 개수이자 샘플 간격
  * @param pixels          평면 시작 주소
  * @param stride          평면 한 줄의 바이트 수
- * @param pixelStride     한 픽셀(샘플)이 차지하는 바이트 수
- * @param componentCount  픽셀 안에서 블러할 성분 개수
  * @param region          평면 좌표 기준 원형 영역
  * @param radius          box blur 반경(샘플)
  * @param scratch         재사용할 중간 버퍼
  *
  * @details 가로 패스는 슬라이딩 합이라 반경과 무관하게 영역 면적에 선형이다. NV12는 휘도
  *          평면(성분 1개, 간격 1바이트)과 색차 평면(U,V 2개, 간격 2바이트)을 각각 호출한다.
+ *
+ *          성분 개수는 인자가 아니라 템플릿 인자다. 값이 1과 2뿐인데 인자로 받으면 픽셀마다
+ *          도는 안쪽 루프가 펼쳐지지 않고 샘플 주소마다 곱셈이 남는다.
  */
-void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentCount, const BlurRegionGeometry& region,
-                     int radius, std::vector<guint8>& scratch) {
-    if (!pixels || region.width < 2 || region.height < 2 || radius < 1) {
+template <int componentCount>
+void blurPlaneRegion(guint8* pixels, int stride, const BlurRegionGeometry& region, int radius,
+                     std::vector<guint8>& scratch) {
+    // NV12에서는 성분 수가 곧 샘플 간격이다. 휘도는 1바이트 간격에 성분 1개, 색차는 U와 V가
+    // 번갈아 놓여 2바이트 간격에 성분 2개다. 둘 다 컴파일 시점에 정해져야 안쪽 루프가 펼쳐진다
+    constexpr int pixelStride = componentCount;
+    if (!pixels || region.width < 2 || region.height < 2 || radius < 1 || radius > maximumSupportedRadius) {
         return;
     }
 
@@ -287,9 +330,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
         scratch.resize(scratchSize);
     }
 
-    // 창이 잘리지 않은 구간에서 쓸 역수를 한 번만 구한다
-    const int fullCount = 2 * radius + 1;
-    const quint64 fullReciprocal = blurReciprocal(fullCount);
+    const quint64* reciprocals = blurReciprocals();
 
     // 가로 패스도 세로 패스가 실제로 읽어 갈 칸만 채운다. 상자 전체를 채우면 원 바깥 모서리까지
     // 계산하는데, 그 값은 아무도 읽지 않는다. scratch는 프레임 사이에 재사용되지만 세로 패스가
@@ -317,7 +358,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
         }
 
         const guint8* sourceRow = pixels + (region.top + localY) * stride + region.left * pixelStride;
-        quint64 sum[maximumComponentCount] = {0, 0};
+        quint64 sum[componentCount] = {};
         int windowStart = std::max(0, firstNeededX - radius);
         int windowEnd = std::min(region.width - 1, firstNeededX + radius);
         for (int x = windowStart; x <= windowEnd; ++x) {
@@ -334,7 +375,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
             const int removeX = x - radius;
             const int addX = x + radius + 1;
             for (int component = 0; component < componentCount; ++component) {
-                targetSample[component] = averagedSample(sum[component], count, fullCount, fullReciprocal);
+                targetSample[component] = averagedSample(sum[component], count, reciprocals);
                 if (removeX >= 0) {
                     sum[component] -= sourceRow[removeX * pixelStride + component];
                 }
@@ -379,7 +420,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
             ++lastInsideY;
         }
 
-        quint64 sum[maximumComponentCount] = {0, 0};
+        quint64 sum[componentCount] = {};
         int windowStart = std::max(0, firstInsideY - radius);
         int windowEnd = std::min(region.height - 1, firstInsideY + radius);
         for (int y = windowStart; y <= windowEnd; ++y) {
@@ -403,7 +444,7 @@ void blurPlaneRegion(guint8* pixels, int stride, int pixelStride, int componentC
                 addY < region.height ? &scratch[(static_cast<size_t>(addY) * region.width + localX) * componentCount]
                                      : nullptr;
             for (int component = 0; component < componentCount; ++component) {
-                targetPixel[component] = averagedSample(sum[component], count, fullCount, fullReciprocal);
+                targetPixel[component] = averagedSample(sum[component], count, reciprocals);
                 if (removeSample) {
                     sum[component] -= removeSample[component];
                 }
@@ -433,13 +474,13 @@ void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gu
 
     const int lumaRadius = std::clamp(std::min(luma.width, luma.height) / config.radiusDivisor, config.minimumRadius,
                                       config.maximumRadius);
-    blurPlaneRegion(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)),
-                    GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0), 1, 1, luma, lumaRadius, scratch);
+    blurPlaneRegion<1>(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)),
+                       GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0), luma, lumaRadius, scratch);
 
     // 색차는 U와 V가 번갈아 놓인 절반 해상도 평면이라 반경도 절반으로 본다
-    blurPlaneRegion(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 1)),
-                    GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1), 2, 2, chromaRegionGeometry(luma),
-                    std::max(1, lumaRadius / 2), scratch);
+    blurPlaneRegion<2>(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 1)),
+                       GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1), chromaRegionGeometry(luma), std::max(1, lumaRadius / 2),
+                       scratch);
 }
 }  // namespace
 
@@ -660,9 +701,8 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp, qint64& metada
 
     // 다음 metadata가 아직 도착하지 않아 마지막 프레임을 그대로 쓰는 구간입니다. 검출 서버의
     // 처리·전송 지연이 영상 지연보다 길면 정상 동작 중에도 여기가 상시 경로가 되고, 그 동안
-    // 상자가 멈춰 있어 움직이는 대상의 앞쪽이 그대로 드러납니다. 마지막 두 metadata의 이동량으로
-    // 현재 위치를 예측하되, 예측 상자와 마지막 상자의 합집합을 덮어 예측이 빗나가도 이미 알고
-    // 있던 위치가 벗겨지지 않게 합니다(직선 이동이면 두 상자의 합집합이 그 사이 전 구간을 덮습니다).
+    // 상자가 멈춰 있어 움직이는 대상의 앞쪽이 그대로 드러납니다. 최근 구간에서 잰 이동 속도로
+    // 현재 위치를 예측해 덮습니다.
     //
     // 영상 지연을 늘려 metadata를 기다리는 방법이 정렬로는 정확하지만, sink 지연은 영상 끊김과
     // 직결됩니다. 예측은 이미 잡고 있는 뮤텍스 안에서 상자 산술만 하므로 영상 경로에 비용이 없습니다.
@@ -670,16 +710,21 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp, qint64& metada
     double extrapolationRatio = 0.0;
     if (nextFrame == nullptr && selectedFrame == previousFrame && config_.maximumExtrapolationMsec > 0 &&
         history_.size() >= 2) {
-        const BlurFrameData& earlier = history_.at(history_.size() - 2);
-        const qint64 sourceGapMsec = previousFrame->sourceTimestamp - earlier.sourceTimestamp;
-        // 두 metadata가 너무 벌어져 있으면 그 사이의 이동량은 현재 속도가 아니다
-        if (sourceGapMsec > 0 && sourceGapMsec <= config_.matchToleranceMsec) {
-            const qint64 aheadMsec =
-                std::min(sourceTimestamp - previousFrame->sourceTimestamp, config_.maximumExtrapolationMsec);
-            if (aheadMsec > 0) {
-                velocityFrame = &earlier;
-                extrapolationRatio = static_cast<double>(aheadMsec) / static_cast<double>(sourceGapMsec);
-            }
+        // 속도는 예측 한계와 같은 길이의 구간에서 잽니다. 바로 직전 프레임 하나만 쓰면 검출 상자의
+        // 떨림이 그대로 속도가 되어 예측이 튀고, 구간이 길수록 그 떨림은 구간 길이로 나뉩니다.
+        // 그 구간 안에 이전 프레임이 없을 만큼 metadata가 드물면 속도를 믿지 않고 예측을 건너뜁니다.
+        // 예측할 수 있는 시간과 속도를 잴 수 있는 시간을 같은 값 하나로 유지합니다.
+        const qint64 baselineStartMsec = previousFrame->sourceTimestamp - config_.maximumExtrapolationMsec;
+        const auto oldest = std::lower_bound(
+            history_.cbegin(), history_.cend(), baselineStartMsec,
+            [](const BlurFrameData& frame, qint64 timestamp) { return frame.sourceTimestamp < timestamp; });
+        const qint64 baselineMsec =
+            oldest == history_.cend() ? 0 : previousFrame->sourceTimestamp - oldest->sourceTimestamp;
+        const qint64 aheadMsec =
+            std::min(sourceTimestamp - previousFrame->sourceTimestamp, config_.maximumExtrapolationMsec);
+        if (baselineMsec > 0 && aheadMsec > 0) {
+            velocityFrame = &*oldest;
+            extrapolationRatio = static_cast<double>(aheadMsec) / static_cast<double>(baselineMsec);
         }
     }
 
@@ -703,9 +748,7 @@ QVector<QRectF> BlurProcessor::regionsFor(qint64 sourceTimestamp, qint64& metada
             }
         } else if (velocityFrame) {
             if (const BlurRegionData* earlierRegion = findSortedRegion(velocityFrame->regions, region)) {
-                // ratio > 1은 두 표본 밖으로 나가는 직선 외삽이다
-                normalizedBox = normalizedBox.united(
-                    interpolatedRect(earlierRegion->normalizedBox, normalizedBox, 1.0 + extrapolationRatio));
+                normalizedBox = extrapolatedRect(earlierRegion->normalizedBox, normalizedBox, extrapolationRatio);
             }
         }
         regions.append(normalizedBox);

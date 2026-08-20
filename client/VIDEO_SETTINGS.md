@@ -299,7 +299,7 @@ flowchart TD
 | `maximumHistorySize` | 300 | 시간 범위와 별개인 metadata 개수 상한 |
 | `matchToleranceMs` | 250 ms | 영상 시각과 metadata 시각을 직접 일치로 인정할 최대 차이 |
 | `holdLastMetadataMs` | 1,000 ms | metadata 공백에서 직전 box를 유지할 최대 시간 |
-| `maxExtrapolationMs` | 300 ms | 미래 쪽 metadata가 없을 때 직전 두 프레임의 이동량으로 위치를 예측할 최대 시간. 0이면 예측하지 않는다 |
+| `maxExtrapolationMs` | 500 ms | 미래 쪽 metadata가 없을 때 이동 속도로 위치를 예측할 최대 시간이자 그 속도를 재는 구간의 길이. 0이면 예측하지 않는다 |
 | `sourceRestartGapMs` | 5,000 ms | 정상 metadata 공백 뒤 timestamp 기준을 재동기화할 기준 |
 | (참고) `mqtt.dispatcher.blurTimestampRestartThresholdMs` | 2,000 ms | dispatcher에서 source timestamp 재시작을 판단하는 역행 기준. **`blur` 아래가 아니라 `mqtt.dispatcher` 아래에 있다.** 예전에 `blur.sourceTimestampRestartThresholdMs`라는 이름으로 JSON에 적혀 있었지만 읽는 코드가 없어 삭제했다 |
 | `paddingRatio` | 0.18 | 검출 box의 각 방향을 box 크기의 18%만큼 확대 |
@@ -324,16 +324,22 @@ flowchart TD
 metadata가 없으므로 예전에는 마지막 box를 그대로 유지했고, 그 사이 대상이 움직이면 상자가 뒤에 남아
 진행 방향이 드러났다.
 
-`maxExtrapolationMs > 0`이면 마지막 두 metadata에서 같은 id의 box 이동량을 구해 조회 시각까지 직선으로
-연장한다. 실제로 덮는 영역은 **예측 상자와 마지막 상자의 합집합**이라, 대상이 갑자기 멈추거나 예측이
-빗나가도 이미 알고 있던 위치가 벗겨지지 않는다(직선 이동이면 합집합이 두 위치 사이 전 구간을 덮는다).
+`maxExtrapolationMs > 0`이면 같은 id의 box가 최근 구간에서 움직인 속도를 구해 조회 시각까지 직선으로
+연장하고, **예측한 위치에 마스크를 그린다**.
 
 - 예측은 이미 잡고 있는 뮤텍스 안에서 box 산술만 한다. 영상 경로에 프레임당 추가 비용이 없고
   `alignmentDelayMs`/`sinkSync`를 건드리지 않으므로 재생 지연이나 끊김에 영향을 주지 않는다.
-- 두 metadata의 간격이 `matchToleranceMs`보다 벌어져 있으면 그 사이의 이동량은 현재 속도로 보지 않고
-  예측을 건너뛴다.
+- 속도를 재는 구간의 길이도 `maxExtrapolationMs`다. 직전 프레임 하나만 쓰면 검출 box의 떨림이 그대로
+  속도가 되어 예측이 튀는데, 구간이 길수록 그 떨림은 구간 길이로 나뉜다. 이 구간 안에 이전 프레임이
+  없을 만큼 metadata가 드물면 속도를 믿지 않고 예측을 건너뛴다.
 - 조회 시각이 최신 metadata보다 `maxExtrapolationMs`를 넘어 앞서면 그 값에서 예측을 멈춘다.
   선형 예측은 그 이상으로 밀면 오히려 엉뚱한 곳을 덮는다.
+- 이동만 예측하고 box 크기는 예측하지 않는다. 크기 변화는 이동보다 느린데 같은 비율로 밀면 box가
+  사라지거나 터지는 쪽으로 먼저 어긋난다.
+- **예측 box와 마지막 box의 합집합을 덮지 않는다.** 합집합은 원의 중심을 두 위치의 가운데로 끌어와
+  실제로 앞서는 양을 절반으로 깎는다. 대상이 이미 떠난 자리를 덮는 것은 가림에 보탬이 되지 않고,
+  예측이 빗나갔을 때의 여유는 원형 마스크가 padding까지 포함한 box의 대각선 절반을 반지름으로 쓰는
+  데서 이미 나온다.
 
 실제로 얼마나 앞서 있는지는 `logging.blurApply=true`로 켜지는 `[BLUR APPLY]` 로그의 `metadataLagMs`가
 보여 준다. 이 값이 대체로 얼마인지 보고 `maxExtrapolationMs`를 그 근처로 맞춘다.
