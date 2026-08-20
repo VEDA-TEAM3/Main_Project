@@ -414,8 +414,11 @@ void GstRtspReceiver::startPipeline() {
     const QString videoChainDesc = videoChainDescription(systemMemoryChainActive_);
 
     qDebug().noquote() << "[GstRtspReceiver] Manual RTSP pipeline:" << videoChainDesc;
+    // 설정값이 아니라 체인에 d3d11scale이 실제로 들어갔는지로 판단한다. 축소는 d3d11 경로에만
+    // 있으므로 소프트웨어 디코더로 떨어지면 1080p 원본을 그대로 CPU에서 변환·블러하는데,
+    // 설정값을 찍으면 720p로 줄여 처리하는 것처럼 보여 원인을 정반대로 읽게 된다
     const QString processingSize =
-        config_.processingWidth > 0 && config_.processingHeight > 0
+        videoChainDesc.contains(QStringLiteral("d3d11scale"))
             ? QStringLiteral("%1x%2").arg(config_.processingWidth).arg(config_.processingHeight)
             : QStringLiteral("source");
     const QString pathName =
@@ -431,7 +434,7 @@ void GstRtspReceiver::startPipeline() {
                              .arg(config_.sinkSync)
                              .arg(playoutDelayMsec)
                              .arg(config_.renderQueueMaximumTimeMsec + playoutDelayMsec)
-                             .arg(systemMemoryChainActive_ ? processingSize : QStringLiteral("source"));
+                             .arg(processingSize);
 
     GError* error = nullptr;
     GstElement* source = gst_element_factory_make("rtspsrc", "src");
@@ -1062,11 +1065,7 @@ void GstRtspReceiver::onPadAdded(GstElement*, GstPad* pad, gpointer userData) {
 gboolean GstRtspReceiver::onBeforeSend(GstElement*, GstRTSPMessage* message, gpointer userData) {
     auto* receiver = static_cast<GstRtspReceiver*>(userData);
 
-    if (!receiver || !receiver->teardownInProgress_.load(std::memory_order_acquire) || !message) {
-        return TRUE;
-    }
-
-    if (gst_rtsp_message_get_type(message) != GST_RTSP_MESSAGE_REQUEST) {
+    if (!receiver || !message || gst_rtsp_message_get_type(message) != GST_RTSP_MESSAGE_REQUEST) {
         return TRUE;
     }
 
@@ -1078,7 +1077,22 @@ gboolean GstRtspReceiver::onBeforeSend(GstElement*, GstRTSPMessage* message, gpo
         return TRUE;
     }
 
-    if (method != GST_RTSP_PAUSE) {
+    // SETUP의 Transport 헤더가 이 세션이 UDP인지 TCP인지 알려주는 유일한 지점이다. rtspsrc는
+    // UDP가 막히면 조용히 TCP로 SETUP을 다시 보내므로 요청마다 찍어야 fallback이 드러난다.
+    // UDP면 latency=350ms + drop-on-latency=true가 지터 초과분을 버릴 수 있고, 그 드롭은
+    // depay의 wait-for-keyframe 때문에 다음 IDR까지의 정지로 나타난다
+    if (method == GST_RTSP_SETUP) {
+        gchar* transport = nullptr;
+
+        if (gst_rtsp_message_get_header(message, GST_RTSP_HDR_TRANSPORT, &transport, 0) == GST_RTSP_OK && transport) {
+            qInfo().noquote() << QStringLiteral("[GstRtspReceiver] %1 SETUP transport=%2")
+                                     .arg(receiver->objectName(), QString::fromUtf8(transport));
+        }
+
+        return TRUE;
+    }
+
+    if (method != GST_RTSP_PAUSE || !receiver->teardownInProgress_.load(std::memory_order_acquire)) {
         return TRUE;
     }
 

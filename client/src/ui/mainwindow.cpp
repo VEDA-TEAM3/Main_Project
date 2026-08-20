@@ -35,7 +35,6 @@
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
 #include "ui/SharedQmlEngine.h"
-#include "ui/VideoRiskBorderFrame.h"
 #include "ui/dialogs/MapSettingsDialog.h"
 #include "ui/panels/DashboardPanelCoordinator.h"
 #include "ui/panels/DashboardPanelFactory.h"
@@ -49,6 +48,24 @@
 namespace {
 const QString normalStatusColor = QStringLiteral("#38e86a");
 const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
+
+/**
+ * @brief            영상 타일 QSS 상태 선택자에 쓰는 위험 단계 이름을 반환합니다.
+ * @param riskLevel  변환할 위험 단계
+ * @return           app.qss의 QFrame#videoTileFrame[riskLevel=...] 값
+ */
+QString videoRiskLevelName(DigitalTwinRiskLevel riskLevel) {
+    switch (riskLevel) {
+        case DigitalTwinRiskLevel::Warning:
+            return QStringLiteral("warning");
+        case DigitalTwinRiskLevel::Danger:
+            return QStringLiteral("danger");
+        case DigitalTwinRiskLevel::Normal:
+            break;
+    }
+
+    return QStringLiteral("normal");
+}
 }  // namespace
 
 /**
@@ -853,11 +870,15 @@ void MainWindow::setupVideoViewEvents() {
                 areaLayout->removeWidget(widget);
             }
 
-            // 위험 테두리는 QSS 속성 교체가 아니라 이 위젯이 직접 그린다. QSS로는 색이 즉시
-            // 튀어 페이드 인/아웃이 나오지 않는다
-            auto* tileFrame = new VideoRiskBorderFrame(grid->parentWidget());
+            // 위험 테두리는 QSS 상태로만 바꾼다. 위젯 애니메이션으로 색을 보간하면 프레임마다
+            // 이 QFrame이 다시 그려지는데, 이 프레임은 d3d11videosink가 그리는 네이티브 자식
+            // HWND의 부모라 그 재도색이 영상 표면 재합성을 함께 끌고 간다(VIDEO_SETTINGS.md).
+            // riskLevel은 여기서 반드시 초기화한다. 비워 두면 hover 쪽에서 읽는 QVariant가
+            // 무효라 riskActive가 늘 true가 되고 hover 테두리가 켜지지 않는다
+            auto* tileFrame = new QFrame(grid->parentWidget());
             tileFrame->setObjectName(QStringLiteral("videoTileFrame"));
             tileFrame->setProperty("hovered", false);
+            tileFrame->setProperty("riskLevel", QStringLiteral("normal"));
             tileFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
             auto* tileLayout = new QVBoxLayout(tileFrame);
@@ -870,11 +891,8 @@ void MainWindow::setupVideoViewEvents() {
 
             connect(clickable, &ClickableVideoWidget::doubleClicked, this,
                     [this](ClickableVideoWidget* target) { toggleExpandVideo(target); });
-            // 위험 단계는 프레임이 직접 들고 있으므로 여기서 읽는다. 예전처럼 QSS 속성을 읽으면
-            // 설정된 적이 없는 QVariant가 돌아와 riskActive가 늘 true가 되고, hover 테두리가
-            // 이 신호로는 절대 켜지지 않는다(느린 배치 타이머 쪽에서만 뒤늦게 켜진다)
             connect(clickable, &ClickableVideoWidget::hoverChanged, tileFrame, [tileFrame](bool hovered) {
-                const bool riskActive = tileFrame->riskLevel() != DigitalTwinRiskLevel::Normal;
+                const bool riskActive = tileFrame->property("riskLevel").toString() != QStringLiteral("normal");
                 tileFrame->setProperty("hovered", hovered && !riskActive);
                 tileFrame->style()->unpolish(tileFrame);
                 tileFrame->style()->polish(tileFrame);
@@ -1081,24 +1099,28 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
     }
 
     for (qsizetype channelIndex = 0; channelIndex < videoTileFrames_.size(); ++channelIndex) {
-        VideoRiskBorderFrame* tileFrame = videoTileFrames_[channelIndex];
+        QFrame* tileFrame = videoTileFrames_[channelIndex];
         if (!tileFrame) {
             continue;
         }
 
         const DigitalTwinRiskLevel visibleRiskLevel =
             videoRiskBordersEnabled_ ? latestVideoRiskLevels_.value(channelIndex) : DigitalTwinRiskLevel::Normal;
-
-        // 색 전환은 위젯이 QVariantAnimation으로 처리한다. 같은 단계면 알아서 무시한다
-        tileFrame->setRiskLevel(visibleRiskLevel);
-
+        const QString riskName = videoRiskLevelName(visibleRiskLevel);
         const bool hovered = visibleRiskLevel == DigitalTwinRiskLevel::Normal && videoWidgets_[channelIndex] &&
                              videoWidgets_[channelIndex]->underMouse();
-        if (tileFrame->property("hovered").toBool() != hovered) {
-            tileFrame->setProperty("hovered", hovered);
-            tileFrame->style()->unpolish(tileFrame);
-            tileFrame->style()->polish(tileFrame);
+
+        // 값이 그대로면 다시 칠하지 않는다. unpolish/polish는 이 프레임과 그 아래 네이티브
+        // 영상 표면까지 재합성을 부르므로 매 배치마다 부르면 안 된다
+        if (tileFrame->property("riskLevel").toString() == riskName &&
+            tileFrame->property("hovered").toBool() == hovered) {
+            continue;
         }
+
+        tileFrame->setProperty("riskLevel", riskName);
+        tileFrame->setProperty("hovered", hovered);
+        tileFrame->style()->unpolish(tileFrame);
+        tileFrame->style()->polish(tileFrame);
     }
 }
 

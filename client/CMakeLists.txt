@@ -32,8 +32,6 @@ qt_add_executable(Qtcctvclient
     src/ui/mainwindow.ui
     include/ui/ClickableVideoWidget.h
     src/ui/ClickableVideoWidget.cpp
-    include/ui/VideoRiskBorderFrame.h
-    src/ui/VideoRiskBorderFrame.cpp
     include/auth/AuthGateway.h
     include/auth/LocalFileAuthGateway.h
     src/auth/LocalFileAuthGateway.cpp
