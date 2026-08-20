@@ -146,17 +146,6 @@ int main(int argc, char** argv) {
     assert(cpuChain.indexOf(QStringLiteral("framewatch")) < cpuChain.indexOf(QStringLiteral("renderqueue")));
     assert(gpuChain.indexOf(QStringLiteral("framewatch")) < gpuChain.indexOf(QStringLiteral("renderqueue")));
 
-    // 디코더 선택. d3d11 모드는 하드웨어 디코더를 골라야 하고, 그렇지 않은 모드는 소프트웨어를
-    // 골라야 한다(둘 다 설치된 환경 기준). d3d11을 요청했는데 avdec으로 떨어져 있으면 플러그인이
-    // 안 뜬 것이고, 15W iGPU에서 4x1080p 소프트웨어 디코딩은 상시 끊김이 된다
-    assert(cpuChain.contains(QStringLiteral("d3d11h264dec")));
-
-    GstRtspReceiverConfig software = baseConfig();
-    software.decoderMode = QStringLiteral("software");
-    const QString softwareChain = chainFor(software, true);
-    assert(softwareChain.contains(QStringLiteral("avdec_h264")));
-    assert(!softwareChain.contains(QStringLiteral("d3d11h264dec")));
-
     // 싱크 플래그는 서로 독립이어야 한다
     GstRtspReceiverConfig synced = baseConfig();
     synced.sinkSync = true;

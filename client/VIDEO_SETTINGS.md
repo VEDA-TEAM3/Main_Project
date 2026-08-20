@@ -588,8 +588,7 @@ UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 검토했고, **
 `QVariantAnimation`으로 400~530 ms 동안 색을 보간하며 프레임마다 `update()`를 불렀는데, 그
 `QFrame`은 `d3d11videosink`가 그리는 네이티브 자식 HWND의 **부모**라 재도색이 영상 표면의
 재합성을 함께 끌고 갔다. 지금은 `riskLevel` 속성 + `app.qss` 상태 선택자로만 바뀐다.
-**이 `QFrame`에 다시 애니메이션을 붙이지 마라.** (2026-08-20에 `VideoRiskBorderFrame`이라는 이름으로
-한 번 되돌아왔다가 다시 걷어냈다. 페이드가 필요해 보이면 `app.qss`의 상태 선택자를 먼저 보라.)
+**이 `QFrame`에 다시 애니메이션을 붙이지 마라.**
 
 다만 z-order는 주의해야 한다. 네이티브 자식 HWND는 Qt가 합성하는 모든 내용 위에 그려지므로
 **영상 타일 위에 QML 오버레이를 올리면 보이지 않는다.** `WA_AlwaysStackOnTop`으로도 이길 수 없다.
