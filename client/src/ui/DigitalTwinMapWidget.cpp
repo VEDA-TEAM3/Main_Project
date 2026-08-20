@@ -1,13 +1,11 @@
 #include "ui/DigitalTwinMapWidget.h"
 
 #include <QDebug>
-#include <QMetaObject>
 #include <QMetaType>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QSet>
 #include <QShowEvent>
-#include <QThread>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QtGlobal>
@@ -15,7 +13,6 @@
 #include <memory>
 #include <utility>
 
-#include "model/DigitalTwinSimulationWorker.h"
 #include "model/RiskObjectTracker.h"
 #include "ui/DigitalTwinHeading.h"
 #include "ui/DigitalTwinObjectStyleProvider.h"
@@ -194,6 +191,8 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     lastLiveSnapshotPublishMsec_ = 0;
+    publishedObjectPayload_.clear();
+    hasPublishedObjectPayload_ = false;
 
     deviceChannels_.resize(liveChannelCount());
     objectStyleProvider_ = std::make_shared<DefaultDigitalTwinObjectStyleProvider>(
@@ -202,46 +201,7 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     publishObjects();
 }
 
-/** @brief worker 스레드를 안전하게 정리합니다. */
-DigitalTwinMapWidget::~DigitalTwinMapWidget() {
-    if (simulationWorker_) {
-        disconnect(simulationWorker_.get(), nullptr, this, nullptr);
-    }
-
-    if (simulationWorker_ && simulationWorker_->thread() == &simulationThread_ && simulationThread_.isRunning()) {
-        QThread* ownerThread = thread();
-        QMetaObject::invokeMethod(
-            simulationWorker_.get(),
-            [worker = simulationWorker_.get(), ownerThread]() {
-                worker->stop();
-                worker->moveToThread(ownerThread);
-            },
-            Qt::BlockingQueuedConnection);
-    }
-
-    simulationThread_.quit();
-    simulationThread_.wait();
-    simulationWorker_.reset();
-}
-
-/** @brief 시뮬레이션 worker에 데모 시작을 요청합니다. */
-void DigitalTwinMapWidget::startDemo() {
-    if (!simulationWorker_ || !simulationThread_.isRunning()) {
-        return;
-    }
-
-    QMetaObject::invokeMethod(simulationWorker_.get(), &DigitalTwinSimulationWorker::start, Qt::QueuedConnection);
-}
-
-/** @brief 시뮬레이션 worker의 주기 갱신을 중지합니다. */
-void DigitalTwinMapWidget::stopDemo() {
-    if (!simulationWorker_ || !simulationThread_.isRunning()) {
-        return;
-    }
-
-    QMetaObject::invokeMethod(simulationWorker_.get(), &DigitalTwinSimulationWorker::stop,
-                              Qt::BlockingQueuedConnection);
-}
+DigitalTwinMapWidget::~DigitalTwinMapWidget() = default;
 
 /**
  * @brief          설정 팝업에서 확정한 맵 표시 옵션을 적용합니다.
@@ -267,14 +227,12 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
 
     if (!liveMode_) {
         qInfo() << "[DigitalTwinMapWidget] Live risk stream activated";
-        stopDemo();
         liveMode_ = true;
         riskObjectTracker_->reset();
         lastLiveSnapshotPublishMsec_ = 0;
-        // 데모와 실데이터는 서로 다른 카운터라 값이 겹칠 수 있다
+        // 새 실데이터 세션의 이동 경로 샘플 순서를 초기화한다.
         lastTrailSampleSequence_ = -1;
         liveFrameExpiryTimer_.start();
-        emit liveRiskStreamActivated();
     }
 
     if (!riskObjectTracker_->submitFrame(std::move(frame), qMax<qint64>(1, liveClock_.elapsed()))) {
@@ -422,10 +380,7 @@ void DigitalTwinMapWidget::showEvent(QShowEvent* event) {
 }
 
 /**
- * @brief   구역 수가 정해진 뒤 worker와 데모를 한 번만 시작합니다.
- *
- * @details 도면 자체는 생성자에서 이미 QML로 올라가 있다. 여기서 하는 일은 구역 수에 맞춰
- *          객체 영역을 읽고 데모를 돌리는 것뿐이다.
+ * @brief   구역 수가 정해진 뒤 빈 지도와 장치 상태를 한 번 준비합니다.
  */
 void DigitalTwinMapWidget::ensureMapReady() {
     if (mapReady_) {
@@ -438,40 +393,6 @@ void DigitalTwinMapWidget::ensureMapReady() {
     deviceChannels_.resize(liveChannelCount());
     publishDisplaySettings();
     publishDeviceStates();
-    setupSimulationWorker();
-    startDemo();
-}
-
-/** @brief 객체 이동과 위험 판정을 담당하는 worker를 별도 스레드에 연결합니다. */
-void DigitalTwinMapWidget::setupSimulationWorker() {
-    simulationWorker_ = std::make_shared<DigitalTwinSimulationWorker>();
-    // 데모는 활성 구역을 가로로 이어 붙인 띠 위에서 객체를 돌린다. 스레드로 옮기기 전에
-    // 넘겨야 경합이 없다. 데모 전용 값이라 실 데이터 경로에는 영향이 없다
-    simulationWorker_->setZoneCount(zoneCount_);
-
-    if (!simulationWorker_->moveToThread(&simulationThread_)) {
-        qWarning() << "[DigitalTwinMapWidget] Failed to move simulation worker to its thread";
-        simulationWorker_.reset();
-        return;
-    }
-
-    connect(simulationWorker_.get(), &DigitalTwinSimulationWorker::snapshotUpdated, this,
-            &DigitalTwinMapWidget::applySimulationSnapshot, Qt::QueuedConnection);
-
-    simulationThread_.setObjectName(QStringLiteral("digital-twin-simulation"));
-    simulationThread_.start();
-}
-
-/**
- * @brief           worker 스냅샷을 지도에 반영한 뒤 대시보드 소비자에게 전달합니다.
- * @param snapshot  객체와 객체 쌍 위험 상태를 함께 담은 최신 스냅샷
- */
-void DigitalTwinMapWidget::applySimulationSnapshot(const DigitalTwinSnapshot& snapshot) {
-    setDangerActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
-
-    applyObjectUpdates(snapshot);
-    publishChannelRiskLevels(snapshot);
-    emit simulationSnapshotUpdated(snapshot);
 }
 
 /**
@@ -651,7 +572,13 @@ void DigitalTwinMapWidget::publishObjects() {
         payload.append(QVariant(fields));
     }
 
-    setMapProperty("mapObjects", payload);
+    if (hasPublishedObjectPayload_ && payload == publishedObjectPayload_) {
+        return;
+    }
+
+    publishedObjectPayload_ = payload;
+    hasPublishedObjectPayload_ = true;
+    setMapProperty("mapObjects", publishedObjectPayload_);
 }
 
 /**
@@ -765,47 +692,6 @@ void DigitalTwinMapWidget::refreshObjectAreas() {
     }
 }
 
-/**
- * @brief            데모 객체가 움직일 구역 사각형을 돌려줍니다.
- * @param zoneIndex  구역 번호
- * @return           객체 영역을 이웃과의 틈 절반만큼 좌우로 넓힌 사각형
- *
- * @details 구역별 객체 영역은 서로 떨어져 있습니다. 아이콘이 구역 테두리를 넘지 않도록
- *          도면이 남겨 둔 여백인데, **데모 객체는 구역을 건너다니므로** 이 틈을 그대로 두면
- *          경계에서 한 프레임에 틈 너비만큼 순간 이동합니다. 좌우로 틈의 절반씩 넓히면 이웃
- *          사각형과 정확히 맞닿아(왼쪽 끝 = 이웃의 오른쪽 끝) 끊김 없이 넘어갑니다.
- *
- *          양 끝 구역은 바깥쪽을 안쪽과 같은 폭으로 넓혀 진입·이탈 거리를 좌우 대칭으로
- *          맞춥니다. 구역이 줄바꿈되는 배치(4개 이상)에서는 이웃이 왼쪽으로 되돌아가므로
- *          틈이 음수가 되는데, 그때는 넓히지 않습니다.
- *
- *          **데모 전용입니다.** 실 데이터는 서버 zoneId와 구역 월드 상자로 자리를 정하므로
- *          이 함수를 타지 않습니다.
- */
-QRectF DigitalTwinMapWidget::demoAreaForZone(int zoneIndex) const {
-    const QRectF& area = objectAreaRects_[zoneIndex];
-    double leftPad = 0.0;
-    double rightPad = 0.0;
-
-    if (zoneIndex > 0) {
-        leftPad = qMax(0.0, area.left() - objectAreaRects_[zoneIndex - 1].right()) / 2.0;
-    }
-
-    if (zoneIndex + 1 < objectAreaRects_.size()) {
-        rightPad = qMax(0.0, objectAreaRects_[zoneIndex + 1].left() - area.right()) / 2.0;
-    }
-
-    if (zoneIndex == 0) {
-        leftPad = rightPad;
-    }
-
-    if (zoneIndex + 1 >= objectAreaRects_.size()) {
-        rightPad = leftPad;
-    }
-
-    return area.adjusted(-leftPad, 0.0, rightPad, 0.0);
-}
-
 /** @brief 월드 좌표를 해당 물리 CCTV의 정사각형 도면 좌표로 변환합니다. */
 QPointF DigitalTwinMapWidget::planPointForObject(const QPointF& worldPosition, int channelIndex) const {
     if (objectAreaRects_.isEmpty()) {
@@ -814,14 +700,8 @@ QPointF DigitalTwinMapWidget::planPointForObject(const QPointF& worldPosition, i
 
     const QRectF worldBounds = liveConfig_.world.bounds;
     const bool validBounds = worldBounds.width() > 0.0 && worldBounds.height() > 0.0;
-    if (!liveMode_ || !validBounds) {
-        const int demoZoneIndex =
-            qBound(0, channelIndex / digitalTwinChannelsPerZone, static_cast<int>(objectAreaRects_.size()) - 1);
-        // 구역 사이 틈까지 덮는 사각형을 쓴다. 이웃과 맞닿아 있어야 구역을 넘는 순간
-        // 객체가 튀지 않는다
-        const QRectF demoArea = demoAreaForZone(demoZoneIndex);
-        return QPointF(demoArea.left() + qBound(0.0, worldPosition.x(), 1.0) * demoArea.width(),
-                       demoArea.top() + qBound(0.0, worldPosition.y(), 1.0) * demoArea.height());
+    if (!validBounds) {
+        return QPointF();
     }
 
     // 어느 물리 CCTV 맵에 그릴지는 서버 zoneId가 정하고, 맵 안에서의 위치는 그 구역의

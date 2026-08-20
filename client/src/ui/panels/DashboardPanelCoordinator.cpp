@@ -100,17 +100,6 @@ void DashboardPanelCoordinator::consumeCentralEvent(CentralEventData event) {
     eventLogPanel_->prependEntry(entry);
 }
 
-/** @brief 데모에서 실시간 MQTT 입력으로 전환될 때 데모 이벤트 이력을
- * 제거합니다. */
-void DashboardPanelCoordinator::resetEventLogForLiveInput() {
-    eventLogGenerator_.reset();
-    latestCentralEventTimestamps_.clear();
-
-    if (eventLogPanel_) {
-        eventLogPanel_->clear();
-    }
-}
-
 /**
  * @brief   누적 대기열 대신 가장 최근 객체 목록만 UI table에 반영합니다.
  */

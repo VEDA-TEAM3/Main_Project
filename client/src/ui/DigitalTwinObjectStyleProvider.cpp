@@ -73,7 +73,7 @@ QColor labelColorForRiskLevel(DigitalTwinRiskLevel riskLevel) {
 /**
  * @brief             객체 유형별 이동 경로 색상을 반환합니다.
  * @param objectType  디지털 트윈 객체 유형
- * @return            데모와 실제 TopView에 공통 적용할 이동 경로 색상
+ * @return            실제 Top-View에 적용할 이동 경로 색상
  */
 QColor trailColorForObjectType(DigitalTwinObjectType objectType) {
     switch (objectType) {

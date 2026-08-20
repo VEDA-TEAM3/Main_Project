@@ -79,7 +79,7 @@ $env:Path = "C:\Program Files\gstreamer\1.0\mingw_x86_64\bin;C:\Qt\6.11.1\mingw_
 build\debug-ninja\Qtcctvclient.exe
 ```
 
-브로커/RTSP 없이도 창은 뜨고 내장 데모가 돕니다(로그에 RTSP·MQTT 오류가 잔뜩 찍히는 건 정상).
+브로커/RTSP 없이도 창은 뜨지만 지도와 영상은 빈 상태로 유지됩니다(연결 오류 로그는 정상입니다).
 크래시는 조용히 죽는 형태라 종료 코드로 판별합니다: `-1073740940`(0xC0000374)은 heap corruption,
 `-1073741819`(0xC0000005)는 access violation입니다. 원인 추적은 `gdb --batch -ex run -ex bt --args Qtcctvclient.exe`.
 
@@ -166,7 +166,7 @@ blur 메타데이터의 UTC `ts`를 실제 표시 프레임에 맞춘 뒤 sink �
 여기에 늘려 맞춰집니다. 그래서 **월드 상자도 정사각형이어야** 가로·세로 배율이 같아집니다(README 참고).
 world 좌표는 Y가 위쪽 양수이므로 화면 매핑 시 Y를 뒤집습니다(`invertY`). 보정된 `VEDA_MAP_*` 경계가 없으면
 수신 좌표에서 자동으로 경계를 확장하지만, 정확한 채널 사분면 배치에는 고정 경계가 필요합니다.
-실 데이터가 처음 들어오면 내장 데모(`DigitalTwinSimulationWorker`)가 중지되고, 5초간 프레임이 없는 채널은 제거됩니다.
+실 데이터가 들어오면 GID 기반 증분 갱신으로 표시하며, 설정한 유예 시간이 지난 미관측 객체만 제거됩니다.
 
 **자동 경계 확장은 단조라 되돌아오지 않습니다.** 그래서 `RiskObjectTracker::submitFrame`은 필터를 돌리기
 전에 현재 경계를 크게 벗어난 좌표를 버립니다(`removeOutOfRangeObjects`). 중앙값 필터와 속도 상한은 이미

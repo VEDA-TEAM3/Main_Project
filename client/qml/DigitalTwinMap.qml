@@ -459,8 +459,8 @@ Item {
             }
         }
 
-        // 맥동은 **위험이 떠 있는 동안에만** 돕니다. running을 dangerActive에 걸어 두는 것이
-        // 여기서 제일 중요합니다.
+        // 위험 진입 시 한 번만 맥동합니다. 위험이 유지되는 동안 무한 반복하면 QQuickWidget의
+        // 추가 렌더 패스가 영상 출력과 계속 GPU·GUI 스레드를 나눠 쓰게 됩니다.
         //
         // Qt Quick은 장면에서 뭐라도 움직이는 동안 매 vsync마다 장면 전체를 다시 래스터화하는데,
         // QQuickWidget은 그것을 offscreen 텍스처에 한 번 더 그린 뒤 사각형으로 합성하고(Qt 문서:
@@ -469,9 +469,7 @@ Item {
         // QQuickWidget disables the threaded render loop on all platforms"). 도면은 CurveRenderer
         // Shape 수십 개라 그 한 장이 싸지 않고, 같은 내장 GPU가 영상 채널을 present하고 있습니다.
         //
-        // 그래서 이 맥동이 도는 동안에는 영상과 GPU·GUI 스레드를 나눠 쓰게 됩니다. 위험이 걷히면
-        // running이 false가 되어 멈추고, 위 dangerBorder의 520 ms 페이드가 끝나는 순간 장면이
-        // 다시 idle로 돌아갑니다. **조건을 dangerActive에서 떼면 세션 내내 멈추지 않습니다.**
+        // 한 주기가 끝나면 얇은 위험 테두리만 남고 장면은 다시 idle 상태로 돌아갑니다.
         Repeater {
             model: [
                 {"w": 13, "min": 0.0, "max": 0.30, "c": "#ff0a1e"},
@@ -494,7 +492,7 @@ Item {
 
                 SequentialAnimation on opacity {
                     running: root.dangerActive
-                    loops: Animation.Infinite
+                    loops: 1
 
                     NumberAnimation {
                         to: stroke.modelData.max

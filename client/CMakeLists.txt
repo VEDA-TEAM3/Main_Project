@@ -32,8 +32,6 @@ qt_add_executable(Qtcctvclient
     src/ui/mainwindow.ui
     include/ui/ClickableVideoWidget.h
     src/ui/ClickableVideoWidget.cpp
-    include/ui/VideoRiskBorderFrame.h
-    src/ui/VideoRiskBorderFrame.cpp
     include/auth/AuthGateway.h
     include/auth/LocalFileAuthGateway.h
     src/auth/LocalFileAuthGateway.cpp
@@ -92,13 +90,6 @@ qt_add_executable(Qtcctvclient
     include/model/MqttRealtimeData.h
     include/model/RiskObjectTracker.h
     src/model/RiskObjectTracker.cpp
-    include/model/DigitalTwinDemoZoneMap.h
-    include/model/DigitalTwinObjectSpawner.h
-    src/model/RandomEdgeObjectSpawner.cpp
-    include/model/DigitalTwinRiskPolicy.h
-    include/model/DigitalTwinSimulationWorker.h
-    src/model/DigitalTwinSimulationWorker.cpp
-    src/model/DistanceRiskPolicy.cpp
     include/model/EventLogEntry.h
     include/model/EventLogGenerator.h
     src/model/EventLogGenerator.cpp
@@ -352,16 +343,6 @@ if(QTCCTV_BUILD_CHECKS)
     )
 
     target_link_libraries(risk_object_tracker_bounds_check PRIVATE Qt6::Gui)
-
-    add_executable(demo_zone_channel_check
-        tests/DemoZoneChannelCheck.cpp
-    )
-
-    target_include_directories(demo_zone_channel_check PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    )
-
-    target_link_libraries(demo_zone_channel_check PRIVATE Qt6::Core)
 
     add_executable(digital_twin_heading_check
         tests/DigitalTwinHeadingCheck.cpp

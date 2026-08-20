@@ -4,7 +4,6 @@
 #include <QHash>
 #include <QPointF>
 #include <QRectF>
-#include <QThread>
 #include <QTimer>
 #include <QVariantList>
 #include <QVector>
@@ -18,7 +17,6 @@
 #include "model/MqttRealtimeData.h"
 #include "ui/DigitalTwinZoneIndex.h"
 
-class DigitalTwinSimulationWorker;
 class DigitalTwinObjectStyleProvider;
 class RiskObjectTracker;
 class QQuickItem;
@@ -41,8 +39,6 @@ public:
     explicit DigitalTwinMapWidget(QWidget* parent = nullptr);
     ~DigitalTwinMapWidget() override;
 
-    void startDemo();
-    void stopDemo();
     void applyDisplaySettings(const DigitalTwinMapDisplaySettings& settings);
     void configureLiveTracking(const DigitalTwinRuntimeConfig& config);
 
@@ -53,7 +49,6 @@ public slots:
     void setDeviceSignalAvailable(bool available);
 
 signals:
-    void liveRiskStreamActivated();
     void simulationSnapshotUpdated(DigitalTwinSnapshot snapshot);
     void channelRiskLevelsChanged(QVector<DigitalTwinRiskLevel> riskLevels);
     /** @brief 지도에서 CCTV가 있는 구역을 클릭했을 때 그 구역 인덱스를 알립니다. */
@@ -88,10 +83,8 @@ private:
     };
 
     void ensureMapReady();
-    void setupSimulationWorker();
     /// 현재 구역 수가 감당하는 전체 채널 수
     int liveChannelCount() const { return zoneCount_ * digitalTwinChannelsPerZone; }
-    void applySimulationSnapshot(const DigitalTwinSnapshot& snapshot);
     void applyObjectUpdates(const DigitalTwinSnapshot& snapshot);
     void publishChannelRiskLevels(const DigitalTwinSnapshot& snapshot);
     void publishObjects();
@@ -109,16 +102,13 @@ private:
     void rebuildVisualIndexes();
     void refreshObjectAreas();
     QPointF planPointForObject(const QPointF& position, int channelIndex) const;
-    QRectF demoAreaForZone(int zoneIndex) const;
     QVector<QPointF> visibleTrail(const QVector<QPointF>& positions) const;
 
     QQuickWidget* mapView_ = nullptr;
     QQuickItem* mapRoot_ = nullptr;
-    QThread simulationThread_;
     DigitalTwinMapDisplaySettings displaySettings_;
     DigitalTwinRuntimeConfig liveConfig_;
     std::shared_ptr<DigitalTwinObjectStyleProvider> objectStyleProvider_;
-    std::shared_ptr<DigitalTwinSimulationWorker> simulationWorker_;
     std::unique_ptr<RiskObjectTracker> riskObjectTracker_;
     QVector<ObjectVisual> visuals_;
     QHash<QString, qsizetype> visualIndexes_;
@@ -129,6 +119,8 @@ private:
     QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
+    QVariantList publishedObjectPayload_;
+    bool hasPublishedObjectPayload_ = false;
     /// 구역별 객체 표시 영역. QML의 ParkingPlan.js가 원본이라 거기서 읽어 온다
     QVector<QRectF> objectAreaRects_;
     qint64 lastLiveSnapshotPublishMsec_ = 0;
