@@ -20,6 +20,9 @@ Item {
     property int zoneCount: 2
     /** 객체 목록. 원소 하나가 MapObjectItem이 읽는 평평한 배열입니다 */
     property var mapObjects: []
+    /// 객체가 줄어드는 프레임에 delegate가 아직 살아 있으면 mapObjects[index]가 undefined가 된다.
+    /// 그 한 프레임 때문에 경고가 초당 수십 줄씩 쏟아지므로 자리 수가 맞는 빈 값을 대신 넘긴다
+    readonly property var emptyObjectFields: ["", "", 0, 0, 0, 0, 0, "transparent", "transparent"]
     /** 채널별 위험 단계 (0=정상, 1=주의, 2=위험). 구역 순서로 CH01~CH04씩 이어 붙입니다 */
     property var channelRisk: []
     /** 채널별 LED 상태 (0=꺼짐, 1=안전, 2=주의, 3=위험) */
@@ -390,13 +393,23 @@ Item {
         }
 
         // ── 실시간 객체 ────────────────────────────────────────────────
+        //
+        // model에 배열 자체를 주면 안 됩니다. C++이 20Hz로 mapObjects를 통째로 새 배열로
+        // 갈아끼우는데, var 배열 모델은 원소 동일성을 모르므로 교체될 때마다 delegate를 전부
+        // 버리고 다시 만듭니다. 그러면 객체 하나당 Shape(파선 궤적)와 Image가 초당 20번
+        // 새로 생성되고, 그 비용을 GUI 스레드와 iGPU가 영상 present와 나눠 쓰게 됩니다.
+        //
+        // 개수만 model로 주고 값은 index로 읽으면 배열이 바뀌어도 length가 같은 한 model 값이
+        // 그대로라 delegate가 유지되고, fields 바인딩만 다시 평가됩니다. 객체 수가 바뀔 때만
+        // 늘어난/줄어든 만큼 생성·파괴됩니다.
+        // 실측(10객체 x 40회 갱신): 배열 모델 400개 생성 -> 개수 모델 10개 생성.
         Repeater {
-            model: root.mapObjects
+            model: root.mapObjects.length
 
             MapObjectItem {
-                required property var modelData
+                required property int index
 
-                fields: modelData
+                fields: root.mapObjects[index] !== undefined ? root.mapObjects[index] : root.emptyObjectFields
                 showTrail: root.showMovementTrails
             }
         }

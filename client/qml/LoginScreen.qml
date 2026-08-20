@@ -21,6 +21,8 @@ Rectangle {
     property string errorText: ""
     /// 인증 처리 중에는 입력을 잠근다
     property bool busy: false
+    /// 퇴장까지 끝났는지. 이 창은 감춰질 뿐 살아 있으므로, 이 값으로 상시 애니메이션을 영구히 끈다
+    property bool finished: false
     /// 계정이 하나도 없는 설치본이면 로그인 대신 최초 관리자 생성으로 연다.
     /// 기본 계정을 심어 배포하면 현장에서 끝내 안 바뀌므로 여기서 직접 만들게 한다
     property bool bootstrapMode: false
@@ -125,8 +127,13 @@ Rectangle {
             GradientStop { position: 1.0; color: "#001b2f3a" }
         }
 
+        // 로그인이 끝나면 반드시 멈춘다. 이 창은 파괴하지 않고 감추기만 하므로, 조건을
+        // exitAnimation.running으로만 두면 퇴장이 끝나는 순간 다시 true가 되어 세션 내내
+        // 무한 애니메이션이 살아 있는다. Qt Quick은 장면에서 뭐라도 움직이는 동안 매 vsync마다
+        // 장면을 다시 처리하고 그 루프가 GUI 스레드에 묶여 있어서, 안 보이는 창 하나가 영상
+        // present와 같은 iGPU·같은 스레드를 계속 갉아먹는다 (DigitalTwinMap.qml의 같은 주석 참고)
         SequentialAnimation on opacity {
-            running: !exitAnimation.running
+            running: !root.finished && !exitAnimation.running
             loops: Animation.Infinite
             NumberAnimation { to: 0.55; duration: 3200; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.32; duration: 3200; easing.type: Easing.InOutSine }
@@ -424,7 +431,10 @@ Rectangle {
             easing.type: Easing.InQuad
         }
 
-        onFinished: root.exitFinished()
+        onFinished: {
+            root.finished = true;
+            root.exitFinished();
+        }
     }
 
     // 창을 걷어내는 순간은 결국 한 프레임에 끊긴다. 밝은 화면에서 끊으면 그 끊김이 그대로
