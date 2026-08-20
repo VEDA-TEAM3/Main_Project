@@ -19,7 +19,6 @@
         "renderIntervalMs": 50,
         "snapshotPublishIntervalMs": 50,
         "frameExpiryMs": 5000,
-        "frameExpiryPollMs": 1000,
         "positionTransitionMs": 66,
         "fadeInMs": 120,
         "missingGraceMs": 200,

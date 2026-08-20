@@ -52,8 +52,8 @@ constexpr int automaticBoundsExpansionFrameCount = 3;
 // 좌표를 경계로 clamp하지 않고 버린다. clamp하면 잘못된 위치가 정상처럼 표시된다.
 // 교정 오차와 실제 도면 확장 여유를 함께 덮도록 경계 크기에 비례해서 잡는다
 constexpr double worldBoundsAcceptanceMargin = 2.0;
-constexpr qint64 outOfRangeLogIntervalMsec = 1000;
-constexpr qint64 rateLimitLogIntervalMsec = 1000;
+constexpr qint64 outOfRangeLogIntervalMsec = 30000;
+constexpr qint64 rateLimitLogIntervalMsec = 30000;
 constexpr qsizetype worldPositionMedianSampleCount = 3;
 // 중앙값 필터는 움직이는 객체의 좌표를 항상 한 프레임 분량만큼 되돌린다. 그
 // 정상 동작까지 '이상치 제거'로 세면 진단 로그가 매 프레임 남고 통계도 의미가

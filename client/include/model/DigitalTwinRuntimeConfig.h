@@ -82,7 +82,6 @@ struct DigitalTwinRuntimeConfig {
     int renderIntervalMsec = 33;
     int snapshotPublishIntervalMsec = 50;
     int frameExpiryMsec = 5000;
-    int frameExpiryPollMsec = 1000;
     // Local UI interpolation only; this is not a video/source timestamp delay.
     qint64 positionTransitionMsec = 100;
     qint64 fadeInMsec = 120;

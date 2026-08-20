@@ -16,7 +16,7 @@ namespace {
 /// 프로토콜 오류를 이 주기로 한 번만 올린다. 오류 하나마다 로그 한 줄과 thread 경계를
 /// 넘는 signal이 하나씩 나가므로, 제한이 없으면 잘못된 메시지를 쏟아붓는 것만으로
 /// GUI 이벤트 큐가 payload 크기 상한에 걸리기 한참 전에 밀린다
-constexpr qint64 protocolErrorIntervalMsec = 1000;
+constexpr qint64 protocolErrorIntervalMsec = 30000;
 
 QString riskLevelName(DigitalTwinRiskLevel riskLevel) {
     switch (riskLevel) {

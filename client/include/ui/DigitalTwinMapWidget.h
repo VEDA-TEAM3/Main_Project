@@ -97,7 +97,6 @@ private:
     QVector<DigitalTwinRiskLevel> channelRiskLevels(const DigitalTwinSnapshot& snapshot) const;
     bool hasActiveCentralDanger() const;
     void setDangerActive(bool active);
-    void expireStaleLiveFrames();
     void updateObjectVisual(ObjectVisual* visual);
     bool removeMissingVisuals(const QVector<DigitalTwinObject>& objects);
     void rebuildVisualIndexes();
@@ -117,7 +116,6 @@ private:
     QHash<QString, CentralEventData> activeCentralEvents_;
     QVector<DeviceRecord> deviceChannels_;
     QElapsedTimer liveClock_;
-    QTimer liveFrameExpiryTimer_;
     QTimer liveFrameRenderTimer_;
     QVector<DigitalTwinRiskLevel> publishedChannelRiskLevels_;
     QVariantList publishedObjectPayload_;

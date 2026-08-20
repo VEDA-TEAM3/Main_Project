@@ -234,7 +234,6 @@ bool parseDigitalTwin(const QJsonObject& root, DigitalTwinRuntimeConfig& config,
         !readInt(digitalTwin, QStringLiteral("snapshotPublishIntervalMs"), 10, 5000, config.snapshotPublishIntervalMsec,
                  error) ||
         !readInt(digitalTwin, QStringLiteral("frameExpiryMs"), 100, 120000, config.frameExpiryMsec, error) ||
-        !readInt(digitalTwin, QStringLiteral("frameExpiryPollMs"), 50, 60000, config.frameExpiryPollMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeInMs"), 0, 5000, config.fadeInMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("missingGraceMs"), 0, 5000, config.missingGraceMsec, error) ||
         !readInteger(digitalTwin, QStringLiteral("fadeOutMs"), 0, 5000, config.fadeOutMsec, error) ||

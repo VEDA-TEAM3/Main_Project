@@ -150,9 +150,6 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
     qRegisterMetaType<QVector<DigitalTwinObject>>("QVector<DigitalTwinObject>");
 
     liveClock_.start();
-    liveFrameExpiryTimer_.setInterval(liveConfig_.frameExpiryPollMsec);
-    liveFrameExpiryTimer_.setTimerType(Qt::CoarseTimer);
-    connect(&liveFrameExpiryTimer_, &QTimer::timeout, this, &DigitalTwinMapWidget::expireStaleLiveFrames);
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     liveFrameRenderTimer_.setSingleShot(false);
     liveFrameRenderTimer_.setTimerType(Qt::CoarseTimer);
@@ -190,7 +187,6 @@ void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig&
     setMapProperty("zoneCount", zoneCount_);
     refreshObjectAreas();
 
-    liveFrameExpiryTimer_.setInterval(liveConfig_.frameExpiryPollMsec);
     liveFrameRenderTimer_.setInterval(liveConfig_.renderIntervalMsec);
     riskObjectTracker_ = std::make_unique<RiskObjectTracker>(liveConfig_);
     lastLiveSnapshotPublishMsec_ = 0;
@@ -240,7 +236,6 @@ void DigitalTwinMapWidget::applyRiskFrame(RiskFrameData frame) {
         lastLiveSnapshotPublishMsec_ = 0;
         // 새 실데이터 세션의 이동 경로 샘플 순서를 초기화한다.
         lastTrailSampleSequence_ = -1;
-        liveFrameExpiryTimer_.start();
     }
 
     if (!riskObjectTracker_->submitFrame(std::move(frame), qMax<qint64>(1, liveClock_.elapsed()))) {
@@ -322,6 +317,7 @@ void DigitalTwinMapWidget::setDeviceSignalAvailable(bool available) {
 
 void DigitalTwinMapWidget::rebuildLiveSnapshot() {
     const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
+    riskObjectTracker_->expireStaleFrame(currentTimeMsec, liveConfig_.frameExpiryMsec);
     const DigitalTwinSnapshot snapshot = riskObjectTracker_->buildSnapshot(currentTimeMsec);
     applyObjectUpdates(snapshot);
     publishChannelRiskLevels(snapshot);
@@ -336,6 +332,9 @@ void DigitalTwinMapWidget::rebuildLiveSnapshot() {
     }
 
     setDangerActive(hasActiveCentralDanger() || hasActiveDanger(snapshot));
+    if (!riskObjectTracker_->hasFrame()) {
+        liveFrameRenderTimer_.stop();
+    }
 }
 
 int DigitalTwinMapWidget::activeSeverityForChannel(int channelIndex) const {
@@ -364,18 +363,6 @@ void DigitalTwinMapWidget::setDangerActive(bool active) {
 
     dangerActive_ = active;
     setMapProperty("dangerActive", active);
-}
-
-void DigitalTwinMapWidget::expireStaleLiveFrames() {
-    const qint64 currentTimeMsec = qMax<qint64>(1, liveClock_.elapsed());
-    const bool riskExpired = riskObjectTracker_->expireStaleFrame(currentTimeMsec, liveConfig_.frameExpiryMsec);
-    if (riskExpired) {
-        rebuildLiveSnapshot();
-    }
-
-    if (!riskObjectTracker_->hasFrame()) {
-        liveFrameRenderTimer_.stop();
-    }
 }
 
 /**
