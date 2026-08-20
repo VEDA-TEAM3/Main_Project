@@ -164,14 +164,18 @@ frame 늦어지는 순간에만 채워져, 이미 디코딩·색변환까지 마
 3. 소프트웨어 디코더가 없고 D3D11 요소가 있으면 D3D11 사용
 4. 마지막 fallback은 `avdec_h264`
 
-즉 현재 일반적인 설치에서는 `auto`가 소프트웨어 디코딩을 선택한다. 디코더를 비교 시험하려면
+즉 `auto`는 일반적인 설치에서 소프트웨어 디코딩을 선택한다. 디코더를 비교 시험하려면
 `QTCCTV_DECODER_MODE=d3d11` 또는 `software`를 명시하고, 한 번에 다른 설정은 바꾸지 않는다.
 
 **이 선택이 `processingWidth`/`processingHeight`에 그대로 영향을 준다.** 축소는 `d3d11scale`로 하므로
 소프트웨어 경로에서는 값이 있어도 **적용되지 않는다.** 설정을 켰는데 부하가 그대로면 로그의
-`[GstRtspReceiver] ... processing=1280x720` 줄과 실제 디코더를 함께 확인한다. 축소 효과까지 받으려면
-`QTCCTV_DECODER_MODE=d3d11`로 하드웨어 디코딩을 명시해야 한다. 소프트웨어 경로에서는 CPU가 이미
-디코딩을 하고 있어 GPU→CPU 전송 자체가 없으므로, 축소로 얻을 것도 그만큼 적다.
+`[GstRtspReceiver] ... processing=1280x720` 줄과 실제 디코더를 함께 확인한다.
+
+**그래서 두 설정 파일은 `decoderMode`를 `d3d11`로 고정한다.** `auto`로 두면 `processingWidth/Height`
+1280x720이 조용히 무시되어, 4채널 전부가 카메라 원본 해상도로 CPU 디코딩 → `videoconvert`
+I420→NV12(`n-threads` 기본 1) → CPU 블러 → sink 업로드를 돈다. `d3d11`을 명시하면 축소가
+**다운로드 전에** GPU에서 걸려 그 뒤 구간의 픽셀 수가 함께 줄어든다. `d3d11h264dec`/`d3d11download`가
+없는 환경에서는 `decoderChain()`이 알아서 `avdec_h264`로 되돌아가므로 명시해 두어도 안전하다.
 
 ### 3.4 H.264 복구 설정
 
@@ -466,8 +470,8 @@ profile4 설정에서 다시 확인해야 한다.
 1. `app_config.json`과 `app_config.example.json`의 영상 수신 값은 현재 동일하다(`latencyMs=250`,
    `alignmentDelayMs=100`, `renderQueueMaximumBuffers=8`, `processingWidth/Height=1280x720`). 한쪽만
    바꾸면 새 환경이 다른 지연 특성으로 시작하므로 항상 같이 고친다.
-2. `decoderMode=auto`는 현재 구현에서 software decoder 우선이다. **이 경우 `processingWidth/Height`
-   축소는 적용되지 않는다**(`d3d11scale` 전용).
+2. `decoderMode`는 `d3d11`로 **고정**돼 있다. `auto`로 되돌리면 software decoder가 선택되고
+   **그 경로에서는 `processingWidth/Height` 축소가 적용되지 않는다**(`d3d11scale` 전용).
 3. `preprocessing.enabled=true`이지만 값이 중립이면 passthrough이므로 실제 보정 비용은 생략된다.
 4. `alignmentDelayMs`는 의도적으로 설정한 영상-MQTT 정렬 지연이므로 RTSP latency를 조정할 때 함께
    없애거나 같은 값으로 취급하면 안 된다.
@@ -484,10 +488,13 @@ GStreamer 1.28.4에서 `gst-inspect-1.0`으로 실측한 값이다. "이 요인�
 | ---: | --- | --- | --- |
 | 1 | sink 클럭 동기화 없음 (`sinkSync=false`) | GstBaseSink 문서: "When `sync` is false, incoming samples will be played as fast as possible." 요소 기본값은 `true` | 저지연 우선으로 **유지** |
 | 2 | 지터버퍼가 기본값의 1/8이고 초과분을 버림 | `rtspsrc` 기본값 `latency=2000`, `drop-on-latency=false` → 현재 `250`/`true` | 저지연 우선으로 **유지** |
-| 3 | 렌더 queue 흡수량 0 | queue 문서의 `leaky`/`max-size-*` 의미. 이전 `max-size-buffers=1` | **수정됨** (3으로 상향) |
+| 3 | 렌더 queue 흡수량 0 | queue 문서의 `leaky`/`max-size-*` 의미. 이전 `max-size-buffers=1` | **수정됨** (8로 상향) |
 | 4 | 정렬 queue가 흡수에 기여하지 않음 | queue 문서의 `min-threshold-time` 의미 | 구조상 불가피. 3장에 명시 |
 | 5 | 매 frame GPU→CPU→GPU 왕복 | `d3d11download` + sink 재업로드 | **완화됨** (NV12 유지 + 다운로드 전 축소). 블러가 CPU 접근을 요구해 왕복 자체는 유지 |
 | 6 | 블러 미사용 시에도 frame 매핑 | GstBaseTransform 문서의 `always_in_place` 복사 규칙 | **수정됨** (passthrough 적용) |
+| 7 | `decoderMode=auto`가 software를 골라 `processingWidth/Height`가 무시됨 | `decoderChain()` 분기 순서. 축소는 `d3d11scale` 전용 | **수정됨** (`d3d11` 고정) |
+| 8 | 객체가 잡히면 QML 지도가 GUI 스레드와 GPU를 상시 점유 | QQuickWidget 문서(렌더 루프·추가 render pass), Shape 문서(속성 변경 시 재삼각분할) | **완화됨** (궤적 `CurveRenderer` 제거, 무한 맥동 제거, `renderIntervalMs` 50) |
+| 9 | 위험 테두리 애니메이션이 네이티브 영상 HWND의 부모를 60 Hz 재도색 | `VideoRiskBorderFrame`의 `QVariantAnimation` + `update()` | **수정됨** (QSS 상태 전환으로 대체, 클래스 삭제) |
 
 ### 1번이 중요한 이유
 
@@ -521,17 +528,41 @@ CPU 블러가 raw frame 접근을 요구하기 때문에 생기므로 **블러�
 frame당 전송량은 1080p 기준 BGRA 8.29 MB → NV12 3.11 MB → NV12 720p 1.38 MB로 바뀐다.
 `videobalance`/`gamma`/블러가 훑는 바이트도 같은 비율로 줄어든다.
 
-### QML 전환은 영상 경로와 무관하다 (검토 완료)
+### QML은 frame을 막지는 않지만, 부하는 나눠 쓴다 (정정됨)
 
-UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 별도로 검토했고, 다음 세 가지로 분리돼 있음을
-확인했다. 같은 의심이 반복되지 않도록 근거를 남긴다.
+UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 검토했고, **데이터 경로는** 다음 두 가지로
+분리돼 있음을 확인했다. 같은 의심이 반복되지 않도록 근거를 남긴다.
 
 - **표면 분리**: 영상은 `ClickableVideoWidget`이 `WA_NativeWindow`로 만든 네이티브 HWND에
   `d3d11videosink`가 직접 그린다. QML은 최상위 창의 합성 표면에 그려진다. 서로 다른 HWND다.
 - **스레드 분리**: 디코딩·블러·present가 모두 채널별 `QThread`와 GStreamer 스트리밍 스레드에서 돈다.
   `BlurProcessor`는 채널마다 별도 인스턴스이고, mutex는 좌표 조회 구간만 잡으며 실제 블러 연산
   (`applyNv12Blur`)은 락 밖에서 실행된다. GUI 스레드가 막혀도 frame은 계속 흐른다.
-- **상시 부하 없음**: `qml/`에 항상 도는 `Timer`나 애니메이션이 없다.
+
+**세 번째로 적어 두었던 "상시 부하 없음"은 틀렸다.** 지도를 QML로 옮긴 뒤(`DigitalTwinMap.qml` +
+`ParkingPlan.js`) 확인된 사실은 이렇다.
+
+- 객체가 잡히면 `DigitalTwinMapWidget`의 `liveFrameRenderTimer_`(`digitalTwin.renderIntervalMs`)가
+  돌기 시작해 `publishObjects()`가 궤적 좌표까지 포함한 목록을 매 tick QML로 다시 넘긴다.
+  Shape 문서는 "Changing the set of path elements, changing the properties of these elements ...
+  all lead to retriangulation of the affected paths on every change"라고 못 박는다.
+- `QQuickWidget`은 그 장면을 offscreen 텍스처에 한 번 더 그린 뒤 사각형으로 합성하고
+  ("at least one additional render pass ... increased load especially for the fragment processing
+  of the GPU"), 그 렌더 루프는 GUI 스레드에 묶인다("Using QQuickWidget disables the threaded
+  render loop on all platforms"). 현재 `QQuickWidget`은 6개 이상이다.
+- 같은 iGPU가 `d3d11videosink` 스왑체인 4개를 동시에 present한다.
+
+즉 **frame이 막히지는 않지만 GPU와 GUI 스레드는 공유 자원이고, `sinkSync=false`라 그 편차가
+그대로 표시 간격이 된다.** "객체가 잡히는 순간 네 채널이 함께 끊긴다"가 이 경로의 증상이다.
+그래서 궤적 Shape에서 `CurveRenderer`를 뺐고(폴리라인이라 곡선 셰이더로 얻을 것이 없다),
+위험 테두리의 무한 맥동을 한 번짜리 페이드로 바꿨으며(장면이 다시 idle로 돌아갈 수 있게),
+`renderIntervalMs`를 50으로 두었다(`positionTransitionMs`가 그 사이를 보간한다).
+
+**영상 타일 테두리도 같은 이유로 위젯 애니메이션을 걷어냈다.** 예전 `VideoRiskBorderFrame`은
+`QVariantAnimation`으로 400~530 ms 동안 색을 보간하며 프레임마다 `update()`를 불렀는데, 그
+`QFrame`은 `d3d11videosink`가 그리는 네이티브 자식 HWND의 **부모**라 재도색이 영상 표면의
+재합성을 함께 끌고 갔다. 지금은 `riskLevel` 속성 + `app.qss` 상태 선택자로만 바뀐다.
+**이 `QFrame`에 다시 애니메이션을 붙이지 마라.**
 
 다만 z-order는 주의해야 한다. 네이티브 자식 HWND는 Qt가 합성하는 모든 내용 위에 그려지므로
 **영상 타일 위에 QML 오버레이를 올리면 보이지 않는다.** `WA_AlwaysStackOnTop`으로도 이길 수 없다.

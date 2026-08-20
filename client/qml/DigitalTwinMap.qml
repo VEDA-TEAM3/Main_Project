@@ -422,17 +422,24 @@ Item {
             }
         }
 
+        // 겹마다 무한 반복 맥동을 걸었더니, 위험이 뜬 뒤로는 이 지도가 **영영 idle로 돌아가지
+        // 못했습니다.** Qt Quick은 화면에서 뭐라도 움직이는 동안 매 vsync마다 장면 전체를
+        // 다시 래스터화하는데, QQuickWidget은 그것을 offscreen 텍스처에 한 번 더 그린 뒤
+        // 사각형으로 합성하고(Qt 문서: "at least one additional render pass ... increased load
+        // especially for the fragment processing of the GPU") 그 렌더 루프가 GUI 스레드에
+        // 묶여 있습니다(Qt 문서: "Using QQuickWidget disables the threaded render loop on all
+        // platforms"). 도면은 CurveRenderer Shape 수십 개라 그 한 장이 싸지 않고, 같은 iGPU가
+        // 영상 4채널을 present하고 있습니다. 맥동을 없애면 위 dangerBorder의 520 ms 페이드가
+        // 끝나는 순간 장면이 다시 멈추므로, 위험 표시는 남기고 상시 부하만 걷어냅니다.
         Repeater {
             model: [
-                {"w": 13, "min": 0.0, "max": 0.30, "c": "#ff0a1e"},
-                {"w": 7, "min": 0.0, "max": 0.48, "c": "#f5081c"},
-                {"w": 3.4, "min": 0.06, "max": 0.78, "c": "#ff1626"},
-                {"w": 1.4, "min": 0.12, "max": 1.0, "c": "#ff2f3d"}
+                {"w": 13, "o": 0.30, "c": "#ff0a1e"},
+                {"w": 7, "o": 0.48, "c": "#f5081c"},
+                {"w": 3.4, "o": 0.78, "c": "#ff1626"},
+                {"w": 1.4, "o": 1.0, "c": "#ff2f3d"}
             ]
 
             Rectangle {
-                id: stroke
-
                 required property var modelData
 
                 anchors.fill: parent
@@ -440,23 +447,7 @@ Item {
                 color: "transparent"
                 border.width: modelData.w
                 border.color: modelData.c
-                opacity: modelData.min
-
-                SequentialAnimation on opacity {
-                    running: root.dangerActive
-                    loops: Animation.Infinite
-
-                    NumberAnimation {
-                        to: stroke.modelData.max
-                        duration: 760
-                        easing.type: Easing.InOutSine
-                    }
-                    NumberAnimation {
-                        to: stroke.modelData.min
-                        duration: 1040
-                        easing.type: Easing.InOutSine
-                    }
-                }
+                opacity: modelData.o
             }
         }
     }

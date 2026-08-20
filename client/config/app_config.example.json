@@ -16,7 +16,7 @@
         "topviewDetailIntervalMs": 1000
     },
     "digitalTwin": {
-        "renderIntervalMs": 33,
+        "renderIntervalMs": 50,
         "snapshotPublishIntervalMs": 50,
         "frameExpiryMs": 5000,
         "frameExpiryPollMs": 1000,
@@ -67,7 +67,7 @@
             { "cameraId": "cam-08", "name": "CH - 08", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/3/profile4/media.smp", "channelIndex": 7, "enabled": true }
         ],
         "receiver": {
-            "decoderMode": "auto",
+            "decoderMode": "d3d11",
             "processingWidth": 1280,
             "processingHeight": 720,
             "busPollIntervalMs": 200,

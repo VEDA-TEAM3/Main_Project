@@ -35,7 +35,6 @@
 #include "ui/DashboardLayout.h"
 #include "ui/DigitalTwinMapWidget.h"
 #include "ui/SharedQmlEngine.h"
-#include "ui/VideoRiskBorderFrame.h"
 #include "ui/dialogs/MapSettingsDialog.h"
 #include "ui/panels/DashboardPanelCoordinator.h"
 #include "ui/panels/DashboardPanelFactory.h"
@@ -609,7 +608,8 @@ void MainWindow::updateStreamConnectionStatus() {
 
     allStreamsReady = hasEnabledStream && allStreamsReady;
 
-    setQuickTopBarProperty("cctvStatusText", allStreamsReady ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
+    setQuickTopBarProperty("cctvStatusText",
+                           allStreamsReady ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
     setQuickTopBarProperty("cctvStatusColor", allStreamsReady ? normalStatusColor : disconnectedStatusColor);
 }
 
@@ -852,7 +852,7 @@ void MainWindow::setupVideoViewEvents() {
                 areaLayout->removeWidget(widget);
             }
 
-            auto* tileFrame = new VideoRiskBorderFrame(grid->parentWidget());
+            auto* tileFrame = new QFrame(grid->parentWidget());
             tileFrame->setObjectName(QStringLiteral("videoTileFrame"));
             tileFrame->setProperty("hovered", false);
             tileFrame->setProperty("riskLevel", QStringLiteral("normal"));
@@ -1076,7 +1076,7 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
     }
 
     for (qsizetype channelIndex = 0; channelIndex < videoTileFrames_.size(); ++channelIndex) {
-        VideoRiskBorderFrame* tileFrame = videoTileFrames_[channelIndex];
+        QFrame* tileFrame = videoTileFrames_[channelIndex];
         if (!tileFrame) {
             continue;
         }
@@ -1096,7 +1096,6 @@ void MainWindow::updateVideoRiskBorders(const QVector<DigitalTwinRiskLevel>& ris
         }
 
         tileFrame->setProperty("riskLevel", riskName);
-        tileFrame->setRiskLevel(visibleRiskLevel);
         const bool hovered = riskName == QStringLiteral("normal") && videoWidgets_[channelIndex] &&
                              videoWidgets_[channelIndex]->underMouse();
         tileFrame->setProperty("hovered", hovered);

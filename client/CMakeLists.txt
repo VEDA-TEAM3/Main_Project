@@ -66,8 +66,6 @@ qt_add_executable(Qtcctvclient
     src/ui/DigitalTwinObjectTableModel.cpp
     include/ui/EventLogTableModel.h
     src/ui/EventLogTableModel.cpp
-    include/ui/VideoRiskBorderFrame.h
-    src/ui/VideoRiskBorderFrame.cpp
 
 
     include/video/StreamReceiver.h

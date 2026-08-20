@@ -35,11 +35,15 @@ Item {
     // dashPattern은 선 굵기의 배수라 [4,4]는 칠한 만큼 그대로 비웁니다. 그러면 실제 궤적 길이는
     // 그대로인데 눈에는 절반만 남아 경로가 짧아 보입니다. 칠한 쪽을 두 배로 두어 예전
     // QPainter의 Qt::DashLine(4:2)과 같은 밀도로 맞춥니다.
+    // 여기는 CurveRenderer를 쓰지 않습니다. PathPolyline은 곡선이 하나도 없어 곡선 셰이더로
+    // 얻을 것이 없는데, 궤적 좌표는 C++이 매 갱신마다 새로 넘기므로 Shape 문서가 말하는
+    // "path element 속성이 바뀌면 해당 path를 매번 다시 삼각분할한다"에 그대로 걸립니다.
+    // 파선 + 둥근 캡/조인은 그 재생성이 가장 비싼 조합이라, 객체가 잡히는 순간부터 지도가
+    // 초당 20번 이 비용을 물고 그만큼 영상 렌더와 GPU·GUI 스레드를 나눠 쓰게 됩니다.
     Shape {
         anchors.fill: parent
         visible: root.showTrail && root.trailPoints.length > 1
         opacity: 0.7
-        preferredRendererType: Shape.CurveRenderer
 
         ShapePath {
             strokeColor: root.fields[8]

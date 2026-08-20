@@ -178,6 +178,20 @@ QFrame#videoTileFrame[hovered="true"] {
     border-color: #7da8b8;
 }
 
+/* 위험 테두리는 QSS 상태로만 바꾼다. 예전에는 QVariantAnimation이 400~530 ms 동안 색을
+   보간하며 프레임마다 update()를 불렀는데, 이 QFrame은 d3d11videosink가 직접 그리는
+   네이티브 자식 HWND의 부모라 그 재도색이 영상 표면의 재합성을 함께 끌고 갔다.
+   색이 즉시 바뀌는 대신 검출 순간의 60 Hz 재도색이 사라진다. */
+QFrame#videoTileFrame[riskLevel="warning"] {
+    background-color: #ffd43b;
+    border-color: #ffd43b;
+}
+
+QFrame#videoTileFrame[riskLevel="danger"] {
+    background-color: #ff2f3d;
+    border-color: #ff2f3d;
+}
+
 QFrame#videoLoadingOverlay {
     background-color: #000000;
     border-radius: 4px;

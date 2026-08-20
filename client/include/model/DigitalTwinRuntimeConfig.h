@@ -5,10 +5,10 @@
 #include <QtGlobal>
 #include <limits>
 
-/// 도면 격자가 4열 x 2행이므로 구역은 최대 8개다.
-/// 더 늘리려면 qml/ParkingPlan.js의 ZONE_COLS/ZONE_ROWS와 홀 가로세로비부터 바꿔야 한다
-/// (셀이 정사각형이 아니면 객체의 가로·세로 배율이 어긋난다)
-inline constexpr int digitalTwinMaximumZoneCount = 8;
+/// 도면 격자가 3열 x 2행이므로 구역은 최대 6개다.
+/// 바꾸려면 qml/ParkingPlan.js의 ZONE_COLS/ZONE_ROWS를 같이 고쳐야 한다 — 이 값은 설정 로더가
+/// 받아들이는 구역 수의 상한이고, 도면이 그릴 수 있는 칸 수를 넘기면 구역이 도면 밖에 찍힌다
+inline constexpr int digitalTwinMaximumZoneCount = 6;
 
 struct DigitalTwinWorldConfig {
     QRectF bounds = QRectF(0.0, 0.0, 100.0, 100.0);

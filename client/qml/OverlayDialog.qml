@@ -24,9 +24,9 @@ PanelFrame {
     readonly property color riskColor: root.riskText === "위험" ? Theme.danger
                                                                 : (root.riskText === "주의" ? Theme.warning : Theme.safe)
 
-    // 구역 선택은 4열 2행 버튼 여덟 개가 전부다. 버튼 하나가 148px이 되도록 거꾸로 잡은
-    // 크기다 (칸 164 x 4열 + 좌우 여백 68)
-    implicitWidth: root.mode === "area" ? 724 : 470
+    // 구역 선택은 3열 2행 버튼 여섯 개가 전부다. 버튼 하나가 148px이 되도록 거꾸로 잡은
+    // 크기다 (칸 164 x 3열 + 좌우 여백 68)
+    implicitWidth: root.mode === "area" ? 560 : 470
     implicitHeight: root.mode === "area" ? 280 : (root.reportMode ? 288 : 230)
     radius: 0
     color: Theme.surfaceRaised
@@ -207,7 +207,7 @@ PanelFrame {
                     }
                 }
 
-                // 구역은 4열 2행에 순서대로 배치하고, 미사용 칸은 비워 둡니다.
+                // 구역은 3열 2행에 순서대로 배치하고, 미사용 칸은 비워 둡니다.
                 // 칸 수는 도면 격자(ParkingPlan.js의 ZONE_COLS x ZONE_ROWS)와 같아야 합니다.
                 Rectangle {
                     anchors.fill: parent
@@ -222,9 +222,9 @@ PanelFrame {
 
                         anchors.fill: parent
                         anchors.margins: 12
-                        cellWidth: width / 4
+                        cellWidth: width / 3
                         cellHeight: height / 2
-                        model: 8
+                        model: 6
                         currentIndex: root.selectedIndex
                         clip: true
 

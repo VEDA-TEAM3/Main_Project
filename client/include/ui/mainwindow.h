@@ -32,7 +32,6 @@ class QShowEvent;
 class ReportGateway;
 class StreamReceiverFactory;
 class StreamSessionManager;
-class VideoRiskBorderFrame;
 class QWidget;
 class QVariant;
 enum class DigitalTwinRiskLevel;
@@ -132,7 +131,7 @@ private:
     QString configSourcePath_;
 
     QVector<QWidget*> videoWidgets_;
-    QVector<VideoRiskBorderFrame*> videoTileFrames_;
+    QVector<QFrame*> videoTileFrames_;
     QVector<QGridLayout*> videoAreaLayouts_;
     QVector<StreamConfig> streamConfigs_;
     QVector<bool> streamChannelReady_;
