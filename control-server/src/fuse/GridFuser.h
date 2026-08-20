@@ -67,6 +67,7 @@ private:
         domain::WorldPoint motionDelta;  ///< 융합 윈도우당 평균 이동량(m)
         domain::WorldPoint pos;         ///< UI/zone/risk에 전달한 안정화 좌표
         std::uint64_t lastMotionFrame = 0;
+        bool hasMotion = false;
         int missedWindows = 0;
     };
 
