@@ -31,7 +31,7 @@ veda::RiskLevel decodeRiskLevel(const veda_uplink_packet_t& pkt) {
     return veda::RiskLevel::None;
 }
 
-///   @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
+/// @brief veda_uplink_packet_t 의 개별 표시 상태를 그대로 HwIndicatorState 로 옮김
 HwIndicatorState decodeIndicators(const veda_uplink_packet_t& pkt) {
     return HwIndicatorState{static_cast<bool>(pkt.siren_on), static_cast<bool>(pkt.buzzer_on),
                             static_cast<bool>(pkt.led_red), static_cast<bool>(pkt.led_yellow),
@@ -68,11 +68,6 @@ SerialHwEventDispatcher::~SerialHwEventDispatcher() {
     }
 }
 
-/**
- * @details 포트를 못 열어도 예외를 던지지 않는다(AppConfig::load와 동일한 원칙).
- *          fd_ == -1로 남기고, dispatch()/readerLoop()가 이를 감지해 조용히 스킵한다.
- *          TODO: 재연결 로직은 없음 — 지금은 서버 재시작으로만 복구 가능
- */
 void SerialHwEventDispatcher::openPort() {
     fd_ = open(devicePath_.c_str(), O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
@@ -106,11 +101,6 @@ void SerialHwEventDispatcher::openPort() {
     logSuccess(kIface, devicePath_ + " 연결됨 (115200 8N1)");
 }
 
-/**
- * @details ConsoleDispatcher와 동일하게 이전에 실제로 전송 성공한 값과 비교해 변경분만 보낸다.
- *          IHwEventDispatcher.h의 @note대로, 비교 기준은 "마지막 전송 성공 값"이어야 유실 시
- *          재전송 누락이 안 생긴다 — write()가 실패하면 lastSentLevel_을 갱신하지 않는다.
- */
 void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     if (fd_ < 0) {
         return;
@@ -173,12 +163,6 @@ void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
     }
 }
 
-/**
- * @details readerLoop()는 콜백 등록 여부와 무관하게 생성 시점부터 계속 상행 프레임을 수신해
- *          reportedState_를 갱신해왔다. 여기서 콜백을 뒤늦게 등록하면, 등록 이전에 이미 파악된
- *          채널별 상태는 다음 전환(alive/indicators 변화)이 생길 때까지 통지되지 않으므로,
- *          등록 즉시 현재 reportedState_ 스냅샷을 한 번 통지해 그 공백을 없앤다.
- */
 void SerialHwEventDispatcher::setStatusCallback(StatusCallback callback) {
     std::lock_guard<std::mutex> lock(heartbeatMutex_);
     statusCallback_ = std::move(callback);
@@ -190,11 +174,6 @@ void SerialHwEventDispatcher::setStatusCallback(StatusCallback callback) {
     }
 }
 
-/**
- * @details STM32 rx_task와 대칭인 상행 프레임 동기화 상태머신.
- *          START_BYTE를 찾을 때까지 앞의 쓰레기 바이트는 건너뛰고, payload(16B)+checksum+END_BYTE가
- *          모두 맞아야 유효한 프레임으로 처리한다. 체크섬/END가 어긋나면 조용히 버리고 재동기화.
- */
 void SerialHwEventDispatcher::readerLoop() {
     enum State { WAIT_START, READ_PAYLOAD, READ_CHECKSUM, WAIT_END };
     State state = WAIT_START;
@@ -263,15 +242,6 @@ void SerialHwEventDispatcher::handleUplinkFrame(const veda_uplink_packet_t& pkt)
     checkChannelMismatch(pkt);
 }
 
-/**
- * @details pkt의 led_red/led_yellow 상태를 decodeRiskLevel()로 RiskLevel 로 디코드해
- *          (그 채널 LED가 실제로 표시 중인 값), 이 채널에 마지막으로 보낸 명령(lastSentLevel_)과
- *          비교한다.
- *          - 아직 명령을 보낸 적 없는 채널은 비교 기준이 없으므로 스킵
- *          - 일치하면 재시도 카운터를 리셋하고 fault 상태였다면 해소 처리
- *          - 불일치면 재시도 카운터를 올리고 mismatchRetryCount_ 이내면 재전송,
- *            소진되면 mismatchEscalateAfterRetries_ 설정에 따라 에스컬레이션
- */
 void SerialHwEventDispatcher::checkChannelMismatch(const veda_uplink_packet_t& pkt) {
     const auto ch = static_cast<veda::ChannelId>(pkt.channel_id);
     const veda::RiskLevel reportedLevel = decodeRiskLevel(pkt);
@@ -322,13 +292,6 @@ void SerialHwEventDispatcher::checkChannelMismatch(const veda_uplink_packet_t& p
     }
 }
 
-/**
- * @details lastSentLevel_에 저장된 값을 그대로 새 타임스탬프로 재전송한다.
- *          원본 dist_mm은 알 수 없으므로 VEDA_DIST_MM_NONE으로 보낸다 -- 재전송의
- *          목적은 "이 채널이 어떤 risk_level을 표시해야 하는지"를 다시 알리는 것이지
- *          원래 프레임의 거리 측정값을 복원하는 게 아니기 때문이다.
- * @note 호출자(checkChannelMismatch)가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
- */
 void SerialHwEventDispatcher::resendLastCommand(veda::ChannelId ch, veda::RiskLevel level) {
     if (fd_ < 0) {
         return;
@@ -359,7 +322,6 @@ void SerialHwEventDispatcher::resendLastCommand(veda::ChannelId ch, veda::RiskLe
     logSuccess(kIface, "채널 " + std::to_string(ch) + " 명령 재전송 (" + std::string(veda::toString(level)) + ")");
 }
 
-/// @note 호출자가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
 void SerialHwEventDispatcher::raiseFault(veda::ChannelId ch) {
     auto it = faultState_.find(ch);
     const bool wasFaulted = (it != faultState_.end()) && it->second;
@@ -373,7 +335,6 @@ void SerialHwEventDispatcher::raiseFault(veda::ChannelId ch) {
     }
 }
 
-/// @note 호출자가 이미 sendStateMutex_를 잡고 있는 상태에서 불린다.
 void SerialHwEventDispatcher::clearFault(veda::ChannelId ch) {
     auto it = faultState_.find(ch);
     const bool wasFaulted = (it != faultState_.end()) && it->second;
@@ -387,10 +348,6 @@ void SerialHwEventDispatcher::clearFault(veda::ChannelId ch) {
     }
 }
 
-/**
- * @details setStatusCallback과 동일한 이유로, 등록 즉시 현재 파악된 채널별 fault 상태를
- *          스냅샷으로 한 번 통지해 등록 이전 상태 공백을 없앤다.
- */
 void SerialHwEventDispatcher::setFaultCallback(FaultCallback callback) {
     std::lock_guard<std::mutex> lock(sendStateMutex_);
     faultCallback_ = std::move(callback);
@@ -402,11 +359,6 @@ void SerialHwEventDispatcher::setFaultCallback(FaultCallback callback) {
     }
 }
 
-/**
- * @details alive 상태를 갱신하고, 실제로 바뀐 경우에만 콜백을 통지한다. HEARTBEAT를 받을
- *          때마다(alive=true) lastHeartbeatAt_는 전이 여부와 무관하게 항상 갱신해야
- *          watchdogLoop()가 타임아웃을 정확히 판단할 수 있다.
- */
 void SerialHwEventDispatcher::reportAlive(veda::ChannelId ch, bool alive) {
     std::lock_guard<std::mutex> lock(heartbeatMutex_);
     if (alive) {
@@ -424,7 +376,6 @@ void SerialHwEventDispatcher::reportAlive(veda::ChannelId ch, bool alive) {
     }
 }
 
-/// @details 표시 상태(led/siren/buzzer)가 실제로 바뀐 경우에만 콜백을 통지한다.
 void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndicatorState& indicators) {
     std::lock_guard<std::mutex> lock(heartbeatMutex_);
     ReportedState& state = reportedState_[ch];
@@ -438,12 +389,6 @@ void SerialHwEventDispatcher::reportIndicators(veda::ChannelId ch, const HwIndic
     }
 }
 
-/**
- * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
- *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
- * @note    타임아웃 채널을 락 안에서 모아두고 락을 푼 뒤에 reportAlive()를 호출한다.
- *          reportAlive()가 같은 heartbeatMutex_(비재귀)를 다시 잠그므로 이 순서를 지켜야 한다.
- */
 void SerialHwEventDispatcher::watchdogLoop() {
     const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
                                                            static_cast<uint64_t>(missedBeatsForTimeout_));
