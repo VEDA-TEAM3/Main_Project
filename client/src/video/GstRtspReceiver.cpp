@@ -143,6 +143,63 @@ QString normalizedGstErrorText(GError* error, const gchar* debugInfo) {
 }
 
 /**
+ * @brief         rtspsrc가 실제로 어느 하위 transport로 붙었는지 판별합니다.
+ * @param source  PLAYING 상태의 rtspsrc element
+ * @return        내부에 udpsrc가 있으면 "UDP", 없으면 "TCP(interleaved)"
+ *
+ * @details rtspsrc의 protocols 기본값은 UDP를 먼저 시도하고 실패하면 TCP로 넘어가므로, 로그가
+ *          없으면 끊김이 망 손실인지 로컬 부하인지 가를 근거가 없다. UDP transport일 때만
+ *          rtspsrc가 내부에 udpsrc를 만들기 때문에 그 존재로 판별한다.
+ */
+QString negotiatedTransportName(GstElement* source) {
+    if (!source || !GST_IS_BIN(source)) {
+        return QStringLiteral("unknown");
+    }
+
+    GstIterator* iterator = gst_bin_iterate_recurse(GST_BIN(source));
+
+    if (!iterator) {
+        return QStringLiteral("unknown");
+    }
+
+    bool hasUdpSource = false;
+    bool done = false;
+    GValue item = G_VALUE_INIT;
+
+    while (!done) {
+        switch (gst_iterator_next(iterator, &item)) {
+            case GST_ITERATOR_OK: {
+                auto* element = static_cast<GstElement*>(g_value_get_object(&item));
+                GstElementFactory* factory = element ? gst_element_get_factory(element) : nullptr;
+                const gchar* factoryName = factory ? GST_OBJECT_NAME(factory) : nullptr;
+
+                if (factoryName && std::strcmp(factoryName, "udpsrc") == 0) {
+                    hasUdpSource = true;
+                    done = true;
+                }
+
+                g_value_reset(&item);
+                break;
+            }
+
+            case GST_ITERATOR_RESYNC:
+                hasUdpSource = false;
+                gst_iterator_resync(iterator);
+                break;
+
+            default:
+                done = true;
+                break;
+        }
+    }
+
+    g_value_unset(&item);
+    gst_iterator_free(iterator);
+
+    return hasUdpSource ? QStringLiteral("UDP") : QStringLiteral("TCP(interleaved)");
+}
+
+/**
  * @brief            오류 문구가 인증 실패 계열인지 확인합니다.
  * @param errorText  정규화된 오류 메시지
  * @return           인증 실패이면 true
@@ -351,12 +408,14 @@ void GstRtspReceiver::startPipeline() {
             : QStringLiteral("source");
     const QString pathName =
         systemMemoryChainActive_ ? QStringLiteral("cpu(download)") : QStringLiteral("gpu(no-download)");
+    const qint64 playoutDelayMsec = systemMemoryChainActive_ ? config_.alignmentDelayMsec : 0;
     qInfo().noquote() << QStringLiteral(
-                             "[GstRtspReceiver] video path=%1 alignment delay=%2ms maxBuffer=%3ms "
-                             "processing=%4")
+                             "[GstRtspReceiver] video path=%1 sinkSync=%2 tsOffset=%3ms renderQueue=%4ms "
+                             "processing=%5")
                              .arg(pathName)
-                             .arg(systemMemoryChainActive_ ? config_.alignmentDelayMsec : 0)
-                             .arg(systemMemoryChainActive_ ? config_.alignmentQueueMaximumTimeMsec : 0)
+                             .arg(config_.sinkSync)
+                             .arg(playoutDelayMsec)
+                             .arg(config_.renderQueueMaximumTimeMsec + playoutDelayMsec)
                              .arg(systemMemoryChainActive_ ? processingSize : QStringLiteral("source"));
 
     GError* error = nullptr;
@@ -661,8 +720,16 @@ void GstRtspReceiver::markFirstPacket() {
     }
 
     const qint64 elapsed = startupTimer_.isValid() ? startupTimer_.elapsed() : 0;
+    QString transport = QStringLiteral("unknown");
 
-    emit statusChanged(QString("First RTP/H264 packet in %1 ms").arg(elapsed));
+    if (GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline_), "src")) {
+        transport = negotiatedTransportName(source);
+        gst_object_unref(source);
+    }
+
+    qInfo().noquote()
+        << QStringLiteral("[GstRtspReceiver] RTSP transport=%1 firstPacket=%2 ms").arg(transport).arg(elapsed);
+    emit statusChanged(QString("First RTP/H264 packet in %1 ms (%2)").arg(elapsed).arg(transport));
 }
 
 /**
@@ -1042,39 +1109,55 @@ bool GstRtspReceiver::needsSystemMemoryChain() const {
  * @param systemMemoryChain   true면 CPU 처리 경로, false면 GPU 전용 경로
  * @return                    gst_parse_bin_from_description에 넘길 문자열
  *
- * @details CPU 경로의 두 큐는 역할이 다르므로 값을 같이 보고 조정해야 한다.
+ * @details 블러 정렬용 지연은 **sink의 ts-offset**으로 만든다. 예전에는 별도 alignmentqueue에
+ *          min-threshold-time을 걸었는데, queue 문서상 그 값은 "출력을 허용하는 최소 보유량"이라
+ *          임계값 아래로 내려가면 출력이 다시 멈춘다. 즉 쌓아 둔 분량을 언더런 흡수에 쓸 수 없어
+ *          '지연'이기만 하고 '완충'이 아니었고, 짧은 언더런도 임계값을 다시 채울 때까지 늘어났다.
+ *          sink가 클럭에 맞춰 꺼내가면 같은 지연이 renderqueue의 진짜 여유분이 된다.
  *
- *          alignmentqueue: min-threshold-time만큼 쌓여야 출력이 시작되는 고정 지연선이다
- *            (블러 정렬용). 임계값 아래로 내려가면 다시 멈추므로 쌓인 분량을 언더런 흡수에 쓸 수
- *            없다. 즉 '지연'이지 '완충'이 아니고, 짧은 언더런도 임계값을 다시 채울 때까지 늘린다.
- *            그래서 블러가 없는 GPU 경로에는 아예 넣지 않는다.
- *          renderqueue: 실제 완충이자 프레임을 버리는 유일한 지점이다. 싱크가 sync=false로 도착
- *            즉시 렌더하므로 평시에는 큐가 비어 있어 깊이를 늘려도 지연이 늘지 않는다. 두 경로 모두 둔다.
+ *          그래서 세 값이 한 몸이다. **셋을 따로 만지지 마라.**
+ *            sinkSync=true : ts-offset은 clock 동기화 경로에서만 쓰인다. false면 지연이 사라진다
+ *                            (설정 로더가 막는다).
+ *            ts-offset     : alignmentDelayMs. 블러가 없는 GPU 경로에는 정렬할 대상이 없어 0이다.
+ *            renderqueue   : ts-offset만큼을 담아야 한다. 못 담으면 leaky=downstream이 상시 프레임을
+ *                            버려서 지연이 서지 않는다. 그래서 상한이 여유분 + 지연이다.
+ *
+ *          max-lateness는 -1로 끈다. 요소 기본값이 5 ms라 sync=true로 켜는 순간 조금만 늦은 프레임도
+ *          sink가 버리는데, 드롭 지점은 renderqueue 하나로 유지하는 편이 원인을 읽기 쉽다.
+ *
+ *          queue 상한은 전부 시간으로만 건다. buffer 개수 상한은 같은 시간이라도 fps에 따라 값이
+ *          달라져서, 30fps에서 지연보다 먼저 걸리면 위의 관계가 조용히 무너진다.
+ *
+ *          navigation 이벤트는 끈다(요소 기본값 true). 앱은 GstNavigation을 쓰지 않는데,
+ *          켜 두면 영상 위에서 마우스가 움직일 때마다 sink가 파이프라인 상류 전체로 이벤트를 올린다.
  *
  *          포맷은 디코더가 내는 NV12를 끝까지 유지한다. videobalance/gamma/qtblur/d3d11videosink가
  *          모두 NV12를 받으므로 videoconvert는 d3d11 경로에서 통과만 하고, BGRA로 바꿀 때 들던
  *          픽셀당 4바이트 풀프레임 변환과 그만큼 늘어난 GPU 왕복 전송이 사라진다.
  */
 QString GstRtspReceiver::videoChainDescription(bool systemMemoryChain) const {
+    const qint64 playoutDelayMsec = systemMemoryChain ? config_.alignmentDelayMsec : 0;
+
+    // decodequeue는 압축 H.264를 담으므로 깊어도 싸다(4 Mbps 기준 1초 = 약 500 KB). 여기서 막히면
+    // 그 backpressure가 rtpjitterbuffer까지 올라가고, drop-on-latency=true가 초과분을 버려서
+    // 로컬 GPU 히컵이 네트워크 손실처럼 나타난다(depay의 wait-for-keyframe 때문에 다음 IDR까지 정지).
+    // leaky는 절대 켜지 마라. 디코더 앞에서 프레임을 버리면 화면이 깨진다
     const QString commonHead = QStringLiteral(
                                    "rtph264depay name=depay request-keyframe=true "
                                    "wait-for-keyframe=true ! "
                                    "h264parse config-interval=-1 ! "
-                                   "queue name=decodequeue silent=true max-size-buffers=%1 "
-                                   "max-size-bytes=0 max-size-time=%2 ! "
-                                   "valve name=presentationvalve drop=false drop-mode=transform-to-gap "
-                                   "! "
-                                   "%3 ! identity name=framewatch silent=true signal-handoffs=false ! ")
-                                   .arg(config_.decodeQueueMaximumBuffers)
+                                   "queue name=decodequeue silent=true max-size-buffers=0 "
+                                   "max-size-bytes=0 max-size-time=%1 ! "
+                                   "valve name=presentationvalve drop=false ! "
+                                   "%2 ! identity name=framewatch silent=true signal-handoffs=false ! ")
                                    .arg(config_.decodeQueueMaximumTimeMsec * 1000LL * 1000LL)
                                    .arg(decoderChain(systemMemoryChain));
 
     const QString renderQueue = QStringLiteral(
                                     "queue name=renderqueue silent=true leaky=downstream "
-                                    "max-size-buffers=%1 max-size-bytes=0 "
-                                    "max-size-time=%2 ! ")
-                                    .arg(config_.renderQueueMaximumBuffers)
-                                    .arg(config_.renderQueueMaximumTimeMsec * 1000LL * 1000LL);
+                                    "max-size-buffers=0 max-size-bytes=0 "
+                                    "max-size-time=%1 ! ")
+                                    .arg((config_.renderQueueMaximumTimeMsec + playoutDelayMsec) * 1000LL * 1000LL);
 
     // 값을 직접 끼워 넣는다. 예전처럼 기본값 문자열을 만들어 두고 replace로 갈아끼우면
     // "sync=false"가 "async=false" 안쪽에도 걸려서, sinkSync를 켜는 순간 async까지 같이 켜지고
@@ -1082,20 +1165,16 @@ QString GstRtspReceiver::videoChainDescription(bool systemMemoryChain) const {
     const auto boolText = [](bool value) { return value ? QStringLiteral("true") : QStringLiteral("false"); };
     const QString sink = QStringLiteral(
                              "d3d11videosink name=videosink force-aspect-ratio=true "
-                             "enable-last-sample=false qos=%1 "
-                             "sync=%2 async=%3")
+                             "enable-last-sample=false enable-navigation-events=false "
+                             "max-lateness=-1 ts-offset=%1 qos=%2 "
+                             "sync=%3 async=%4")
+                             .arg(playoutDelayMsec * 1000LL * 1000LL)
                              .arg(boolText(config_.sinkQos), boolText(config_.sinkSync), boolText(config_.sinkAsync));
 
     QString description = commonHead;
 
     if (systemMemoryChain) {
-        description += QStringLiteral(
-                           "videoconvert ! video/x-raw,format=NV12 ! "
-                           "queue name=alignmentqueue silent=true leaky=downstream "
-                           "max-size-buffers=0 max-size-bytes=0 "
-                           "max-size-time=%1 min-threshold-time=%2 ! ")
-                           .arg(config_.alignmentQueueMaximumTimeMsec * 1000LL * 1000LL)
-                           .arg(config_.alignmentDelayMsec * 1000LL * 1000LL);
+        description += QStringLiteral("videoconvert ! video/x-raw,format=NV12 ! ");
         description += renderQueue;
         description += QStringLiteral(
             "videobalance name=balance brightness=0.0 contrast=1.0 "

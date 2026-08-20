@@ -65,15 +65,16 @@ struct GstRtspReceiverConfig {
     bool rtspKeepAlive = true;
     bool udpReconnect = true;
     bool addReferenceTimestampMeta = true;
-    int decodeQueueMaximumBuffers = 0;
+    // queue는 전부 시간으로만 제한한다. buffer 개수 상한은 같은 시간이라도 fps에 따라 값이 달라져서,
+    // 30fps에서 정렬 지연보다 먼저 걸리면 지연선이 조용히 무너진다
     qint64 decodeQueueMaximumTimeMsec = 0;
     // Intentional decoded-video playout delay used to align video with slower AI/MQTT state updates.
+    // sink의 ts-offset으로 적용하므로 sinkSync=true가 전제다(설정 로더가 검증한다).
     qint64 alignmentDelayMsec = 250;
-    qint64 alignmentQueueMaximumTimeMsec = 450;
-    int renderQueueMaximumBuffers = 0;
+    // 정렬 지연 위에 얹는 순수 여유분. renderqueue의 실제 상한은 이 값 + alignmentDelayMsec다
     qint64 renderQueueMaximumTimeMsec = 0;
     bool sinkQos = false;
-    bool sinkSync = false;
+    bool sinkSync = true;
     bool sinkAsync = false;
     qint64 minimumLoadingMsec = 0;
     int reconnectSpreadMsec = 0;

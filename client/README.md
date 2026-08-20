@@ -221,11 +221,12 @@ AI/MQTT 처리 결과와 맞추기 위한 의도적 영상 표시 지연입니�
 채널을 확대했을 때만 약간 부드러워집니다. 너비와 높이를 모두 지정해도 `d3d11scale`이 pixel-aspect-ratio로
 화면비를 보정하므로 4:3 카메라도 왜곡되지 않습니다.
 
-`alignmentDelayMs`는 큐의 `min-threshold-time`으로 구현한 **고정 지연선**입니다. 임계값 아래로 내려가면
-출력이 멈추므로 쌓인 분량을 지터 흡수에 쓸 수 없습니다. 지터를 흡수하고 프레임을 버리는 지점은
-`renderQueueMaximumBuffers` 하나뿐입니다. 싱크가 `sinkSync: false`로 도착 즉시 렌더하므로 평시에는 이 큐가
-비어 있어 깊이를 늘려도 지연이 늘지 않고, 블러나 GPU 업로드가 한 프레임 늦어질 때만 채워집니다. 1로 두면
-흡수량이 0이라 짧은 지연도 곧바로 드롭이 되므로 8을 기본값으로 씁니다(720p NV12 기준 프레임당 약 1.4 MB).
+`alignmentDelayMs`는 싱크의 `ts-offset`으로 구현한 **표시 지연**입니다. 그래서 `sinkSync: true`가 전제이며,
+둘의 조합은 설정 로더가 검증합니다(`sinkSync: false`면 지연이 무시되어 블러만 앞서 나갑니다).
+지터를 흡수하고 프레임을 버리는 지점은 `renderqueue` 하나뿐이고, 그 상한은
+`renderQueueMaximumTimeMs + alignmentDelayMs`입니다. 앞의 값은 지연 **위에 얹는 여유분**이라 늘려도
+정상 지연이 늘지 않습니다. 예전처럼 큐의 `min-threshold-time`으로 지연을 만들지 마세요 — 임계값 아래로
+내려가면 출력이 멈춰서 쌓인 분량을 지터 흡수에 쓸 수 없습니다.
 
 탑뷰 배치는 서버 `zoneId`가 어느 물리 CCTV 맵인지 정하고(`zoneId / 4`), 맵 안에서의 좌표는 그 구역의 월드
 상자로 정규화합니다. 구역 상자는 `digitalTwin.world.zones`에 `video.areas` 개수와 똑같이 적습니다(최대 6개).

@@ -12,6 +12,14 @@
 // 반대로 두면 GStreamer가 같이 들고 다니는 libstdc++-6/libgcc_s_seh-1/libwinpthread-1이 Qt의
 // MinGW 13.1 것을 가려서, gst_init 뒤 QObject 자식을 파괴하는 자리에서 heap이 깨진다
 // (0xC0000374, 백트레이스는 QObjectPrivate::deleteChildren). 검사 로직과는 무관한 증상이다.
+//
+// **여기서 gst_parse_bin_from_description으로 체인을 파싱해 보려 하지 마라.** 오타 난 property를
+// 잡고 싶은 마음은 맞지만 이 환경에서는 절대 돌지 않는다. 위 PATH 순서(Qt 먼저)에서는
+// libgstd3d11.dll이 로드에 실패하고(procedure not found), 그래도 registry에는 factory가 남아 있어
+// "no property ... in element d3d11h264dec" 같은 엉뚱한 오류가 난다. 반대 순서로 돌리면 파싱까지
+// 가기 전에 GstRtspReceiver 소멸에서 위 heap 손상으로 죽는다. 실제로 둘 다 해 봤다.
+// property 이름·범위는 gst-inspect-1.0으로 확인할 것(GStreamer bin만 PATH에 두면 잘 돈다):
+//   gst-inspect-1.0 d3d11videosink | Select-String "ts-offset|max-lateness|enable-navigation-events"
 
 #include <gst/gst.h>
 
@@ -29,12 +37,10 @@ GstRtspReceiverConfig baseConfig() {
     config.decoderMode = QStringLiteral("d3d11");
     config.processingWidth = 1280;
     config.processingHeight = 720;
-    config.decodeQueueMaximumBuffers = 8;
-    config.decodeQueueMaximumTimeMsec = 100;
+    config.decodeQueueMaximumTimeMsec = 800;
     config.alignmentDelayMsec = 100;
-    config.alignmentQueueMaximumTimeMsec = 450;
-    config.renderQueueMaximumBuffers = 8;
     config.renderQueueMaximumTimeMsec = 200;
+    config.sinkSync = true;
     return config;
 }
 
@@ -93,30 +99,45 @@ int main(int argc, char** argv) {
     assert(!gpuChain.contains(QStringLiteral("videobalance")));
     assert(!gpuChain.contains(QStringLiteral("gammafilter")));
     assert(!gpuChain.contains(QStringLiteral("qtblur")));
-    // 블러 정렬용 지연선도 같이 빠져야 한다. 남겨 두면 언더런마다 임계값만큼 더 멈춘다
-    assert(!gpuChain.contains(QStringLiteral("alignmentqueue")));
+    // 정렬할 블러가 없으므로 GPU 경로에는 지연도 없어야 한다. 남겨 두면 renderqueue가 담지도
+    // 못하는 지연을 sink가 기다리면서 leaky queue가 상시 프레임을 버린다
+    assert(gpuChain.contains(QStringLiteral("ts-offset=0")));
     // 완충과 출력은 두 경로 모두 있어야 한다
     assert(gpuChain.contains(QStringLiteral("renderqueue")));
     assert(gpuChain.contains(QStringLiteral("d3d11videosink")));
     assert(gpuChain.contains(QStringLiteral("framewatch")));
     assert(gpuChain.contains(QStringLiteral("presentationvalve")));
+    // GPU 경로의 renderqueue 상한은 여유분 그대로다(지연이 0이므로)
+    assert(gpuChain.contains(QStringLiteral("max-size-time=200000000")));
 
     // CPU 경로에는 전부 있어야 한다
     const QString cpuChain = chainFor(neutral, true);
     assert(cpuChain.contains(QStringLiteral("d3d11download")));
-    assert(cpuChain.contains(QStringLiteral("alignmentqueue")));
-    assert(cpuChain.contains(QStringLiteral("min-threshold-time=100000000")));
     assert(cpuChain.contains(QStringLiteral("qtblur")));
     assert(cpuChain.contains(QStringLiteral("videobalance")));
     assert(cpuChain.contains(QStringLiteral("gammafilter")));
     assert(cpuChain.contains(QStringLiteral("renderqueue")));
     assert(cpuChain.contains(QStringLiteral("d3d11videosink")));
 
+    // 정렬 지연은 sink의 ts-offset이고, renderqueue는 그 지연 + 여유분을 담아야 한다. 둘이
+    // 어긋나면 leaky=downstream이 지연을 세우지 못하고 계속 프레임을 버린다
+    assert(cpuChain.contains(QStringLiteral("ts-offset=100000000")));
+    assert(cpuChain.contains(QStringLiteral("max-size-time=300000000")));
+    // ts-offset은 clock 동기화 경로에서만 쓰인다. sync가 꺼져 있으면 지연이 통째로 사라진다
+    assert(cpuChain.contains(QStringLiteral("sync=true")));
+    // 드롭 지점은 renderqueue 하나로 유지한다. 요소 기본값 5 ms를 두면 sink가 먼저 버린다
+    assert(cpuChain.contains(QStringLiteral("max-lateness=-1")));
+    // 앱은 GstNavigation을 쓰지 않는다. 켜 두면 마우스가 움직일 때마다 상류로 이벤트가 올라간다
+    assert(cpuChain.contains(QStringLiteral("enable-navigation-events=false")));
+    // 숨긴 채널의 valve는 그냥 버려야 한다. transform-to-gap은 GAP마다 디코더를 drain시킨다
+    assert(!cpuChain.contains(QStringLiteral("drop-mode")));
+    // queue 상한은 시간으로만 건다. 개수 상한은 같은 시간이라도 fps에 따라 달라진다
+    assert(!cpuChain.contains(QStringLiteral("max-size-buffers=8")));
+
     // 순서가 바뀌면 파이프라인은 그대로 만들어지지만 동작이 달라진다. 축소는 다운로드보다
     // 앞이어야 전송량이 줄고, 블러는 renderqueue 뒤여야 완충이 블러 지연을 흡수한다
     assert(cpuChain.indexOf(QStringLiteral("d3d11scale")) < cpuChain.indexOf(QStringLiteral("d3d11download")));
-    assert(cpuChain.indexOf(QStringLiteral("d3d11download")) < cpuChain.indexOf(QStringLiteral("alignmentqueue")));
-    assert(cpuChain.indexOf(QStringLiteral("alignmentqueue")) < cpuChain.indexOf(QStringLiteral("renderqueue")));
+    assert(cpuChain.indexOf(QStringLiteral("d3d11download")) < cpuChain.indexOf(QStringLiteral("renderqueue")));
     assert(cpuChain.indexOf(QStringLiteral("renderqueue")) < cpuChain.indexOf(QStringLiteral("videobalance")));
     assert(cpuChain.indexOf(QStringLiteral("videobalance")) < cpuChain.indexOf(QStringLiteral("gammafilter")));
     assert(cpuChain.indexOf(QStringLiteral("gammafilter")) < cpuChain.indexOf(QStringLiteral("qtblur")));

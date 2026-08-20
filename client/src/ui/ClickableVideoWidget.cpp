@@ -89,7 +89,6 @@ private:
 ClickableVideoWidget::ClickableVideoWidget(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_NativeWindow);
     setAttribute(Qt::WA_DontCreateNativeAncestors);
-    setMouseTracking(true);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setProperty("loading", true);
 
@@ -261,13 +260,18 @@ bool ClickableVideoWidget::nativeEvent(const QByteArray& eventType, void* messag
     MSG* msg = static_cast<MSG*>(message);
 
     if (msg) {
+        // 진입할 때 한 번만 건다. TME_LEAVE는 WM_MOUSELEAVE가 나갈 때까지 유효하므로, 매
+        // WM_MOUSEMOVE마다 다시 거는 것은 영상 위에서 마우스를 움직이는 내내 GUI 스레드에
+        // 일을 얹는 것뿐이다
         if (msg->message == WM_MOUSEMOVE) {
-            TRACKMOUSEEVENT trackingEvent{};
-            trackingEvent.cbSize = sizeof(trackingEvent);
-            trackingEvent.dwFlags = TME_LEAVE;
-            trackingEvent.hwndTrack = msg->hwnd;
-            TrackMouseEvent(&trackingEvent);
-            setHoverHighlighted(true);
+            if (!hovered_) {
+                TRACKMOUSEEVENT trackingEvent{};
+                trackingEvent.cbSize = sizeof(trackingEvent);
+                trackingEvent.dwFlags = TME_LEAVE;
+                trackingEvent.hwndTrack = msg->hwnd;
+                TrackMouseEvent(&trackingEvent);
+                setHoverHighlighted(true);
+            }
         } else if (msg->message == WM_MOUSELEAVE) {
             setHoverHighlighted(false);
         } else if (msg->message == WM_LBUTTONDBLCLK) {

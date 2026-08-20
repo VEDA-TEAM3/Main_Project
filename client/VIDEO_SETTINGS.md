@@ -52,15 +52,14 @@ flowchart LR
     Decoder["avdec_h264 또는\nd3d11h264dec + d3d11scale + d3d11download"]
     Watch["identity framewatch\n프레임 감시"]
     Convert["videoconvert\nNV12 유지 (d3d11 경로는 passthrough)"]
-    Align["alignmentqueue\n고정 지연선"]
-    RenderQueue["renderqueue\n완충 겸 유일한 드롭 지점"]
+    RenderQueue["renderqueue\n완충 겸 유일한 드롭 지점\n(지연 + 여유분을 담는다)"]
     Balance["videobalance\n밝기·대비"]
     Gamma["gamma\n감마 보정"]
     Blur["qtblur\nMQTT 블러 적용"]
-    Sink["d3d11videosink\nQt 위젯 출력"]
+    Sink["d3d11videosink\nsync=true + ts-offset\nQt 위젯 출력"]
 
     Camera --> Source --> Depay --> Parse --> DecodeQueue --> Valve --> Decoder --> Watch --> Convert
-    Convert --> Align --> RenderQueue --> Balance --> Gamma --> Blur --> Sink
+    Convert --> RenderQueue --> Balance --> Gamma --> Blur --> Sink
 ```
 
 `presentationvalve`는 **디코더 앞**에 있다. 화면에 없는 채널은 이 valve에서 차단되므로 디코딩, 다운로드,
@@ -94,7 +93,7 @@ GStreamer `queue`는 자체 src thread를 만들어 앞뒤 처리 단계를 분�
 
 | 설정 | 현재값 | 정의 | 현재 설정 이유 |
 | --- | ---: | --- | --- |
-| `latencyMs` | 250 ms | `rtspsrc` 내부 jitterbuffer가 네트워크 변동을 흡수할 목표 시간 | 공식 기본값 2000 ms의 1/8이다. 유선 환경에서 실시간성을 우선한 값이며, 지터가 이 값을 넘으면 패킷이 버려진다(아래 12장 참고). |
+| `latencyMs` | 350 ms | `rtspsrc` 내부 jitterbuffer가 네트워크 변동을 흡수할 목표 시간 | 공식 기본값 2000 ms보다 훨씬 작다. 유선 환경에서 실시간성을 우선한 값이며, 지터가 이 값을 넘으면 패킷이 버려진다(아래 12장 참고). |
 | `dropOnLatency` | `true` | jitterbuffer가 `latencyMs`보다 계속 커지지 않도록 오래된 데이터를 버림 | 지연 누적보다 최신 화면 유지를 우선한다. |
 | `udpBufferSizeBytes` | 4,194,304 B | OS UDP 수신 버퍼 요청 크기 | 네 채널 burst와 순간 처리 지연에서 커널 패킷 손실 여유를 확보한다. |
 | `udpTimeoutUs` | 5,000,000 us | UDP RTP가 오지 않을 때 TCP transport 재시도까지의 시간 | GStreamer 기본값과 같은 5초이며, 장시간 무응답 대기를 막는다. |
@@ -112,48 +111,56 @@ multicast, TCP를 사용한다. `udpTimeoutUs`는 일반적인 “RTSP 접속 ti
 
 | 설정 | 현재값 | 정의 | 현재 설정 이유 |
 | --- | ---: | --- | --- |
-| `decoderMode` | `auto` | 디코더 선택 모드 | 설치 환경에서 사용 가능한 디코더로 동작하게 한다. 아래 구현 주의사항 참고. |
+| `decoderMode` | `d3d11` | 디코더 선택 모드 | 축소가 `d3d11scale` 전용이라 고정해 둔다. 아래 구현 주의사항 참고. |
 | `processingWidth` / `processingHeight` | 1280 x 720 | 시스템 메모리로 내려받기 전에 GPU에서 줄일 해상도 | 블러가 CPU 접근을 요구해 생기는 왕복 전송량과 CPU 픽셀 수를 함께 줄인다. 둘 다 `0`이면 원본 유지. **`d3d11` 디코더 경로에서만 적용된다.** |
-| `decodeQueueMaximumBuffers` | 8 | 디코딩 전 queue의 최대 buffer 수 | 순간 디코딩 흔들림을 흡수하되 무제한 누적을 막는다. |
-| `decodeQueueMaximumTimeMs` | 100 ms | 디코딩 전 queue의 최대 시간 | buffer 8개보다 먼저 도달할 수 있는 실질 지연 상한이다. |
-| `alignmentDelayMs` | 100 ms | 영상과 늦게 도착하는 AI/MQTT metadata를 맞추기 위한 의도적 영상 대기 | 블러 위치가 영상보다 뒤처지는 현상을 줄이기 위한 현장 보정값이다. |
-| `alignmentQueueMaximumTimeMs` | 450 ms | alignment queue가 보유할 수 있는 최대 영상 시간 | 100 ms 지연선을 만들 여유와 일시 변동분을 확보한다. 평시에는 도달하지 않는 천장이다. |
-| `renderQueueMaximumBuffers` | 8 | 렌더 전 queue의 최대 frame 수 | 순간 처리 지연을 흡수하는 유일한 지점이다. 1로 두면 흡수량이 0이라 짧은 지연도 곧바로 드롭이 된다. 평시에 비어 있어 깊이를 늘려도 지연이 늘지 않는다. |
-| `renderQueueMaximumTimeMs` | 200 ms | 렌더 전 queue의 시간 한도 | frame 8개보다 먼저 도달할 수 있는 안전 상한이다. |
+| `decodeQueueMaximumTimeMs` | 800 ms | 디코딩 전 queue의 최대 시간 | 압축 H.264라 깊어도 싸다(4 Mbps 기준 1초 ≈ 500 KB). 여기서 막히면 backpressure가 지터버퍼까지 올라간다. 아래 참고. |
+| `alignmentDelayMs` | 300 ms | 영상과 늦게 도착하는 AI/MQTT metadata를 맞추기 위한 의도적 영상 대기 | sink의 `ts-offset`으로 적용한다. `sinkSync=true`가 전제다. |
+| `renderQueueMaximumTimeMs` | 200 ms | 렌더 전 queue가 지연 **위에 추가로** 담는 여유분 | 실제 queue 상한은 `renderQueueMaximumTimeMs + alignmentDelayMs`(현재 500 ms)다. |
 
 GStreamer queue는 `max-size-buffers`, `max-size-bytes`, `max-size-time` 중 **먼저 도달한 제한**을
-사용한다. 이 프로젝트는 bytes 제한을 끄고 buffer/time 제한만 사용한다.
+사용한다. 이 프로젝트는 **시간 제한만** 쓴다. buffer 개수 상한은 같은 시간이라도 fps에 따라 값이
+달라져서, 30 fps에서 `alignmentDelayMs`보다 먼저 걸리면 아래의 지연 관계가 조용히 무너진다.
+(예전 `renderQueueMaximumBuffers=8`은 15 fps에서 533 ms지만 30 fps에서는 266 ms다.)
 
-- `decodequeue`는 기본 non-leaky queue이다. 가득 차면 upstream을 잠시 block하여 decode chain의
-  순서를 보존한다.
-- `alignmentqueue`는 `min-threshold-time=100 ms`로 최소 대기량을 만들고,
-  `max-size-time=450 ms`, `leaky=downstream`으로 오래된 frame부터 버린다.
-- `renderqueue`는 `max-size-buffers=8`, `leaky=downstream`이므로 렌더가 계속 밀리면 오래된 frame을
-  버리고 최신 frame을 유지한다.
+- `decodequeue`는 non-leaky queue다. **leaky로 바꾸지 마라** — 디코더 앞에서 압축 frame을 버리면
+  화면이 깨진다.
+- `renderqueue`는 `leaky=downstream`이며 **frame을 버리는 유일한 지점**이다. 렌더가 계속 밀리면
+  오래된 frame을 버리고 최신 frame을 유지한다.
 
-`alignmentQueueMaximumTimeMs`는 항상 `alignmentDelayMs` 이상이어야 하며, 설정 로더가 이 관계를
-검증한다. 반대로 최대값을 최소값과 너무 가깝게 두면 작은 처리 흔들림에도 queue가 빈번하게 leak될
-수 있다.
+#### 지연은 queue가 아니라 sink가 만든다 (세 값이 한 몸이다)
 
-#### 두 queue의 역할은 다르다 (같이 보고 조정할 것)
+`alignmentDelayMs`, `sinkSync`, `renderQueueMaximumTimeMs`는 **따로 만지면 안 된다.**
 
-**`alignmentqueue`는 지연선이지 완충이 아니다.** `min-threshold-time`은 공식 문서상 "Min. amount of
-data in the queue to allow reading"이다. 임계값 아래로 내려가면 출력이 다시 멈추므로, 쌓아 둔 100 ms를
-언더런 흡수에 **쓸 수 없다.** 도착이 끊기면 frame 하나만 내보내고 나머지를 쥔 채 멈춘다. 즉 100 ms는
-순수한 지연 비용이고 지터 흡수 효과는 0이다.
+| 값 | 역할 |
+| --- | --- |
+| `sinkSync=true` | `ts-offset`은 clock 동기화 경로에서만 쓰인다. `false`면 지연이 통째로 사라지고 블러만 앞서 나간다. 설정 로더가 이 조합을 **오류로 막는다.** |
+| sink `ts-offset` | `alignmentDelayMs`가 그대로 들어간다. 블러가 없는 GPU 경로에는 정렬할 대상이 없어 0이다. |
+| `renderqueue` 상한 | `ts-offset`만큼을 담아야 한다. 못 담으면 `leaky=downstream`이 상시 frame을 버려서 지연이 서지 않는다. |
 
-**흡수와 드롭은 `renderqueue` 한 곳에서만 일어난다.** sink가 `sync=false`로 도착 즉시 렌더하므로 평시에
-이 queue는 비어 있다. 따라서 깊이를 늘려도 **정상 구간 지연이 늘지 않는다.** 블러나 D3D11 업로드가 한
-frame 늦어지는 순간에만 채워져, 이미 디코딩·색변환까지 마친 frame을 버리는 대신 흡수한다. 지속적인
-과부하에서만 최대 8 frame 분량이 쌓인다(720p NV12 기준 약 11 MB).
+**예전 구조(`alignmentqueue` + `min-threshold-time`)를 되살리지 마라.** `min-threshold-time`은 공식
+문서상 "Min. amount of data in the queue to allow reading"이라, 임계값 아래로 내려가면 출력이 다시
+멈춘다. 쌓아 둔 분량을 언더런 흡수에 **쓸 수 없어** 순수한 지연 비용이었고, 짧은 언더런도 임계값을
+다시 채울 때까지 늘어났다. `alignmentDelayMs`를 100→300으로 올렸을 때 회복 비용이 그대로 3배가 된
+것이 그 구조 때문이다. sink가 클럭에 맞춰 꺼내가면 **같은 지연이 renderqueue의 진짜 여유분**이 된다.
 
-예전에는 `renderQueueMaximumBuffers=1`이라 흡수량이 0이었다. 그 상태에서는 과부하 시
-`alignmentqueue`가 frame 3개를 붙잡고 있는 동안 `renderqueue`가 갓 디코딩한 frame을 버리는 모순이
-생겼다. 8로 올리면 `renderqueue`가 backpressure 대신 흡수·leak을 담당하므로 `alignmentqueue`의
-450 ms 천장까지 밀릴 일이 없어지고, 드롭 지점이 하나로 단일화된다.
+**`max-lateness`는 `-1`로 끈다.** 요소 기본값이 5 ms라 `sync=true`로 켜는 순간 조금만 늦은 frame도
+sink가 버린다. 드롭 지점은 `renderqueue` 하나로 유지하는 편이 원인을 읽기 쉽다.
 
-`sync=false`에서는 sink의 `render-delay`가 동작하지 않으므로, 표시 지연을 만드는 수단은
-`min-threshold-time`뿐이다. `alignmentDelayMs`를 없애려면 sink 동기화 정책부터 다시 정해야 한다.
+#### `decodequeue`가 얕으면 로컬 부하가 망 손실로 번진다
+
+`decodequeue`는 non-leaky다. 가득 차면 upstream을 block하는데, 그 backpressure가 여기서 멈추지 않는다.
+
+```
+디코더가 잠깐 밀림 → decodequeue 가득 참 → h264parse/depay push 블록
+  → rtpjitterbuffer push 스레드 블록
+  → drop-on-latency=true + latency=350 ms 이므로 초과분 폐기
+  → 조각난 frame → depay의 wait-for-keyframe=true
+  → 다음 IDR까지 화면 정지 (GOV 15 / 15 FPS 기준 약 1초)
+```
+
+즉 12장 2번의 "수 초 정지"는 **네트워크 지터 없이 로컬 GPU 경합만으로도 도달한다.** 그래서 상한을
+100 ms에서 800 ms로 올렸다. 여기 흐르는 것은 압축 H.264라 깊어도 싸고, 드롭이 필요하면
+`renderqueue`가 "디코딩 끝난 frame 하나 스킵"으로 깨끗하게 처리한다.
 
 #### `decoderMode: auto`의 실제 동작
 
@@ -197,15 +204,18 @@ I420→NV12(`n-threads` 기본 1) → CPU 블러 → sink 업로드를 돈다. `
 
 | 설정 | 현재값 | 의미와 선택 이유 |
 | --- | ---: | --- |
-| `sinkSync` | `false` | pipeline clock에 맞춰 frame을 기다리지 않고 도착 즉시 렌더 | 관제 화면의 실시간성을 우선한다. |
-| `sinkQos` | `false` | sink가 upstream으로 QoS event를 보내지 않음 | `sync=false` 구성에서 불필요한 QoS 개입을 피한다. |
+| `sinkSync` | `true` | pipeline clock에 맞춰 frame을 표시 | 표시 간격을 도착 간격에서 떼어 내고, `ts-offset` 지연을 성립시킨다. 요소 기본값도 `true`다. |
+| `ts-offset` | `alignmentDelayMs` | 렌더 시각을 그만큼 뒤로 민다 | 블러 정렬 지연을 만드는 수단. GPU 경로에서는 0. |
+| `max-lateness` | `-1` | 늦은 frame을 sink가 버리지 않음 | 요소 기본값 5 ms. 드롭 지점을 `renderqueue` 하나로 유지한다. |
+| `sinkQos` | `false` | sink가 upstream으로 QoS event를 보내지 않음 | 디코더에 QoS 개입을 시키지 않는다. 요소 기본값은 `true`. |
 | `sinkAsync` | `false` | sink가 ASYNC 상태 전환을 기다리지 않음 | sparse/비동기 live stream의 시작 상태 지연을 줄인다. |
 | `enable-last-sample` | `false` | sink가 마지막 sample을 별도로 보관하지 않음 | frame reference를 빨리 반환하고 불필요한 보관 비용을 줄인다. |
+| `enable-navigation-events` | `false` | 마우스/키보드 navigation event를 상류로 올리지 않음 | 요소 기본값은 `true`. 앱은 `GstNavigation`을 쓰지 않는데(더블클릭은 `ClickableVideoWidget`이 Qt에서 처리), 켜 두면 영상 위에서 마우스가 움직일 때마다 sink → qtblur → … → rtspsrc로 event가 올라간다. |
 | `force-aspect-ratio` | `true` | 원본 종횡비 유지 | 영상 찌그러짐을 막는다. |
 
-GStreamer 공식 문서상 `sync=false`이면 sink clock 동기화가 비활성화된다. 이 경우 `max-lateness`로
-late frame을 버리는 방식도 효력이 제한되므로, 현재 프로젝트는 sink보다 앞의 leaky queue에서 최신
-frame 정책을 구현한다.
+GStreamer 공식 문서상 `sync=false`이면 sink clock 동기화가 비활성화되고 `ts-offset`/`render-delay`도
+효력을 잃는다. 예전에는 그 상태였고, 그래서 **표시 간격이 곧 도착 간격**이었다(12장 1번). 지금은
+sink가 클럭에 맞춰 표시하고, 최신 frame 정책은 그대로 앞의 leaky `renderqueue`가 담당한다.
 
 ### 3.6 시작·stall·재연결
 
@@ -284,13 +294,13 @@ flowchart TD
 
 | 설정 | 현재값 | 기능과 상호작용 |
 | --- | ---: | --- |
-| `syncOffsetMs` | 300 ms | RTCP sender clock을 얻지 못한 PTS-anchor fallback에서만 영상 UTC에서 빼는 보정값 |
+| `syncOffsetMs` | 100 ms | RTCP sender clock을 얻지 못한 PTS-anchor fallback에서만 영상 UTC에서 빼는 보정값 |
 | `historyMs` | 10,000 ms | timestamp 검색에 보존할 metadata 시간 범위 |
 | `maximumHistorySize` | 300 | 시간 범위와 별개인 metadata 개수 상한 |
 | `matchToleranceMs` | 250 ms | 영상 시각과 metadata 시각을 직접 일치로 인정할 최대 차이 |
 | `holdLastMetadataMs` | 1,000 ms | metadata 공백에서 직전 box를 유지할 최대 시간 |
 | `sourceRestartGapMs` | 5,000 ms | 정상 metadata 공백 뒤 timestamp 기준을 재동기화할 기준 |
-| `sourceTimestampRestartThresholdMs` | 2,000 ms | dispatcher에서 source timestamp 재시작을 판단하는 역행 기준 |
+| (참고) `mqtt.dispatcher.blurTimestampRestartThresholdMs` | 2,000 ms | dispatcher에서 source timestamp 재시작을 판단하는 역행 기준. **`blur` 아래가 아니라 `mqtt.dispatcher` 아래에 있다.** 예전에 `blur.sourceTimestampRestartThresholdMs`라는 이름으로 JSON에 적혀 있었지만 읽는 코드가 없어 삭제했다 |
 | `paddingRatio` | 0.18 | 검출 box의 각 방향을 box 크기의 18%만큼 확대 |
 | `radiusDivisor` | 3 | blur radius 계산의 분모. 작을수록 blur가 강해짐 |
 | `minimumRadius` / `maximumRadius` | 4 / 28 px | 해상도·box 크기에 따른 radius 하한/상한 |
@@ -298,10 +308,10 @@ flowchart TD
 
 `addReferenceTimestampMeta=true`로 RTCP sender clock을 얻은 frame에는 `syncOffsetMs`를 적용하지
 않는다. RTCP reference가 없을 때만 최초 PTS와 로컬 UTC로 anchor를 만들고, 이 fallback 경로에서
-300 ms를 보정한다. 따라서 `syncOffsetMs`는 네트워크 jitterbuffer 값이나 `alignmentDelayMs`의
+100 ms를 보정한다. 따라서 `syncOffsetMs`는 네트워크 jitterbuffer 값이나 `alignmentDelayMs`의
 대체값이 아니다.
 
-`alignmentDelayMs=100`은 metadata가 도착할 시간을 확보하기 위해 **영상 자체를 기다리는 값**이고,
+`alignmentDelayMs=300`은 metadata가 도착할 시간을 확보하기 위해 **영상 자체를 기다리는 값**이고,
 `matchToleranceMs=250`은 이미 저장된 metadata 중 어떤 것을 **같은 시각으로 인정할지** 정하는 값이다.
 두 값을 무조건 같게 유지해야 하는 것은 아니지만, alignment delay를 줄이면 미래 쪽 metadata가 아직
 도착하지 않아 보간 대신 이전 box hold가 더 자주 사용될 수 있다.
@@ -334,17 +344,17 @@ passthrough가 아니면 `GstBaseTransform`이 매 frame 버퍼를 쓰기 가능
 + 네트워크 전송 및 rtspsrc jitterbuffer
 + decodequeue 대기와 디코딩
 + 시스템 메모리 다운로드 (d3d11 경로)
-+ alignmentqueue의 의도적 대기
++ sink ts-offset의 의도적 대기(=alignmentDelayMs)
 + 전처리와 블러 연산
 + renderqueue 및 화면 출력
 ```
 
 현재 설정에서 의도적으로 명확한 두 축은 다음과 같다.
 
-- 네트워크 지터 흡수: `latencyMs=250`
-- AI/MQTT 정렬용 영상 대기: `alignmentDelayMs=100`
+- 네트워크 지터 흡수: `latencyMs=350`
+- AI/MQTT 정렬용 영상 대기: `alignmentDelayMs=300`(sink `ts-offset`)
 
-따라서 정상 상태에서도 이 두 설정만으로 약 350 ms 규모의 buffering 의도가 있다. 하지만 실제
+따라서 정상 상태에서도 이 두 설정만으로 약 650 ms 규모의 buffering 의도가 있다. 하지만 실제
 end-to-end 지연은 카메라 인코딩, 패킷 도착 패턴, queue underrun, frame period, 디코딩 시간에 따라
 달라지므로 350 ms로 단정하면 안 된다. queue의 maximum 값도 항상 소비되는 지연이 아니라 용량
 상한이다.
@@ -360,10 +370,9 @@ frame 경계 때문에 계단식으로 보일 수 있다.
 | `latencyMs` 증가 | 불안정한 네트워크 흡수 | 정상 지연 증가 |
 | `alignmentDelayMs` 감소 | 화면이 빨라짐 | MQTT blur가 영상 뒤를 따라가거나 이전 box hold가 늘 수 있음 |
 | `alignmentDelayMs` 증가 | blur 좌표 도착 여유 증가 | 모든 영상이 의도적으로 늦어짐 |
-| `alignmentQueueMaximumTimeMs` 감소 | 오래된 frame 누적 억제 | `alignmentDelayMs`와 너무 가까우면 잦은 drop/underrun |
-| decode queue 감소 | backlog 상한 감소 | 순간 decode 지연을 흡수하지 못해 upstream block 증가 |
-| render queue 증가 | 순간 render 흔들림 흡수 | `sync=false`에서는 평시 queue가 비어 있어 정상 지연이 늘지 않는다. 지속 과부하에서만 최대 depth만큼 화면이 뒤처진다 |
-| `sinkSync=true` | pipeline clock 기준 출력 | 현재의 명시적 alignment 구조와 지연 정책이 달라지며 재검증 필요 |
+| decode queue 감소 | backlog 상한 감소 | upstream block이 지터버퍼까지 번져 packet 폐기 → IDR 대기 정지가 된다(3.3장) |
+| render queue 증가 | 순간 render 흔들림 흡수 | 상한은 `ts-offset` + 여유분이다. 여유분만 늘리면 정상 지연은 그대로다 |
+| `sinkSync=false`로 되돌림 | (롤백 스위치) | `ts-offset` 지연이 사라져 블러만 앞서 나간다. 설정 로더가 `alignmentDelayMs>0`과의 조합을 막는다 |
 | 전처리 활성값 적용 | 가시성 향상 | raw frame 전체 연산으로 4채널 처리 비용 증가 |
 | blur radius/padding 증가 | 개인정보 마스킹 강화 | box당 처리 pixel 수와 CPU 비용 증가 |
 
@@ -407,11 +416,11 @@ profile4 설정에서 다시 확인해야 한다.
 - [`identity`](https://gstreamer.freedesktop.org/documentation/coreelements/identity.html): buffer를 변경하지
   않는 진단 요소. `signal-handoffs=false`는 불필요한 frame별 signal 비용을 없앤다.
 - [`GstBaseSink`](https://gstreamer.freedesktop.org/documentation/base/gstbasesink.html): `sync`, `qos`, `async`,
-  `enable-last-sample`과 late frame 처리 원리
+  `ts-offset`, `max-lateness`, `enable-last-sample`과 late frame 처리 원리
 - [`GstBaseTransform`](https://gstreamer.freedesktop.org/documentation/base/gstbasetransform.html): `transform_ip`,
   `always_in_place`의 비쓰기 버퍼 복사 규칙, passthrough 전환. `qtblur`와 전처리 요소의 근거
 - [`valve`](https://gstreamer.freedesktop.org/documentation/coreelements/valve.html): `drop`,
-  `drop-mode`. 숨긴 채널의 디코딩 차단에 사용
+  `drop-mode`. 숨긴 채널의 디코딩 차단에 `drop`만 사용한다(`drop-mode`는 기본값 `drop-all`)
 - [GStreamer latency 설계](https://gstreamer.freedesktop.org/documentation/additional/design/latency.html): live
   pipeline에서 요소별 latency query와 buffering 원리
 
@@ -436,7 +445,8 @@ profile4 설정에서 다시 확인해야 한다.
 2. 전처리를 중립값, 블러를 OFF로 두고 RTSP 자체 끊김을 확인한다.
 3. `latencyMs`만 20~50 ms 단위로 조정한다.
 4. RTSP가 안정되면 `alignmentDelayMs`를 블러 위치에 맞춘다.
-5. `alignmentQueueMaximumTimeMs >= alignmentDelayMs`를 유지한다.
+5. `alignmentDelayMs`를 바꿨으면 sink `ts-offset`과 `renderqueue` 상한이 함께 움직였는지 로그로 확인한다
+   (`[GstRtspReceiver] video path=... tsOffset=...ms renderQueue=...ms`).
 6. 블러를 켜고 `syncOffsetMs`, `matchToleranceMs`, `holdLastMetadataMs` 순서로 조정한다.
 7. 마지막에 전처리 값을 적용하고 CPU 사용률과 frame stall을 비교한다.
 
@@ -457,8 +467,8 @@ profile4 설정에서 다시 확인해야 한다.
 - 활성 설정 파일이 실제로 어느 경로에서 로드됐는지 확인한다.
 - 환경 변수가 JSON 값을 덮어쓰고 있지 않은지 확인한다.
 - `app_config.json`과 `app_config.example.json`의 의도적 차이를 문서화한다.
-- `alignmentQueueMaximumTimeMs >= alignmentDelayMs`를 유지한다.
-- `sync=false` 상태에서는 sink `max-lateness`만으로 frame drop을 기대하지 않는다.
+- `alignmentDelayMs > 0`이면 `sinkSync=true`를 유지한다(설정 로더가 막지만, 의도를 먼저 확인할 것).
+- frame drop은 `renderqueue` 한 곳에서만 일어난다. sink `max-lateness`로 버리게 만들지 않는다.
 - 블러 성능 측정 시 RTCP clock 사용과 PTS-anchor fallback을 구분한다.
 - 15 FPS에서는 한 frame이 약 66.7 ms임을 고려한다.
 - 네 채널 총 bitrate와 network overhead를 합산한다.
@@ -467,9 +477,11 @@ profile4 설정에서 다시 확인해야 한다.
 
 ## 11. 현재 설정에서 특히 주의할 점
 
-1. `app_config.json`과 `app_config.example.json`의 영상 수신 값은 현재 동일하다(`latencyMs=250`,
-   `alignmentDelayMs=100`, `renderQueueMaximumBuffers=8`, `processingWidth/Height=1280x720`). 한쪽만
-   바꾸면 새 환경이 다른 지연 특성으로 시작하므로 항상 같이 고친다.
+1. `app_config.json`과 `app_config.example.json`의 영상 수신 값은 현재 동일하다(`latencyMs=350`,
+   `alignmentDelayMs=300`, `sinkSync=true`, `decodeQueueMaximumTimeMs=800`,
+   `renderQueueMaximumTimeMs=200`, `processingWidth/Height=1280x720`). 한쪽만 바꾸면 새 환경이 다른
+   지연 특성으로 시작하므로 항상 같이 고친다. **실제로 한 번 갈라진 적이 있다** — 예제만
+   `latencyMs` 250→350, `alignmentDelayMs` 100→300으로 바뀌고 로컬 파일과 이 문서는 그대로였다.
 2. `decoderMode`는 `d3d11`로 **고정**돼 있다. `auto`로 되돌리면 software decoder가 선택되고
    **그 경로에서는 `processingWidth/Height` 축소가 적용되지 않는다**(`d3d11scale` 전용).
 3. `preprocessing.enabled=true`이지만 값이 중립이면 passthrough이므로 실제 보정 비용은 생략된다.
@@ -486,32 +498,44 @@ GStreamer 1.28.4에서 `gst-inspect-1.0`으로 실측한 값이다. "이 요인�
 
 | # | 요인 | 근거 | 현재 상태 |
 | ---: | --- | --- | --- |
-| 1 | sink 클럭 동기화 없음 (`sinkSync=false`) | GstBaseSink 문서: "When `sync` is false, incoming samples will be played as fast as possible." 요소 기본값은 `true` | 저지연 우선으로 **유지** |
-| 2 | 지터버퍼가 기본값의 1/8이고 초과분을 버림 | `rtspsrc` 기본값 `latency=2000`, `drop-on-latency=false` → 현재 `250`/`true` | 저지연 우선으로 **유지** |
-| 3 | 렌더 queue 흡수량 0 | queue 문서의 `leaky`/`max-size-*` 의미. 이전 `max-size-buffers=1` | **수정됨** (8로 상향) |
-| 4 | 정렬 queue가 흡수에 기여하지 않음 | queue 문서의 `min-threshold-time` 의미 | 구조상 불가피. 3장에 명시 |
+| 1 | sink 클럭 동기화 없음 (`sinkSync=false`) | GstBaseSink 문서: "When `sync` is false, incoming samples will be played as fast as possible." 요소 기본값은 `true` | **수정됨** (`sync=true` + `ts-offset`) |
+| 2 | 지터버퍼가 기본값보다 작고 초과분을 버림 | `rtspsrc` 기본값 `latency=2000`, `drop-on-latency=false` → 현재 `350`/`true` | 저지연 우선으로 **유지**. 단 10번도 함께 볼 것 |
+| 3 | 렌더 queue 흡수량 0 | queue 문서의 `leaky`/`max-size-*` 의미. 이전 `max-size-buffers=1` | **수정됨** (시간 상한 = `ts-offset` + 여유분) |
+| 4 | 정렬 queue가 흡수에 기여하지 않음 | queue 문서의 `min-threshold-time` 의미 | **수정됨** (`alignmentqueue` 삭제, sink `ts-offset`으로 대체) |
 | 5 | 매 frame GPU→CPU→GPU 왕복 | `d3d11download` + sink 재업로드 | **완화됨** (NV12 유지 + 다운로드 전 축소). 블러가 CPU 접근을 요구해 왕복 자체는 유지 |
 | 6 | 블러 미사용 시에도 frame 매핑 | GstBaseTransform 문서의 `always_in_place` 복사 규칙 | **수정됨** (passthrough 적용) |
 | 7 | `decoderMode=auto`가 software를 골라 `processingWidth/Height`가 무시됨 | `decoderChain()` 분기 순서. 축소는 `d3d11scale` 전용 | **수정됨** (`d3d11` 고정) |
 | 8 | 객체가 잡히면 QML 지도가 GUI 스레드와 GPU를 상시 점유 | QQuickWidget 문서(렌더 루프·추가 render pass), Shape 문서(속성 변경 시 재삼각분할) | **완화됨** (궤적 `CurveRenderer` 제거, 무한 맥동 제거, `renderIntervalMs` 50) |
 | 9 | 위험 테두리 애니메이션이 네이티브 영상 HWND의 부모를 60 Hz 재도색 | `VideoRiskBorderFrame`의 `QVariantAnimation` + `update()` | **수정됨** (QSS 상태 전환으로 대체, 클래스 삭제) |
+| 10 | 얕은 `decodequeue`의 backpressure가 지터버퍼까지 올라가 2번을 로컬에서 유발 | queue 문서(non-leaky는 upstream block) + `drop-on-latency` 의미 | **수정됨** (100 → 800 ms) |
+| 11 | 숨긴 채널의 valve가 frame마다 GAP 이벤트를 만들어 디코더를 drain | `GstVideoDecoder`가 GAP을 forward하기 전에 drain한다 | **수정됨** (`drop-mode=transform-to-gap` 제거, 기본 `drop-all`) |
+| 12 | 마우스 이동마다 sink가 navigation 이벤트를 상류 전체로 전파 | `d3d11videosink` 기본값 `enable-navigation-events=true`. 앱은 `GstNavigation` 미사용 | **수정됨** (`false`로 명시) |
+| 13 | 두 설정 파일의 지연 값이 갈라져 환경마다 다른 특성으로 동작 | `latencyMs`/`alignmentDelayMs`/`syncOffsetMs`가 예제에서만 바뀜 | **수정됨** (두 파일 통일, 11장 1번) |
 
-### 1번이 중요한 이유
+### 1번을 어떻게 고쳤나
 
-`sync=false`는 버퍼 타임스탬프를 무시하고 도착 즉시 렌더한다. 따라서 **표시 간격이 곧 도착 간격**이다.
+`sync=false`는 버퍼 타임스탬프를 무시하고 도착 즉시 렌더한다. 따라서 **표시 간격이 곧 도착 간격**이었다.
 frame을 하나도 잃지 않아도 디코딩 시간 편차, 단일 스레드 색변환 편차, 블러 영역 수에 따른 편차가 그대로
-화면 떨림이 된다. 이 편차를 흡수할 주체가 pipeline에 없다는 뜻이므로, 3번의 완충이 특히 중요하다.
+화면 떨림이 됐고, 그 편차를 흡수할 주체가 pipeline에 없었다.
 
-부수적으로 `sync=false`에서는 `max-lateness`(요소 기본 5 ms) 기반의 late frame 처리도 우회된다.
+지금은 `sync=true`이고 정렬 지연이 sink `ts-offset`으로 들어간다. 표시 시각이 클럭 기준이 되므로
+위 편차가 화면 간격에 그대로 나타나지 않고, 4번에서 "흡수에 쓸 수 없다"던 지연분이 `renderqueue`의
+실제 여유가 된다. 대신 `max-lateness`를 `-1`로 두지 않으면 요소 기본값 5 ms 때문에 sink가 늦은 frame을
+버리므로, 두 값은 항상 같이 본다(3.3장).
+
+**롤백은 `sinkSync=false` 한 줄**이지만, 그러면 `ts-offset`이 무시되어 블러 정렬이 깨진다. 설정 로더가
+`alignmentDelayMs > 0`과의 조합을 오류로 막으므로, 되돌릴 때는 `alignmentDelayMs=0`도 같이 둔다.
 
 ### 2번이 "짧은 떨림"이 아니라 "몇 초 정지"로 나타나는 경로
 
-지터가 250 ms를 넘으면 jitterbuffer가 패킷을 버린다. 그 뒤 디코더가
+지터가 `latencyMs`를 넘으면 jitterbuffer가 패킷을 버린다. 그 뒤 디코더가
 `discard-corrupted-frames=true`로 손상 frame을 버리고 `automatic-request-sync-points=true`로 새
 동기 지점을 요청하므로, **다음 IDR이 도착할 때까지 화면이 정지한다.** GOV 15 / 15 FPS 기준 약 1초이며,
 GOV가 큰 카메라에서는 더 길어진다.
 
-즉 증상이 "미세한 떨림"이면 1·3·5번을, "수 초 정지"면 2번을 먼저 본다.
+즉 증상이 "미세한 떨림"이면 1·3·5번을, "수 초 정지"면 2번과 10번을 먼저 본다. 10번 때문에 "수 초
+정지"가 반드시 망 문제라는 뜻은 아니다. 첫 packet 로그의 `RTSP transport=UDP|TCP(interleaved)`로
+어느 transport인지 먼저 가른다.
 
 ### 5번의 규모
 
@@ -552,8 +576,10 @@ UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 검토했고, **
   render loop on all platforms"). 현재 `QQuickWidget`은 6개 이상이다.
 - 같은 iGPU가 `d3d11videosink` 스왑체인 4개를 동시에 present한다.
 
-즉 **frame이 막히지는 않지만 GPU와 GUI 스레드는 공유 자원이고, `sinkSync=false`라 그 편차가
-그대로 표시 간격이 된다.** "객체가 잡히는 순간 네 채널이 함께 끊긴다"가 이 경로의 증상이다.
+즉 **frame이 막히지는 않지만 GPU와 GUI 스레드는 공유 자원이다.** 예전에는 `sinkSync=false`라 그 편차가
+그대로 표시 간격이 됐다. `sync=true`로 바꾼 뒤에는 편차가 `renderqueue`의 여유분 안에서 흡수되지만,
+여유분을 넘기면 이번에는 leak(드롭)으로 나타난다. **부하 자체가 사라지는 것은 아니다.**
+"객체가 잡히는 순간 네 채널이 함께 끊긴다"가 이 경로의 증상이다.
 그래서 궤적 Shape에서 `CurveRenderer`를 뺐고(폴리라인이라 곡선 셰이더로 얻을 것이 없다),
 위험 테두리의 무한 맥동을 한 번짜리 페이드로 바꿨으며(장면이 다시 idle로 돌아갈 수 있게),
 `renderIntervalMs`를 50으로 두었다(`positionTransitionMs`가 그 사이를 보간한다).
@@ -583,5 +609,9 @@ UI를 Qt Quick으로 옮기면서 영상이 영향을 받는지 검토했고, **
 
 - Qt Quick RHI(D3D11)와 `d3d11videosink`의 GPU 경합: 장치를 각자 쓰고 백엔드 강제 설정도 없다. 부하
   공유는 있으나 "충돌"이라 부를 근거는 없다.
-- `rtspsrc protocols` 기본 협상(UDP 우선): 실제로 어느 transport가 선택됐는지는 로그 없이 단정 불가.
-- `sinkQos=false`: `sync=false`에서는 QoS 자체가 의미를 갖지 않아 독립 요인으로 세지 않았다.
+- `rtspsrc protocols` 기본 협상(UDP 우선): **이제 로그로 확인할 수 있다.** 첫 packet에서
+  `[GstRtspReceiver] RTSP transport=UDP|TCP(interleaved) firstPacket=... ms`를 남긴다(rtspsrc 내부에
+  `udpsrc`가 있는지로 판별). UDP 손실이 의심되면 그 로그를 먼저 보고, `protocols=tcp`와 비교한다.
+  transport가 원인인지 자체는 여전히 실 계측이 필요하다.
+- `sinkQos=false`: `sync=true`가 된 뒤에도 QoS는 켜지 않았다. 디코더에 개입시킬 이유가 없고, 드롭
+  지점을 `renderqueue` 하나로 유지하려는 것과 같은 이유다.

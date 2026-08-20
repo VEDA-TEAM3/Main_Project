@@ -568,54 +568,53 @@ bool parseReceiverConfig(const QJsonObject& video, GstRtspReceiverConfig& config
         !readInteger(receiver, QStringLiteral("alignmentDelayMs"), 0, 5000, config.alignmentDelayMsec, error)) {
         return false;
     }
-    if (receiver.contains(QStringLiteral("alignmentQueueMaximumTimeMs")) &&
-        !readInteger(receiver, QStringLiteral("alignmentQueueMaximumTimeMs"), 1, 10000,
-                     config.alignmentQueueMaximumTimeMsec, error)) {
-        return false;
-    }
-    if (config.alignmentDelayMsec > 0 && config.alignmentQueueMaximumTimeMsec < config.alignmentDelayMsec) {
-        error = QStringLiteral("video.receiver.alignmentQueueMaximumTimeMs must be >= alignmentDelayMs");
+    const bool parsed =
+        readInt(receiver, QStringLiteral("busPollIntervalMs"), 10, 5000, config.busPollIntervalMsec, error) &&
+        readInt(receiver, QStringLiteral("latencyMs"), 0, 60000, config.latencyMsec, error) &&
+        readBoolean(receiver, QStringLiteral("dropOnLatency"), config.dropOnLatency, error) &&
+        readInt(receiver, QStringLiteral("initialPacketTimeoutMs"), 100, 600000, config.initialPacketTimeoutMsec,
+                error) &&
+        readInt(receiver, QStringLiteral("initialFrameTimeoutMs"), 100, 600000, config.initialFrameTimeoutMsec,
+                error) &&
+        readInt(receiver, QStringLiteral("maximumReconnectDelayMs"), 100, 600000, config.maximumReconnectDelayMsec,
+                error) &&
+        readInt(receiver, QStringLiteral("authenticationFailureReconnectDelayMs"), 100, 3600000,
+                config.authenticationFailureReconnectDelayMsec, error) &&
+        readInt(receiver, QStringLiteral("stallTimeoutMs"), 100, 600000, config.stallTimeoutMsec, error) &&
+        readInteger(receiver, QStringLiteral("udpBufferSizeBytes"), 0, 1073741824, udpBufferSize, error) &&
+        (config.udpBufferSizeBytes = static_cast<quint64>(udpBufferSize), true) &&
+        readInteger(receiver, QStringLiteral("tcpTimeoutUs"), 0, 3600000000LL, tcpTimeout, error) &&
+        (config.tcpTimeoutUsec = static_cast<quint64>(tcpTimeout), true) &&
+        readInteger(receiver, QStringLiteral("udpTimeoutUs"), 0, 3600000000LL, udpTimeout, error) &&
+        (config.udpTimeoutUsec = static_cast<quint64>(udpTimeout), true) &&
+        readInt(receiver, QStringLiteral("probationPackets"), 0, 1000, config.probationPackets, error) &&
+        readBoolean(receiver, QStringLiteral("rtspKeepAlive"), config.rtspKeepAlive, error) &&
+        readBoolean(receiver, QStringLiteral("udpReconnect"), config.udpReconnect, error) &&
+        readBoolean(receiver, QStringLiteral("addReferenceTimestampMeta"), config.addReferenceTimestampMeta, error) &&
+        readInteger(receiver, QStringLiteral("decodeQueueMaximumTimeMs"), 0, 60000, config.decodeQueueMaximumTimeMsec,
+                    error) &&
+        readInteger(receiver, QStringLiteral("renderQueueMaximumTimeMs"), 0, 60000, config.renderQueueMaximumTimeMsec,
+                    error) &&
+        readBoolean(receiver, QStringLiteral("sinkQos"), config.sinkQos, error) &&
+        readBoolean(receiver, QStringLiteral("sinkSync"), config.sinkSync, error) &&
+        readBoolean(receiver, QStringLiteral("sinkAsync"), config.sinkAsync, error) &&
+        readInteger(receiver, QStringLiteral("minimumLoadingMs"), 0, 60000, config.minimumLoadingMsec, error) &&
+        readInt(receiver, QStringLiteral("reconnectSpreadMs"), 1, 600000, config.reconnectSpreadMsec, error) &&
+        parseVideoPreprocessingConfig(receiver, config.preprocessing, error) &&
+        parseBlurConfig(receiver, config.blur, error);
+    if (!parsed) {
         return false;
     }
 
-    return readInt(receiver, QStringLiteral("busPollIntervalMs"), 10, 5000, config.busPollIntervalMsec, error) &&
-           readInt(receiver, QStringLiteral("latencyMs"), 0, 60000, config.latencyMsec, error) &&
-           readBoolean(receiver, QStringLiteral("dropOnLatency"), config.dropOnLatency, error) &&
-           readInt(receiver, QStringLiteral("initialPacketTimeoutMs"), 100, 600000, config.initialPacketTimeoutMsec,
-                   error) &&
-           readInt(receiver, QStringLiteral("initialFrameTimeoutMs"), 100, 600000, config.initialFrameTimeoutMsec,
-                   error) &&
-           readInt(receiver, QStringLiteral("maximumReconnectDelayMs"), 100, 600000, config.maximumReconnectDelayMsec,
-                   error) &&
-           readInt(receiver, QStringLiteral("authenticationFailureReconnectDelayMs"), 100, 3600000,
-                   config.authenticationFailureReconnectDelayMsec, error) &&
-           readInt(receiver, QStringLiteral("stallTimeoutMs"), 100, 600000, config.stallTimeoutMsec, error) &&
-           readInteger(receiver, QStringLiteral("udpBufferSizeBytes"), 0, 1073741824, udpBufferSize, error) &&
-           (config.udpBufferSizeBytes = static_cast<quint64>(udpBufferSize), true) &&
-           readInteger(receiver, QStringLiteral("tcpTimeoutUs"), 0, 3600000000LL, tcpTimeout, error) &&
-           (config.tcpTimeoutUsec = static_cast<quint64>(tcpTimeout), true) &&
-           readInteger(receiver, QStringLiteral("udpTimeoutUs"), 0, 3600000000LL, udpTimeout, error) &&
-           (config.udpTimeoutUsec = static_cast<quint64>(udpTimeout), true) &&
-           readInt(receiver, QStringLiteral("probationPackets"), 0, 1000, config.probationPackets, error) &&
-           readBoolean(receiver, QStringLiteral("rtspKeepAlive"), config.rtspKeepAlive, error) &&
-           readBoolean(receiver, QStringLiteral("udpReconnect"), config.udpReconnect, error) &&
-           readBoolean(receiver, QStringLiteral("addReferenceTimestampMeta"), config.addReferenceTimestampMeta,
-                       error) &&
-           readInt(receiver, QStringLiteral("decodeQueueMaximumBuffers"), 1, 1000, config.decodeQueueMaximumBuffers,
-                   error) &&
-           readInteger(receiver, QStringLiteral("decodeQueueMaximumTimeMs"), 0, 60000,
-                       config.decodeQueueMaximumTimeMsec, error) &&
-           readInt(receiver, QStringLiteral("renderQueueMaximumBuffers"), 1, 1000, config.renderQueueMaximumBuffers,
-                   error) &&
-           readInteger(receiver, QStringLiteral("renderQueueMaximumTimeMs"), 0, 60000,
-                       config.renderQueueMaximumTimeMsec, error) &&
-           readBoolean(receiver, QStringLiteral("sinkQos"), config.sinkQos, error) &&
-           readBoolean(receiver, QStringLiteral("sinkSync"), config.sinkSync, error) &&
-           readBoolean(receiver, QStringLiteral("sinkAsync"), config.sinkAsync, error) &&
-           readInteger(receiver, QStringLiteral("minimumLoadingMs"), 0, 60000, config.minimumLoadingMsec, error) &&
-           readInt(receiver, QStringLiteral("reconnectSpreadMs"), 1, 600000, config.reconnectSpreadMsec, error) &&
-           parseVideoPreprocessingConfig(receiver, config.preprocessing, error) &&
-           parseBlurConfig(receiver, config.blur, error);
+    // 정렬 지연은 sink의 ts-offset으로만 만든다. GstBaseSink 문서상 ts-offset은 clock 동기화 경로에서
+    // 쓰이므로 sync=false면 값이 조용히 무시되고, 블러가 영상보다 alignmentDelayMs만큼 앞서 나간다
+    if (config.alignmentDelayMsec > 0 && !config.sinkSync) {
+        error = QStringLiteral(
+            "video.receiver.alignmentDelayMs requires sinkSync=true (the delay is applied as the sink ts-offset)");
+        return false;
+    }
+
+    return true;
 }
 
 bool parseVideo(const QJsonObject& root, VideoRuntimeConfig& config, QString& error) {
