@@ -13,11 +13,15 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <utility>
 
 #include "video/BlurVideoFilter.h"
 
 namespace {
+/// 채널당 프레임 통계 로그 주기. 4채널 기준 5초에 4줄이라 상시 켜 두어도 로그를 덮지 않는다
+constexpr qint64 frameStatisticsIntervalMsec = 5000;
+
 /**
  * @brief             지정한 GStreamer element factory가 설치되어 있는지
  * 확인합니다.
@@ -381,6 +385,14 @@ void GstRtspReceiver::startPipeline() {
     lastPacketTimeUsec_.store(startTimeUsec, std::memory_order_relaxed);
     lastFrameTimeUsec_.store(startTimeUsec, std::memory_order_relaxed);
 
+    packetCount_.store(0, std::memory_order_relaxed);
+    decodedFrameCount_.store(0, std::memory_order_relaxed);
+    presentedFrameCount_.store(0, std::memory_order_relaxed);
+    lastReportedPacketCount_ = 0;
+    lastReportedDecodedCount_ = 0;
+    lastReportedPresentedCount_ = 0;
+    statisticsTimer_.start();
+
     startupTimer_.restart();
     emit loadingChanged(true);
 
@@ -409,10 +421,13 @@ void GstRtspReceiver::startPipeline() {
     const QString pathName =
         systemMemoryChainActive_ ? QStringLiteral("cpu(download)") : QStringLiteral("gpu(no-download)");
     const qint64 playoutDelayMsec = systemMemoryChainActive_ ? config_.alignmentDelayMsec : 0;
+    // 실제로 고른 디코더 factory 이름. 설정값(decoderMode)이 아니라 체인에 들어간 것을 찍어야
+    // 플러그인 로드 실패로 소프트웨어 디코더에 떨어진 상태를 로그에서 구분할 수 있다
+    activeDecoderName_ = decoderChain(systemMemoryChainActive_).section(QLatin1Char(' '), 0, 0);
     qInfo().noquote() << QStringLiteral(
-                             "[GstRtspReceiver] video path=%1 sinkSync=%2 tsOffset=%3ms renderQueue=%4ms "
-                             "processing=%5")
-                             .arg(pathName)
+                             "[GstRtspReceiver] %1 video decoder=%2 path=%3 sinkSync=%4 tsOffset=%5ms "
+                             "renderQueue=%6ms processing=%7")
+                             .arg(objectName(), activeDecoderName_, pathName)
                              .arg(config_.sinkSync)
                              .arg(playoutDelayMsec)
                              .arg(config_.renderQueueMaximumTimeMsec + playoutDelayMsec)
@@ -567,6 +582,12 @@ void GstRtspReceiver::startPipeline() {
     }
 
     gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(sink), windowHandle_);
+
+    if (GstPad* sinkPad = gst_element_get_static_pad(sink, "sink")) {
+        gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_BUFFER, &GstRtspReceiver::onPresentProbe, this, nullptr);
+        gst_object_unref(sinkPad);
+    }
+
     gst_object_unref(sink);
 
     const GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
@@ -758,6 +779,50 @@ void GstRtspReceiver::markFirstFrame() {
 }
 
 /**
+ * @brief   채널별 프레임 통계를 주기적으로 기록합니다.
+ *
+ * @details 끊김의 원인 후보는 처방이 서로 반대라 추측으로 고를 수 없다(GPU/전력 포화, 망 손실,
+ *          소프트웨어 디코더 fallback). 파이프라인 세 지점의 개수를 한 줄에 같이 찍으면 갈린다:
+ *            rtp가 함께 줄어듦          -> 상류(망/카메라)
+ *            rtp는 정상, decoded가 줄어듦 -> 디코더(특히 avdec fallback. decoder= 값을 같이 본다)
+ *            decoded는 정상, gap이 자람   -> 하류. renderqueue(leaky=downstream)가 버리는 중이라
+ *                                          GPU/전력 포화 쪽이다
+ *          gap은 decoded - presented 누적값이다. renderqueue에 머무는 분량만큼은 정상 상태에서도
+ *          0이 아니지만 그 깊이는 일정하므로, **자라는 gap만이 드롭**이다.
+ */
+void GstRtspReceiver::reportFrameStatistics() {
+    // 숨은 채널은 presentationvalve가 프레임을 막으므로 0이 찍힌다. 통계는 보이는 채널만 남긴다
+    if (!pipeline_ || !presentationActive_) {
+        statisticsTimer_.start();
+        lastReportedPacketCount_ = packetCount_.load(std::memory_order_relaxed);
+        lastReportedDecodedCount_ = decodedFrameCount_.load(std::memory_order_relaxed);
+        lastReportedPresentedCount_ = presentedFrameCount_.load(std::memory_order_relaxed);
+        return;
+    }
+
+    if (!statisticsTimer_.isValid() || statisticsTimer_.elapsed() < frameStatisticsIntervalMsec) {
+        return;
+    }
+
+    const quint64 packets = packetCount_.load(std::memory_order_relaxed);
+    const quint64 decoded = decodedFrameCount_.load(std::memory_order_relaxed);
+    const quint64 presented = presentedFrameCount_.load(std::memory_order_relaxed);
+    const double elapsedSeconds = static_cast<double>(statisticsTimer_.restart()) / 1000.0;
+
+    qInfo().noquote() << QStringLiteral("[VIDEO STAT] %1 decoder=%2 rtp=%3/s decoded=%4fps presented=%5fps gap=%6")
+                             .arg(objectName(), activeDecoderName_)
+                             .arg(static_cast<double>(packets - lastReportedPacketCount_) / elapsedSeconds, 0, 'f', 1)
+                             .arg(static_cast<double>(decoded - lastReportedDecodedCount_) / elapsedSeconds, 0, 'f', 1)
+                             .arg(static_cast<double>(presented - lastReportedPresentedCount_) / elapsedSeconds, 0, 'f',
+                                  1)
+                             .arg(decoded - presented);
+
+    lastReportedPacketCount_ = packets;
+    lastReportedDecodedCount_ = decoded;
+    lastReportedPresentedCount_ = presented;
+}
+
+/**
  * @brief   초기 패킷/프레임 수신 지연과 실행 중 frame stall을 감시합니다.
  */
 void GstRtspReceiver::checkStall() {
@@ -845,11 +910,27 @@ GstPadProbeReturn GstRtspReceiver::onFrameProbe(GstPad*, GstPadProbeInfo*, gpoin
     }
 
     receiver->lastFrameTimeUsec_.store(g_get_monotonic_time(), std::memory_order_relaxed);
+    receiver->decodedFrameCount_.fetch_add(1, std::memory_order_relaxed);
 
     bool expected = false;
     if (receiver->gotAnyFrame_.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                                        std::memory_order_relaxed)) {
         QMetaObject::invokeMethod(receiver, [receiver]() { receiver->markFirstFrame(); }, Qt::QueuedConnection);
+    }
+
+    return GST_PAD_PROBE_OK;
+}
+
+/**
+ * @brief            sink에 도달한 프레임 수를 셉니다.
+ * @param userData   GstRtspReceiver 포인터
+ * @return           pad probe 처리 결과
+ */
+GstPadProbeReturn GstRtspReceiver::onPresentProbe(GstPad*, GstPadProbeInfo*, gpointer userData) {
+    auto* receiver = static_cast<GstRtspReceiver*>(userData);
+
+    if (receiver) {
+        receiver->presentedFrameCount_.fetch_add(1, std::memory_order_relaxed);
     }
 
     return GST_PAD_PROBE_OK;
@@ -874,6 +955,7 @@ GstPadProbeReturn GstRtspReceiver::onPacketProbe(GstPad*, GstPadProbeInfo* info,
 
     const gint64 packetTimeUsec = g_get_monotonic_time();
     receiver->lastPacketTimeUsec_.store(packetTimeUsec, std::memory_order_relaxed);
+    receiver->packetCount_.fetch_add(1, std::memory_order_relaxed);
 
     gint64 expectedFirstPacketTime = 0;
     receiver->firstPacketTimeUsec_.compare_exchange_strong(expectedFirstPacketTime, packetTimeUsec,
@@ -1033,19 +1115,23 @@ GstBusSyncReply GstRtspReceiver::onBusSyncMessage(GstBus*, GstMessage* message, 
  * @return                         GStreamer bin description 일부로 사용할 decoder chain
  */
 QString GstRtspReceiver::decoderChain(bool downloadToSystemMemory) const {
-    const QByteArray decoderMode = config_.decoderMode.toLatin1();
+    const bool preferHardware = config_.decoderMode == QLatin1String("d3d11");
     const bool d3d11Available = hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download");
 
-    if (d3d11Available && (decoderMode == "d3d11" || !hasGstFactory("avdec_h264"))) {
+    if (d3d11Available && (preferHardware || !hasGstFactory("avdec_h264"))) {
         return d3d11DecoderChain(downloadToSystemMemory);
     }
 
-    if (decoderMode != "d3d11" && hasGstFactory("avdec_h264")) {
-        return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
-    }
-
-    if (d3d11Available) {
-        return d3d11DecoderChain(downloadToSystemMemory);
+    // libgstd3d11.dll은 PATH 순서에 민감해서 조용히 로드에 실패한다. 그러면 설정이 d3d11이어도
+    // 여기서 소프트웨어 디코더로 떨어지는데, 15W iGPU 노트북에서 4x1080p 소프트웨어 디코딩은
+    // 상시 끊김으로 나타난다. 조용히 넘어가면 로그만 보고는 구분할 수 없으므로 경고를 남긴다
+    if (preferHardware) {
+        static std::once_flag warnOnceFlag;
+        std::call_once(warnOnceFlag, []() {
+            qWarning().noquote() << QStringLiteral(
+                "[GstRtspReceiver] decoderMode=d3d11 requested but d3d11h264dec/d3d11download is missing; "
+                "falling back to software avdec_h264 (check GStreamer PATH/plugins)");
+        });
     }
 
     return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
@@ -1443,4 +1529,5 @@ void GstRtspReceiver::pollBus() {
 
     gst_object_unref(bus);
     checkStall();
+    reportFrameStatistics();
 }
