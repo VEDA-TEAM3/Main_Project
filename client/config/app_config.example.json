@@ -66,7 +66,7 @@
             { "cameraId": "cam-08", "name": "CH - 08", "url": "rtsp://USERNAME:PASSWORD@CAMERA_HOST:554/3/profile4/media.smp", "channelIndex": 7, "enabled": true }
         ],
         "receiver": {
-            "decoderMode": "d3d11",
+            "decoderMode": "auto",
             "processingWidth": 1280,
             "processingHeight": 720,
             "busPollIntervalMs": 200,
@@ -84,9 +84,9 @@
             "rtspKeepAlive": true,
             "udpReconnect": true,
             "addReferenceTimestampMeta": true,
-            "decodeQueueMaximumTimeMs": 800,
+            "decodeQueueMaximumTimeMs": 100,
             "alignmentDelayMs": 0,
-            "renderQueueMaximumTimeMs": 200,
+            "renderQueueMaximumTimeMs": 33,
             "sinkQos": false,
             "sinkSync": false,
             "sinkAsync": false,
