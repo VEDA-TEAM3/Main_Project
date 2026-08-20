@@ -14,6 +14,19 @@
 namespace {
 constexpr int maximumRecentReportKeys = 128;
 constexpr int uiFlushIntervalMsec = 50;
+
+/**
+ * @brief        화면에 표시되는 장비 상태가 같은지 확인합니다.
+ * @details      원본 timestamp는 상태 최신성 판단용이며 UI 표시값이 아니므로 비교하지 않습니다.
+ */
+bool hasSameDisplayedState(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
+    return left.channelIndex == right.channelIndex && left.outputs.ledRed == right.outputs.ledRed &&
+           left.outputs.ledYellow == right.outputs.ledYellow && left.outputs.ledGreen == right.outputs.ledGreen &&
+           left.outputs.beacon == right.outputs.beacon && left.outputs.buzzer == right.outputs.buzzer &&
+           left.hasConfirmedState == right.hasConfirmedState && left.sensorHealth == right.sensorHealth &&
+           left.feedbackHealth == right.feedbackHealth && left.sensorDetail == right.sensorDetail &&
+           left.detail == right.detail;
+}
 }  // namespace
 
 /**
@@ -289,8 +302,7 @@ void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& 
         status.confirmedSourceTimestamp = report.sourceTimestamp;
     }
 
-    channelStatuses_.insert(status.channelIndex, status);
-    queueChannelStatus(std::move(status));
+    storeChannelStatus(std::move(status));
 }
 
 void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, SensorHealth health) {
@@ -303,8 +315,7 @@ void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, S
     status.sensorHealth = health;
     status.sensorDetail = report.detail;
 
-    channelStatuses_.insert(status.channelIndex, status);
-    queueChannelStatus(std::move(status));
+    storeChannelStatus(std::move(status));
 }
 
 void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& report) {
@@ -316,8 +327,7 @@ void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& r
     status.channelIndex = report.channelIndex;
     status.detail = report.detail;
 
-    channelStatuses_.insert(status.channelIndex, status);
-    queueChannelStatus(std::move(status));
+    storeChannelStatus(std::move(status));
 }
 
 /**
@@ -342,8 +352,7 @@ void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& repo
     status.detail = report.detail;
     status.confirmedSourceTimestamp = report.sourceTimestamp;
 
-    channelStatuses_.insert(status.channelIndex, status);
-    queueChannelStatus(std::move(status));
+    storeChannelStatus(std::move(status));
 }
 
 /**
@@ -361,8 +370,19 @@ void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report)
     status.feedbackHealth = DeviceFeedbackHealth::Failed;
     status.detail = report.detail;
 
+    storeChannelStatus(std::move(status));
+}
+
+/**
+ * @brief         최신 상태를 저장하고 화면 표시값이 바뀐 경우에만 UI 갱신을 예약합니다.
+ * @param status  저장할 채널 상태
+ */
+void DeviceStatusService::storeChannelStatus(DeviceChannelStatus status) {
+    const DeviceChannelStatus previousStatus = channelStatuses_.value(status.channelIndex);
     channelStatuses_.insert(status.channelIndex, status);
-    queueChannelStatus(std::move(status));
+    if (!hasSameDisplayedState(previousStatus, status)) {
+        queueChannelStatus(std::move(status));
+    }
 }
 
 /**

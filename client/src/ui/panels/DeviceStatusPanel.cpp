@@ -16,7 +16,7 @@ bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& r
            left.outputs.beacon == right.outputs.beacon && left.outputs.buzzer == right.outputs.buzzer &&
            left.hasConfirmedState == right.hasConfirmedState && left.sensorHealth == right.sensorHealth &&
            left.feedbackHealth == right.feedbackHealth && left.sensorDetail == right.sensorDetail &&
-           left.detail == right.detail && left.confirmedSourceTimestamp == right.confirmedSourceTimestamp;
+           left.detail == right.detail;
 }
 
 /**

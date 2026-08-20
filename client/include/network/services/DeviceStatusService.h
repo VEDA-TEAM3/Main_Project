@@ -53,6 +53,7 @@ private:
     void handleConfirmedFeedback(const DeviceStatusReport& report);
     void handleAcknowledgedFeedback(const DeviceStatusReport& report);
     void handleFailedFeedback(const DeviceStatusReport& report);
+    void storeChannelStatus(DeviceChannelStatus status);
     void queueChannelStatus(DeviceChannelStatus status);
     void scheduleUiFlush();
     void flushPendingStatuses();
