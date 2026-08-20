@@ -188,6 +188,11 @@ void GstRtspReceiver::setUrl(const QString& url) { url_ = url.trimmed(); }
 
 void GstRtspReceiver::setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) {
     blurProcessor_.setTargetsEnabled(faceEnabled, licensePlateEnabled);
+
+    if (rebuildIfChainShapeChanged(QStringLiteral("blur targets changed"))) {
+        return;
+    }
+
     applyBlurPassthrough();
 }
 
@@ -200,7 +205,30 @@ void GstRtspReceiver::setBlurFrame(BlurFrameData frame) { blurProcessor_.submitF
  */
 void GstRtspReceiver::setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) {
     config_.preprocessing = settings;
+
+    if (rebuildIfChainShapeChanged(QStringLiteral("preprocessing changed"))) {
+        return;
+    }
+
     applyVideoPreprocessingSettings();
+}
+
+/**
+ * @brief        CPU 처리가 필요한지 여부가 뒤집혔으면 파이프라인을 다시 세웁니다.
+ * @param reason 로그와 상태 표시에 남길 사유
+ * @return       재시작을 시작했으면 true
+ *
+ * @details 다운로드 요소를 넣고 빼는 것은 실행 중에 링크를 바꿔서는 할 수 없으므로 재연결로
+ *          처리한다. 블러 토글과 전처리 값은 설정 팝업에서만 바뀌는 드문 조작이라 그 자리에서
+ *          한 번 끊기는 편이, 필요도 없는 프레임 왕복을 세션 내내 무는 것보다 싸다.
+ */
+bool GstRtspReceiver::rebuildIfChainShapeChanged(const QString& reason) {
+    if (!pipeline_ || needsSystemMemoryChain() == systemMemoryChainActive_) {
+        return false;
+    }
+
+    restartPipeline(reason);
+    return true;
 }
 
 /**
@@ -313,67 +341,23 @@ void GstRtspReceiver::startPipeline() {
         return;
     }
 
-    // 두 큐의 역할이 다르므로 값을 같이 보고 조정해야 한다.
-    //
-    // alignmentqueue: min-threshold-time만큼 쌓여야 출력이 시작되는 고정 지연선이다(블러 정렬용).
-    //   임계값 아래로 내려가면 다시 멈추므로 쌓인 분량을 언더런 흡수에 쓸 수 없다. 즉 '지연'이지
-    //   '완충'이 아니다. max-size-time은 폭주를 막는 천장일 뿐이라 평시에는 걸리지 않는다.
-    // renderqueue: 실제 완충이자 프레임을 버리는 유일한 지점이다. 싱크가 sync=false로 도착 즉시
-    //   렌더하므로 평시에는 큐가 비어 있어 깊이를 늘려도 지연이 늘지 않는다. 블러나 D3D11 업로드가
-    //   한 프레임 늦어지는 순간에만 채워져, 이미 디코딩까지 마친 프레임을 버리는 대신 흡수한다.
-    //   여기를 1로 두면 흡수량이 0이라 아주 짧은 지연도 곧바로 드롭이 된다.
-    //
-    // 포맷은 디코더가 내는 NV12를 끝까지 유지한다. videobalance/gamma/qtblur/d3d11videosink가 모두
-    // NV12를 받으므로 videoconvert는 d3d11 경로에서 통과만 하고, BGRA로 바꿀 때 들던 픽셀당 4바이트
-    // 풀프레임 변환과 그만큼 늘어난 GPU 왕복 전송이 사라진다.
-    const QString videoChainDesc =
-        QString(
-            "rtph264depay name=depay request-keyframe=true "
-            "wait-for-keyframe=true ! "
-            "h264parse config-interval=-1 ! "
-            "queue name=decodequeue silent=true max-size-buffers=%2 "
-            "max-size-bytes=0 max-size-time=%3 ! "
-            "valve name=presentationvalve drop=false drop-mode=transform-to-gap "
-            "! "
-            "%1 ! identity name=framewatch silent=true signal-handoffs=false ! "
-            "videoconvert ! video/x-raw,format=NV12 ! "
-            "queue name=alignmentqueue silent=true leaky=downstream "
-            "max-size-buffers=0 max-size-bytes=0 "
-            "max-size-time=%6 min-threshold-time=%7 ! "
-            "queue name=renderqueue silent=true leaky=downstream "
-            "max-size-buffers=%4 max-size-bytes=0 "
-            "max-size-time=%5 ! "
-            "videobalance name=balance brightness=0.0 contrast=1.0 "
-            "saturation=1.0 ! "
-            "gamma name=gammafilter gamma=1.0 ! "
-            "qtblur name=blur ! "
-            "d3d11videosink name=videosink force-aspect-ratio=true "
-            "enable-last-sample=false qos=false "
-            "sync=false async=false")
-            .arg(decoderChain())
-            .arg(config_.decodeQueueMaximumBuffers)
-            .arg(config_.decodeQueueMaximumTimeMsec * 1000LL * 1000LL)
-            .arg(config_.renderQueueMaximumBuffers)
-            .arg(config_.renderQueueMaximumTimeMsec * 1000LL * 1000LL)
-            .arg(config_.alignmentQueueMaximumTimeMsec * 1000LL * 1000LL)
-            .arg(config_.alignmentDelayMsec * 1000LL * 1000LL)
-            .replace(QStringLiteral("qos=false"),
-                     QStringLiteral("qos=%1").arg(config_.sinkQos ? QStringLiteral("true") : QStringLiteral("false")))
-            .replace(QStringLiteral("sync=false"),
-                     QStringLiteral("sync=%1").arg(config_.sinkSync ? QStringLiteral("true") : QStringLiteral("false")))
-            .replace(
-                QStringLiteral("async=false"),
-                QStringLiteral("async=%1").arg(config_.sinkAsync ? QStringLiteral("true") : QStringLiteral("false")));
+    systemMemoryChainActive_ = needsSystemMemoryChain();
+    const QString videoChainDesc = videoChainDescription(systemMemoryChainActive_);
 
     qDebug().noquote() << "[GstRtspReceiver] Manual RTSP pipeline:" << videoChainDesc;
     const QString processingSize =
         config_.processingWidth > 0 && config_.processingHeight > 0
             ? QStringLiteral("%1x%2").arg(config_.processingWidth).arg(config_.processingHeight)
             : QStringLiteral("source");
-    qInfo().noquote() << QStringLiteral("[GstRtspReceiver] video alignment delay=%1ms maxBuffer=%2ms processing=%3")
-                             .arg(config_.alignmentDelayMsec)
-                             .arg(config_.alignmentQueueMaximumTimeMsec)
-                             .arg(processingSize);
+    const QString pathName =
+        systemMemoryChainActive_ ? QStringLiteral("cpu(download)") : QStringLiteral("gpu(no-download)");
+    qInfo().noquote() << QStringLiteral(
+                             "[GstRtspReceiver] video path=%1 alignment delay=%2ms maxBuffer=%3ms "
+                             "processing=%4")
+                             .arg(pathName)
+                             .arg(systemMemoryChainActive_ ? config_.alignmentDelayMsec : 0)
+                             .arg(systemMemoryChainActive_ ? config_.alignmentQueueMaximumTimeMsec : 0)
+                             .arg(systemMemoryChainActive_ ? processingSize : QStringLiteral("source"));
 
     GError* error = nullptr;
     GstElement* source = gst_element_factory_make("rtspsrc", "src");
@@ -465,7 +449,8 @@ void GstRtspReceiver::startPipeline() {
     if (blur) {
         BlurVideoFilter::setProcessor(blur, &blurProcessor_);
         gst_object_unref(blur);
-    } else {
+    } else if (systemMemoryChainActive_) {
+        // GPU 경로에는 qtblur가 애초에 없다. 없어야 정상인 경우까지 경고하지 않는다
         qWarning() << "[GstRtspReceiver] Failed to find blur filter";
     }
 
@@ -976,15 +961,16 @@ GstBusSyncReply GstRtspReceiver::onBusSyncMessage(GstBus*, GstMessage* message, 
 }
 
 /**
- * @brief   사용 가능한 H.264 decoder chain 문자열을 반환합니다.
- * @return  GStreamer bin description 일부로 사용할 decoder chain
+ * @brief                          사용 가능한 H.264 decoder chain 문자열을 반환합니다.
+ * @param downloadToSystemMemory   true면 디코딩 결과를 시스템 메모리로 내려받는 체인
+ * @return                         GStreamer bin description 일부로 사용할 decoder chain
  */
-QString GstRtspReceiver::decoderChain() const {
+QString GstRtspReceiver::decoderChain(bool downloadToSystemMemory) const {
     const QByteArray decoderMode = config_.decoderMode.toLatin1();
     const bool d3d11Available = hasGstFactory("d3d11h264dec") && hasGstFactory("d3d11download");
 
     if (d3d11Available && (decoderMode == "d3d11" || !hasGstFactory("avdec_h264"))) {
-        return d3d11DecoderChain();
+        return d3d11DecoderChain(downloadToSystemMemory);
     }
 
     if (decoderMode != "d3d11" && hasGstFactory("avdec_h264")) {
@@ -992,25 +978,34 @@ QString GstRtspReceiver::decoderChain() const {
     }
 
     if (d3d11Available) {
-        return d3d11DecoderChain();
+        return d3d11DecoderChain(downloadToSystemMemory);
     }
 
     return "avdec_h264 max-threads=2 ! video/x-raw,format=I420";
 }
 
 /**
- * @brief   d3d11 하드웨어 디코더 체인을 반환합니다.
- * @return  디코더 + (설정 시) GPU 축소 + 시스템 메모리 다운로드 체인
+ * @brief                          d3d11 하드웨어 디코더 체인을 반환합니다.
+ * @param downloadToSystemMemory   true면 GPU 축소 + 시스템 메모리 다운로드까지 붙인다
+ * @return                         디코더 체인
  *
  * @details 축소는 반드시 d3d11download **앞**에 둔다. 뒤에 두면 이미 원본 해상도를 CPU로
  *          내려받은 뒤라 전송량이 그대로고, 축소 비용만 CPU에 더 얹힌다.
  *          너비와 높이를 모두 지정해도 d3d11scale이 pixel-aspect-ratio로 화면비를 보정하므로
  *          4:3 카메라도 sink의 force-aspect-ratio=true와 함께 올바르게 표시된다.
+ *
+ *          다운로드하지 않는 GPU 경로에서는 축소도 붙이지 않는다. 축소의 목적이 전송량을
+ *          줄이는 것인데 전송 자체가 없고, d3d11videosink가 어차피 창 크기로 한 번 더 늘리므로
+ *          중간에 720p를 거치면 GPU 패스만 하나 늘고 화질은 떨어진다.
  */
-QString GstRtspReceiver::d3d11DecoderChain() const {
+QString GstRtspReceiver::d3d11DecoderChain(bool downloadToSystemMemory) const {
     QString chain = QStringLiteral(
         "d3d11h264dec discard-corrupted-frames=true "
         "automatic-request-sync-points=true");
+
+    if (!downloadToSystemMemory) {
+        return chain;
+    }
 
     if (config_.processingWidth > 0 && config_.processingHeight > 0 && hasGstFactory("d3d11scale")) {
         chain += QStringLiteral(" ! d3d11scale ! video/x-raw(memory:D3D11Memory),width=%1,height=%2")
@@ -1019,6 +1014,101 @@ QString GstRtspReceiver::d3d11DecoderChain() const {
     }
 
     return chain + QStringLiteral(" ! d3d11download");
+}
+
+/**
+ * @brief  프레임을 시스템 메모리로 내려받아야 하는 구성인지 판단합니다.
+ * @return CPU에서 픽셀을 만져야 하면 true
+ *
+ * @details 블러도 videobalance/gamma도 CPU 요소라 프레임이 시스템 메모리에 있어야 한다.
+ *          둘 다 필요 없으면 디코딩된 텍스처를 그대로 sink에 넘길 수 있고, 그러면 채널당
+ *          매 프레임 일어나던 GPU->CPU 다운로드와 sink에서의 재업로드가 통째로 사라진다.
+ *          d3d11download는 staging 텍스처로 복사한 뒤 Map(READ)로 GPU를 기다리므로,
+ *          비용이 전송량뿐 아니라 프레임마다 GPU 큐를 비우는 동기화 지점이라는 점이 더 크다.
+ *          UI가 같은 iGPU를 쓰는 동안 그 대기가 길어지면서 영상 끊김으로 나타난다.
+ */
+bool GstRtspReceiver::needsSystemMemoryChain() const {
+    if (blurProcessor_.hasEnabledTargets()) {
+        return true;
+    }
+
+    const VideoPreprocessingSettings& preprocessing = config_.preprocessing;
+    return preprocessing.enabled &&
+           (preprocessing.brightness != 0 || preprocessing.contrast != 1.0 || preprocessing.gamma != 1.0);
+}
+
+/**
+ * @brief                     영상 체인 bin description을 만듭니다.
+ * @param systemMemoryChain   true면 CPU 처리 경로, false면 GPU 전용 경로
+ * @return                    gst_parse_bin_from_description에 넘길 문자열
+ *
+ * @details CPU 경로의 두 큐는 역할이 다르므로 값을 같이 보고 조정해야 한다.
+ *
+ *          alignmentqueue: min-threshold-time만큼 쌓여야 출력이 시작되는 고정 지연선이다
+ *            (블러 정렬용). 임계값 아래로 내려가면 다시 멈추므로 쌓인 분량을 언더런 흡수에 쓸 수
+ *            없다. 즉 '지연'이지 '완충'이 아니고, 짧은 언더런도 임계값을 다시 채울 때까지 늘린다.
+ *            그래서 블러가 없는 GPU 경로에는 아예 넣지 않는다.
+ *          renderqueue: 실제 완충이자 프레임을 버리는 유일한 지점이다. 싱크가 sync=false로 도착
+ *            즉시 렌더하므로 평시에는 큐가 비어 있어 깊이를 늘려도 지연이 늘지 않는다. 두 경로 모두 둔다.
+ *
+ *          포맷은 디코더가 내는 NV12를 끝까지 유지한다. videobalance/gamma/qtblur/d3d11videosink가
+ *          모두 NV12를 받으므로 videoconvert는 d3d11 경로에서 통과만 하고, BGRA로 바꿀 때 들던
+ *          픽셀당 4바이트 풀프레임 변환과 그만큼 늘어난 GPU 왕복 전송이 사라진다.
+ */
+QString GstRtspReceiver::videoChainDescription(bool systemMemoryChain) const {
+    const QString commonHead = QStringLiteral(
+                                   "rtph264depay name=depay request-keyframe=true "
+                                   "wait-for-keyframe=true ! "
+                                   "h264parse config-interval=-1 ! "
+                                   "queue name=decodequeue silent=true max-size-buffers=%1 "
+                                   "max-size-bytes=0 max-size-time=%2 ! "
+                                   "valve name=presentationvalve drop=false drop-mode=transform-to-gap "
+                                   "! "
+                                   "%3 ! identity name=framewatch silent=true signal-handoffs=false ! ")
+                                   .arg(config_.decodeQueueMaximumBuffers)
+                                   .arg(config_.decodeQueueMaximumTimeMsec * 1000LL * 1000LL)
+                                   .arg(decoderChain(systemMemoryChain));
+
+    const QString renderQueue = QStringLiteral(
+                                    "queue name=renderqueue silent=true leaky=downstream "
+                                    "max-size-buffers=%1 max-size-bytes=0 "
+                                    "max-size-time=%2 ! ")
+                                    .arg(config_.renderQueueMaximumBuffers)
+                                    .arg(config_.renderQueueMaximumTimeMsec * 1000LL * 1000LL);
+
+    // 값을 직접 끼워 넣는다. 예전처럼 기본값 문자열을 만들어 두고 replace로 갈아끼우면
+    // "sync=false"가 "async=false" 안쪽에도 걸려서, sinkSync를 켜는 순간 async까지 같이 켜지고
+    // 그 뒤 async 치환은 대상을 못 찾아 조용히 무시된다
+    const auto boolText = [](bool value) { return value ? QStringLiteral("true") : QStringLiteral("false"); };
+    const QString sink = QStringLiteral(
+                             "d3d11videosink name=videosink force-aspect-ratio=true "
+                             "enable-last-sample=false qos=%1 "
+                             "sync=%2 async=%3")
+                             .arg(boolText(config_.sinkQos), boolText(config_.sinkSync), boolText(config_.sinkAsync));
+
+    QString description = commonHead;
+
+    if (systemMemoryChain) {
+        description += QStringLiteral(
+                           "videoconvert ! video/x-raw,format=NV12 ! "
+                           "queue name=alignmentqueue silent=true leaky=downstream "
+                           "max-size-buffers=0 max-size-bytes=0 "
+                           "max-size-time=%1 min-threshold-time=%2 ! ")
+                           .arg(config_.alignmentQueueMaximumTimeMsec * 1000LL * 1000LL)
+                           .arg(config_.alignmentDelayMsec * 1000LL * 1000LL);
+        description += renderQueue;
+        description += QStringLiteral(
+            "videobalance name=balance brightness=0.0 contrast=1.0 "
+            "saturation=1.0 ! "
+            "gamma name=gammafilter gamma=1.0 ! "
+            "qtblur name=blur ! ");
+    } else {
+        description += renderQueue;
+    }
+
+    description += sink;
+
+    return description;
 }
 
 /**

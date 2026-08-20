@@ -32,6 +32,11 @@ public:
     void stop() override;
     void markFirstFrame();
 
+    /// CPU에서 픽셀을 만져야 하는 구성인지. 자체 검사가 직접 부른다
+    bool needsSystemMemoryChain() const;
+    /// 영상 체인 bin description. 자체 검사가 직접 부른다
+    QString videoChainDescription(bool systemMemoryChain) const;
+
 private slots:
     void pollBus();
 
@@ -41,8 +46,9 @@ private:
     void scheduleReconnect(const QString& reason, int overrideDelayMsec = 0);
     void restartPipeline(const QString& reason);
     bool applySourceProperties(GstElement* source);
-    QString decoderChain() const;
-    QString d3d11DecoderChain() const;
+    QString decoderChain(bool downloadToSystemMemory) const;
+    QString d3d11DecoderChain(bool downloadToSystemMemory) const;
+    bool rebuildIfChainShapeChanged(const QString& reason);
     void applyVideoPreprocessingSettings();
     void applyBlurPassthrough();
     void applyPresentationState();
@@ -89,6 +95,8 @@ private:
     bool firstAsyncDoneReported_ = false;
     bool firstFrameReported_ = false;
     bool presentationActive_ = true;
+    /// 현재 파이프라인이 프레임을 시스템 메모리로 내려받는 구성인지
+    bool systemMemoryChainActive_ = true;
 
     BlurProcessor blurProcessor_;
 };

@@ -32,6 +32,8 @@ qt_add_executable(Qtcctvclient
     src/ui/mainwindow.ui
     include/ui/ClickableVideoWidget.h
     src/ui/ClickableVideoWidget.cpp
+    include/ui/VideoRiskBorderFrame.h
+    src/ui/VideoRiskBorderFrame.cpp
     include/auth/AuthGateway.h
     include/auth/LocalFileAuthGateway.h
     src/auth/LocalFileAuthGateway.cpp
@@ -440,6 +442,42 @@ if(QTCCTV_BUILD_CHECKS)
     target_link_libraries(video_utc_clock_mapper_check PRIVATE
         Qt6::Core
         gstreamer-1.0
+        gobject-2.0
+        glib-2.0
+        intl
+    )
+
+    add_executable(video_chain_selection_check
+        tests/VideoChainSelectionCheck.cpp
+        include/video/StreamReceiver.h
+        include/video/GstRtspReceiver.h
+        src/video/GstRtspReceiver.cpp
+        src/video/BlurProcessor.cpp
+        src/video/BlurVideoFilter.cpp
+        src/video/VideoUtcClockMapper.cpp
+    )
+
+    target_include_directories(video_chain_selection_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_include_directories(video_chain_selection_check SYSTEM PRIVATE
+        "${GSTREAMER_ROOT}/include/gstreamer-1.0"
+        "${GSTREAMER_ROOT}/include/glib-2.0"
+        "${GSTREAMER_ROOT}/lib/glib-2.0/include"
+    )
+
+    target_link_directories(video_chain_selection_check PRIVATE
+        "${GSTREAMER_ROOT}/lib"
+    )
+
+    target_link_libraries(video_chain_selection_check PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        gstreamer-1.0
+        gstbase-1.0
+        gstrtsp-1.0
+        gstvideo-1.0
         gobject-2.0
         glib-2.0
         intl

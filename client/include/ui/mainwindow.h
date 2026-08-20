@@ -13,6 +13,7 @@
 #include "video/VideoRuntimeConfig.h"
 
 class ClickableVideoWidget;
+class VideoRiskBorderFrame;
 class DashboardPanelCoordinator;
 class DashboardPanelFactory;
 class DeviceStatusGatewayFactory;
@@ -131,7 +132,7 @@ private:
     QString configSourcePath_;
 
     QVector<QWidget*> videoWidgets_;
-    QVector<QFrame*> videoTileFrames_;
+    QVector<VideoRiskBorderFrame*> videoTileFrames_;
     QVector<QGridLayout*> videoAreaLayouts_;
     QVector<StreamConfig> streamConfigs_;
     QVector<bool> streamChannelReady_;
