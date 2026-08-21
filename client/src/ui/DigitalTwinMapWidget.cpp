@@ -182,7 +182,10 @@ DigitalTwinMapWidget::DigitalTwinMapWidget(QWidget* parent)
  */
 void DigitalTwinMapWidget::configureLiveTracking(const DigitalTwinRuntimeConfig& config) {
     liveConfig_ = config;
-    zoneCount_ = qBound(1, liveConfig_.world.zoneCount(), digitalTwinMaximumZoneCount);
+    // 구역이 하나도 없으면 0이다. QML은 zoneCount 뒤쪽 칸을 "확장 예정"으로 그리므로,
+    // 최초 배포 상태에서는 도면 전체가 빈 칸으로 뜬다. world.zoneCount()는 나눗셈에 쓰여
+    // 최소 1을 돌려주므로 여기서는 실제 상자 수를 본다
+    zoneCount_ = qBound(0, static_cast<int>(liveConfig_.world.zones.size()), digitalTwinMaximumZoneCount);
     ensureMapReady();
     setMapProperty("zoneCount", zoneCount_);
     refreshObjectAreas();
@@ -717,7 +720,8 @@ void DigitalTwinMapWidget::refreshObjectAreas() {
                                        areas[index + 2].toDouble(), areas[index + 3].toDouble()));
     }
 
-    if (objectAreaRects_.isEmpty()) {
+    // 구역이 0개면 도면이 영역을 안 돌려주는 것이 정상이다
+    if (objectAreaRects_.isEmpty() && zoneCount_ > 0) {
         qWarning() << "[DigitalTwinMapWidget] Plan returned no object areas; objects will be hidden";
     }
 }

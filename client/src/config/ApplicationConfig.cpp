@@ -178,9 +178,8 @@ bool readWorldZones(const QJsonObject& world, DigitalTwinWorldConfig& config, QS
     }
 
     const QJsonValue zonesValue = world.value(QStringLiteral("zones"));
-    if (!zonesValue.isArray() || zonesValue.toArray().isEmpty() ||
-        zonesValue.toArray().size() > digitalTwinMaximumZoneCount) {
-        error = QStringLiteral("digitalTwin.world.zones must contain 1 to %1 boxes").arg(digitalTwinMaximumZoneCount);
+    if (!zonesValue.isArray() || zonesValue.toArray().size() > digitalTwinMaximumZoneCount) {
+        error = QStringLiteral("digitalTwin.world.zones must contain up to %1 boxes").arg(digitalTwinMaximumZoneCount);
         return false;
     }
 
@@ -375,9 +374,16 @@ bool parseStreams(const QJsonObject& video, int channelCount, QVector<StreamConf
 bool parseVideoAreas(const QJsonObject& video, const QVector<StreamConfig>& streams, VideoRuntimeConfig& config,
                      QString& error) {
     const QJsonValue areaValue = video.value(QStringLiteral("areas"));
-    if (!areaValue.isArray() || areaValue.toArray().isEmpty()) {
-        error = QStringLiteral("video.areas must contain at least one area");
+    if (!areaValue.isArray()) {
+        error = QStringLiteral("video.areas must be an array");
         return false;
+    }
+
+    // 갓 배포한 프로그램에는 구역이 하나도 없다. 사용자가 설정 팝업의 구역 관리에서 첫 구역을
+    // 추가할 때까지 빈 채로 두고, 영상/지도/장비 상태는 각자 빈 상태로 뜬다
+    if (areaValue.toArray().isEmpty()) {
+        config.initialAreaIndex = -1;
+        return true;
     }
 
     QHash<QString, int> channelIndexByCameraId;
@@ -454,13 +460,15 @@ bool parseVideoAreas(const QJsonObject& video, const QVector<StreamConfig>& stre
         config.areas.append(std::move(area));
     }
 
+    // 구역이 없던 설정 파일에 사용자가 첫 구역을 추가하면 initialAreaId는 아직 없다. 그때는
+    // 첫 구역을 쓴다 - 여기서 막으면 구역을 추가한 순간부터 앱이 뜨지 않는다
     QString initialAreaId;
-    if (!readString(video, QStringLiteral("initialAreaId"), initialAreaId, error)) {
+    if (video.contains(QStringLiteral("initialAreaId")) &&
+        !readString(video, QStringLiteral("initialAreaId"), initialAreaId, error)) {
         error = QStringLiteral("video: %1").arg(error);
         return false;
     }
-
-    config.initialAreaIndex = -1;
+    config.initialAreaIndex = initialAreaId.isEmpty() ? 0 : -1;
     for (qsizetype areaIndex = 0; areaIndex < config.areas.size(); ++areaIndex) {
         if (config.areas[areaIndex].areaId == initialAreaId) {
             config.initialAreaIndex = static_cast<int>(areaIndex);
@@ -624,9 +632,8 @@ bool parseVideo(const QJsonObject& root, VideoRuntimeConfig& config, QString& er
     }
 
     const QJsonValue areaValue = video.value(QStringLiteral("areas"));
-    if (!areaValue.isArray() || areaValue.toArray().isEmpty() ||
-        areaValue.toArray().size() > digitalTwinMaximumZoneCount) {
-        error = QStringLiteral("video.areas must contain 1 to %1 areas").arg(digitalTwinMaximumZoneCount);
+    if (!areaValue.isArray() || areaValue.toArray().size() > digitalTwinMaximumZoneCount) {
+        error = QStringLiteral("video.areas must contain up to %1 areas").arg(digitalTwinMaximumZoneCount);
         return false;
     }
 
@@ -1040,7 +1047,7 @@ QString readVideoArrays(const QJsonObject& root, QJsonObject& video, QJsonArray&
     video = root.value(QStringLiteral("video")).toObject();
     areas = video.value(QStringLiteral("areas")).toArray();
     streams = video.value(QStringLiteral("streams")).toArray();
-    if (areas.isEmpty() || streams.size() != areas.size() * videoChannelsPerArea) {
+    if (streams.size() != areas.size() * videoChannelsPerArea) {
         return QStringLiteral("설정 파일의 구역과 채널 구성이 손상되어 있습니다.");
     }
     return {};

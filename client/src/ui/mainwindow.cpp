@@ -6,6 +6,7 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMessageBox>
 #include <QQuickItem>
 #include <QQuickWidget>
@@ -780,7 +781,27 @@ void MainWindow::setupVideoViewEvents() {
     videoAreaLayouts_ = {ui_->videoGridLayoutArea1, ui_->videoGridLayoutArea2};
     const qsizetype areaCount = videoConfig_.areas.size();
     const qsizetype channelCount = streamConfigs_.size();
-    if (areaCount <= 0 || channelCount != areaCount * videoChannelsPerArea) {
+
+    // 구역이 하나도 없는 최초 배포 상태. .ui에 미리 놓인 4분할 타일을 치우고 안내만 남긴다.
+    // 뒤의 코드가 videoWidgets_/videoTileFrames_를 크기로만 훑으므로 비워 두면 알아서 빠진다
+    if (areaCount <= 0) {
+        for (QWidget* widget : videoWidgets_) {
+            widget->hide();
+        }
+        videoWidgets_.clear();
+        videoAreaLayouts_.clear();
+        videoTileFrames_.clear();
+
+        auto* placeholder =
+            new QLabel(QStringLiteral("등록된 CCTV 구역이 없습니다.\n설정의 구역 관리 탭에서 구역을 추가하세요."),
+                       ui_->videoAreaStackedWidget);
+        placeholder->setObjectName(QStringLiteral("videoAreaPlaceholder"));
+        placeholder->setAlignment(Qt::AlignCenter);
+        ui_->videoAreaStackedWidget->setCurrentIndex(ui_->videoAreaStackedWidget->addWidget(placeholder));
+        return;
+    }
+
+    if (channelCount != areaCount * videoChannelsPerArea) {
         qWarning() << "[MainWindow] Invalid video area/channel configuration" << areaCount << channelCount;
         return;
     }
@@ -859,7 +880,11 @@ void MainWindow::setupVideoViewEvents() {
 
 /** @brief 설정된 CCTV 구역을 상단 표시줄과 페이지 스택에 연결합니다. */
 void MainWindow::setupVideoAreaSelector() {
-    if (!ui_->videoAreaStackedWidget || videoConfig_.areas.isEmpty()) {
+    if (!ui_->videoAreaStackedWidget) {
+        return;
+    }
+    if (videoConfig_.areas.isEmpty()) {
+        setQuickTopBarProperty("areaText", QStringLiteral("No zone"));
         return;
     }
 
@@ -869,6 +894,12 @@ void MainWindow::setupVideoAreaSelector() {
 
 /** @brief 현재 구역을 선택 상태로 표시한 뒤 구역 선택 다이얼로그를 엽니다. */
 void MainWindow::openVideoAreaSelectionDialog() {
+    if (videoConfig_.areas.isEmpty()) {
+        showQuickDialog(QStringLiteral("information"), QStringLiteral("등록된 구역 없음"),
+                        QStringLiteral("설정의 구역 관리 탭에서 CCTV 구역을 먼저 추가하세요."));
+        return;
+    }
+
     QVariantList areaNames;
     areaNames.reserve(videoConfig_.areas.size());
     for (const VideoAreaConfig& area : videoConfig_.areas) {

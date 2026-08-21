@@ -31,38 +31,89 @@ QStringList zoneUrls(int firstChannelNumber) {
     return urls;
 }
 
-/** @brief 예제 설정을 임시 파일로 복사해 원본을 건드리지 않고 검사합니다. */
+/**
+ * @brief 배포 기본 설정을 임시 파일로 복사해 원본을 건드리지 않고 검사합니다.
+ *
+ * @details 예제는 구역이 하나도 없는 최초 배포 상태다. 이후 검사는 여기에 구역을 붙여 나간다.
+ */
 QString prepareWorkingCopy() {
     const QString target = QDir(QDir::tempPath()).filePath(QStringLiteral("qtcctv_config_area_writer_check.json"));
     QFile::remove(target);
     if (!QFile::copy(QStringLiteral(QTCCTV_EXAMPLE_CONFIG_PATH), target)) {
         return {};
     }
+    return target;
+}
 
-    // 예제는 RTSP 자리 표시자를 쓰므로 유효 URL로 바꿔야 로더 검증을 통과한다
-    QFile file(target);
+/**
+ * @brief 구역이 하나도 없는 설정이 그대로 뜨고, 첫 구역을 붙여도 다시 뜨는지 검사합니다.
+ *
+ * @details 갓 배포한 프로그램이 여기서 걸리면 아무도 첫 구역을 넣을 수 없다. 첫 구역을 붙인
+ *          직후에는 initialAreaId가 아직 없으므로 그 경로도 같이 본다.
+ */
+void checkEmptyConfigLoads(const QString& configPath) {
+    const ApplicationConfigLoadResult empty = ApplicationConfigLoader::load();
+    check(empty.successful, "a freshly deployed config with no zones must load");
+    if (!empty.successful) {
+        std::fprintf(stderr, "  load error: %s\n", qPrintable(empty.error));
+        return;
+    }
+    check(empty.config.video.areas.isEmpty() && empty.config.video.streams.isEmpty(),
+          "no zones must mean no areas and no channels");
+    check(empty.config.mqtt.channelCount == 0, "the MQTT layer must start with no channels");
+
+    check(ApplicationConfigWriter::appendArea(configPath, QStringLiteral("제 1구역"), zoneUrls(1)).isEmpty(),
+          "the very first zone must be addable to an empty config");
+
+    const ApplicationConfigLoadResult first = ApplicationConfigLoader::load();
+    check(first.successful, "the config must still load once the first zone exists");
+    if (!first.successful) {
+        std::fprintf(stderr, "  load error: %s\n", qPrintable(first.error));
+        return;
+    }
+    check(first.config.video.areas.size() == 1 && first.config.video.streams.size() == videoChannelsPerArea,
+          "the first zone must bring its own channels");
+    check(first.config.video.initialAreaIndex == 0,
+          "the first zone must become the initial area even though initialAreaId is absent");
+}
+
+/**
+ * @brief 두 번째 구역과 보정된 구역 상자를 심어 이후 검사의 출발점을 만듭니다.
+ *
+ * @details 상자를 적어 두어야 nextZoneBox가 간격을 이어 붙이는 경로를 검사할 수 있다.
+ *          상자가 없으면 로더가 bounds를 균등하게 갈라 쓰므로 그 경로는 지나가지 않는다.
+ */
+bool seedSecondZone(const QString& configPath) {
+    if (!ApplicationConfigWriter::appendArea(configPath, QStringLiteral("제 2구역"), zoneUrls(5)).isEmpty()) {
+        return false;
+    }
+
+    QFile file(configPath);
     if (!file.open(QFile::ReadOnly | QFile::Text)) {
-        return {};
+        return false;
     }
     QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
     file.close();
 
-    QJsonObject video = root.value(QStringLiteral("video")).toObject();
-    QJsonArray streams = video.value(QStringLiteral("streams")).toArray();
-    for (qsizetype index = 0; index < streams.size(); ++index) {
-        QJsonObject stream = streams.at(index).toObject();
-        stream.insert(QStringLiteral("url"), QStringLiteral("rtsp://user:pass@10.0.0.8:554/%1/media.smp").arg(index));
-        streams.replace(index, stream);
-    }
-    video.insert(QStringLiteral("streams"), streams);
-    root.insert(QStringLiteral("video"), video);
+    QJsonObject digitalTwin = root.value(QStringLiteral("digitalTwin")).toObject();
+    QJsonObject world = digitalTwin.value(QStringLiteral("world")).toObject();
+    world.insert(QStringLiteral("zones"), QJsonArray{QJsonObject{{QStringLiteral("minX"), 0.0},
+                                                                 {QStringLiteral("minY"), 0.0},
+                                                                 {QStringLiteral("maxX"), 10.0},
+                                                                 {QStringLiteral("maxY"), 10.0}},
+                                                     QJsonObject{{QStringLiteral("minX"), 12.785},
+                                                                 {QStringLiteral("minY"), 0.0},
+                                                                 {QStringLiteral("maxX"), 22.785},
+                                                                 {QStringLiteral("maxY"), 10.0}}});
+    digitalTwin.insert(QStringLiteral("world"), world);
+    root.insert(QStringLiteral("digitalTwin"), digitalTwin);
 
     if (!file.open(QFile::WriteOnly | QFile::Truncate | QFile::Text)) {
-        return {};
+        return false;
     }
     file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
     file.close();
-    return target;
+    return true;
 }
 
 /** @brief 잘못된 입력은 파일을 건드리기 전에 거절하는지 검사합니다. */
@@ -231,6 +282,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     qputenv("VEDA_CONFIG_FILE", configPath.toUtf8());
+
+    checkEmptyConfigLoads(configPath);
+    if (!seedSecondZone(configPath)) {
+        std::fprintf(stderr, "FAIL: could not seed the two-zone starting point\n");
+        return 1;
+    }
 
     checkRejectedInput(configPath);
     checkAppendedZoneLoadsBack(configPath);

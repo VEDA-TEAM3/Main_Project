@@ -462,12 +462,11 @@ void MapSettingsDialog::setBlurTargetsEnabled(bool faceEnabled, bool licensePlat
  * @param selectedAreaIndex 처음 표시할 구역 인덱스
  */
 void MapSettingsDialog::setVideoAreas(const QVector<VideoAreaConfig>& areas, int selectedAreaIndex) {
-    if (areas.isEmpty()) {
-        return;
-    }
-
     videoAreas_ = areas;
-    currentVideoAreaIndex_ = qBound(0, selectedAreaIndex, static_cast<int>(videoAreas_.size()) - 1);
+    // 구역이 하나도 없어도 구역 관리 탭은 채워야 한다 - 여기서 돌아가면 첫 구역을 추가할 화면이
+    // 빈 채로 남는다. 0이면 목록의 첫 빈 자리를 골라 새 구역 입력 폼이 뜬다
+    currentVideoAreaIndex_ =
+        videoAreas_.isEmpty() ? 0 : qBound(0, selectedAreaIndex, static_cast<int>(videoAreas_.size()) - 1);
     displayedZoneIndex_ = currentVideoAreaIndex_;
 
     QStringList areaNames;
