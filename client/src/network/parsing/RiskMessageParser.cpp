@@ -4,39 +4,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <cmath>
 #include <utility>
 
+#include "network/parsing/MqttJsonValue.h"
 #include "network/parsing/MqttPayloadLimits.h"
 
 namespace {
 constexpr int riskProtocolVersion = 1;
 constexpr int minimumZoneId = 0;
-
-bool readInteger(const QJsonObject& object, const QString& name, qint64& value) {
-    const QJsonValue jsonValue = object.value(name);
-    if (!jsonValue.isDouble()) {
-        return false;
-    }
-
-    const qint64 integerValue = jsonValue.toInteger();
-    if (static_cast<double>(integerValue) != jsonValue.toDouble()) {
-        return false;
-    }
-
-    value = integerValue;
-    return true;
-}
-
-bool readFiniteNumber(const QJsonObject& object, const QString& name, double& value) {
-    const QJsonValue jsonValue = object.value(name);
-    if (!jsonValue.isDouble() || !std::isfinite(jsonValue.toDouble())) {
-        return false;
-    }
-
-    value = jsonValue.toDouble();
-    return true;
-}
 
 bool parseRiskLevel(const QJsonValue& value, DigitalTwinRiskLevel& riskLevel) {
     if (!value.isString()) {
@@ -65,7 +40,8 @@ DigitalTwinRiskLevel highestRiskLevel(DigitalTwinRiskLevel first, DigitalTwinRis
 
 int parseZoneId(const QJsonObject& object, int channelCount) {
     qint64 zoneId = -1;
-    if (!readInteger(object, QStringLiteral("zoneId"), zoneId) || zoneId < minimumZoneId || zoneId >= channelCount) {
+    if (!readMqttInteger(object, QStringLiteral("zoneId"), zoneId) || zoneId < minimumZoneId ||
+        zoneId >= channelCount) {
         return -1;
     }
     return static_cast<int>(zoneId);
@@ -98,8 +74,8 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
     const QJsonObject root = document.object();
     qint64 version = 0;
     qint64 timestamp = 0;
-    if (!readInteger(root, QStringLiteral("v"), version) || version != riskProtocolVersion ||
-        !readInteger(root, QStringLiteral("ts"), timestamp) || timestamp <= 0) {
+    if (!readMqttInteger(root, QStringLiteral("v"), version) || version != riskProtocolVersion ||
+        !readMqttInteger(root, QStringLiteral("ts"), timestamp) || timestamp <= 0) {
         error = QStringLiteral("Invalid RiskFrame v or ts field on %1").arg(topic);
         return false;
     }
@@ -146,8 +122,8 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
                                          : sourceObject.value(QStringLiteral("level"));
         qint64 objectId = 0;
         DigitalTwinRiskLevel objectRiskLevel = DigitalTwinRiskLevel::Normal;
-        if (!readInteger(sourceObject, QStringLiteral("gid"), objectId) || objectId <= 0 || !classValue.isString() ||
-            !positionValue.isObject() || !parseRiskLevel(riskValue, objectRiskLevel)) {
+        if (!readMqttInteger(sourceObject, QStringLiteral("gid"), objectId) || objectId <= 0 ||
+            !classValue.isString() || !positionValue.isObject() || !parseRiskLevel(riskValue, objectRiskLevel)) {
             error = QStringLiteral("Invalid RiskObject fields on %1").arg(topic);
             return false;
         }
@@ -160,8 +136,8 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
         const QJsonObject position = positionValue.toObject();
         double x = 0.0;
         double y = 0.0;
-        if (!readFiniteNumber(position, QStringLiteral("x"), x) ||
-            !readFiniteNumber(position, QStringLiteral("y"), y)) {
+        if (!readMqttFiniteNumber(position, QStringLiteral("x"), x) ||
+            !readMqttFiniteNumber(position, QStringLiteral("y"), y)) {
             error = QStringLiteral("Invalid RiskObject world position on %1").arg(topic);
             return false;
         }
@@ -175,11 +151,13 @@ bool RiskMessageParser::parse(const QByteArray& payload, const QString& topic, R
         parsedObject.zoneId = parseZoneId(sourceObject, channelCount);
 
         qint64 nearestId = 0;
-        if (readInteger(sourceObject, QStringLiteral("nearest"), nearestId) && nearestId >= 0) {
+        if (readMqttInteger(sourceObject, QStringLiteral("nearest"), nearestId) && nearestId >= 0) {
             parsedObject.nearestId = nearestId;
         }
+        // 음수는 RiskObjectData가 "거리 없음"을 나타내는 값이다. 그대로 받으면 서버가 보낸
+        // 잘못된 거리와 미측정이 구분되지 않은 채 객체 목록에 섞인다
         double distance = -1.0;
-        if (readFiniteNumber(sourceObject, QStringLiteral("dist"), distance)) {
+        if (readMqttFiniteNumber(sourceObject, QStringLiteral("dist"), distance) && distance >= 0.0) {
             parsedObject.distance = distance;
         }
 

@@ -13,7 +13,7 @@
 /// MQTT 한 패킷은 규약상 256MB까지 가능하다. 정상 payload는 risk 프레임이 수십 KB,
 /// blur가 수 KB이므로 이 상한은 실사용의 열 배 이상이다. 초과분은 잘라 쓰지 않고
 /// 메시지 전체를 버린다 (잘라 쓰면 안전 판단에서 객체가 조용히 빠진다)
-inline constexpr qsizetype maximumMqttPayloadBytes = 256 * 1024;
+inline constexpr qsizetype maximumMqttPayloadBytes = qsizetype{256} * 1024;
 
 /// 한 RiskFrame이 실을 수 있는 융합 객체 수. 구역 6개 x 채널 4개 기준 실사용은 수십 개다
 inline constexpr qsizetype maximumRiskObjectsPerFrame = 256;

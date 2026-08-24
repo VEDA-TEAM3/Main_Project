@@ -18,6 +18,13 @@ option(QTCCTV_BUILD_CHECKS "Build standalone logic self-checks" OFF)
 
 qt_standard_project_setup()
 
+# 경고를 켜 두지 않으면 지금 0인 상태가 유지된다는 보장이 없다. -Werror는 걸지 않는다 -
+# Q_DECLARE_METATYPE이 GCC 13에서 Qt 헤더 안쪽에 -Wstringop-overread 오탐을 하나 만드는데,
+# 우리 코드로는 못 고치는 자리라서 그것 하나로 빌드가 막히면 안 된다
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra)
+endif()
+
 qt_add_executable(Qtcctvclient
     "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-format"
     "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-tidy"
@@ -128,6 +135,7 @@ qt_add_executable(Qtcctvclient
     src/network/routing/BlurTopicHandler.cpp
     include/network/gateways/MqttDeviceStatusGateway.h
     include/network/parsing/BlurMessageParser.h
+    include/network/parsing/MqttJsonValue.h
     include/network/parsing/MqttPayloadLimits.h
     src/network/parsing/BlurMessageParser.cpp
     include/network/realtime/BlurFrameDispatcher.h

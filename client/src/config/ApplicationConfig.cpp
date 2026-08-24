@@ -668,6 +668,19 @@ bool parseMqtt(const QJsonObject& root, MqttRuntimeConfig& config, QString& clie
         !readInt(mqtt, QStringLiteral("riskDebugLogIntervalMs"), 0, 600000, config.riskDebugLogIntervalMsec, error)) {
         return false;
     }
+
+    // broker 계정은 선택 사항이다. mTLS나 익명 + 토픽 ACL로 운영하는 배포가 있으므로 없다고
+    // 시작을 막지 않는다. 비밀번호를 파일에 두면 설정 파일이 곧 자격증명이 되니 환경 변수를 권한다
+    const QJsonValue userNameValue = mqtt.value(QStringLiteral("username"));
+    const QJsonValue passwordValue = mqtt.value(QStringLiteral("password"));
+    if ((!userNameValue.isUndefined() && !userNameValue.isString()) ||
+        (!passwordValue.isUndefined() && !passwordValue.isString())) {
+        error = QStringLiteral("mqtt.username and mqtt.password must be strings");
+        return false;
+    }
+    config.connection.userName = userNameValue.toString().trimmed();
+    // 비밀번호는 trim하지 않는다. 앞뒤 공백도 비밀번호의 일부다
+    config.connection.password = passwordValue.toString();
     config.connection.port = static_cast<quint16>(port);
 
     qint64 maximumDebugPayloadLength = 0;
@@ -752,6 +765,13 @@ void applyEnvironmentOverrides(ApplicationConfig& config, const QString& clientI
         environmentValue(environment, QStringLiteral("VEDA_MQTT_CA_FILE"), config.mqtt.connection.caCertificatePath);
     config.mqtt.connection.debugLogging =
         environmentFlag(environment, QStringLiteral("VEDA_MQTT_DEBUG"), config.mqtt.connection.debugLogging);
+    config.mqtt.connection.userName =
+        environmentValue(environment, QStringLiteral("VEDA_MQTT_USERNAME"), config.mqtt.connection.userName);
+    // 비밀번호는 trim하지 않으므로 environmentValue를 쓰지 않는다. 설정되지 않은 변수와
+    // 빈 문자열로 설정된 변수는 둘 다 "값 없음"으로 보고 파일 값을 남긴다
+    if (const QString mqttPassword = environment.value(QStringLiteral("VEDA_MQTT_PASSWORD")); !mqttPassword.isEmpty()) {
+        config.mqtt.connection.password = mqttPassword;
+    }
     config.video.receiver.decoderMode =
         environmentValue(environment, QStringLiteral("QTCCTV_DECODER_MODE"), config.video.receiver.decoderMode)
             .toLower();

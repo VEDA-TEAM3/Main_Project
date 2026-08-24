@@ -357,7 +357,10 @@ void blurPlaneRegion(guint8* pixels, int stride, const BlurRegionGeometry& regio
             ++lastNeededX;
         }
 
-        const guint8* sourceRow = pixels + (region.top + localY) * stride + region.left * pixelStride;
+        // 행 오프셋은 ptrdiff_t로 곱한다. int로 곱하면 stride x 높이가 int 범위를 넘는 순간
+        // 음수로 돌아 평면 밖을 가리키고, 그대로 픽셀을 읽고 쓴다
+        const guint8* sourceRow = pixels + static_cast<ptrdiff_t>(region.top + localY) * stride +
+                                  static_cast<ptrdiff_t>(region.left) * pixelStride;
         quint64 sum[componentCount] = {};
         int windowStart = std::max(0, firstNeededX - radius);
         int windowEnd = std::min(region.width - 1, firstNeededX + radius);
@@ -434,7 +437,8 @@ void blurPlaneRegion(guint8* pixels, int stride, const BlurRegionGeometry& regio
             windowStart = std::max(0, localY - radius);
             windowEnd = std::min(region.height - 1, localY + radius);
             const int count = windowEnd - windowStart + 1;
-            guint8* targetPixel = pixels + (region.top + localY) * stride + (region.left + localX) * pixelStride;
+            guint8* targetPixel = pixels + static_cast<ptrdiff_t>(region.top + localY) * stride +
+                                  static_cast<ptrdiff_t>(region.left + localX) * pixelStride;
             const int removeY = localY - radius;
             const int addY = localY + radius + 1;
             const guint8* removeSample =

@@ -10,15 +10,6 @@
 namespace {
 constexpr int visibleChannelCount = 4;
 
-bool statusesEqual(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
-    return left.channelIndex == right.channelIndex && left.outputs.ledRed == right.outputs.ledRed &&
-           left.outputs.ledYellow == right.outputs.ledYellow && left.outputs.ledGreen == right.outputs.ledGreen &&
-           left.outputs.beacon == right.outputs.beacon && left.outputs.buzzer == right.outputs.buzzer &&
-           left.hasConfirmedState == right.hasConfirmedState && left.sensorHealth == right.sensorHealth &&
-           left.feedbackHealth == right.feedbackHealth && left.sensorDetail == right.sensorDetail &&
-           left.detail == right.detail;
-}
-
 /**
  * @brief         카드 테두리 색을 고르는 데 쓰는 상태 이름을 반환합니다.
  * @param status  대상 채널 상태
@@ -106,22 +97,12 @@ bool DeviceStatusPanel::storeChannelStatus(const DeviceChannelStatus& status) {
         return false;
     }
 
-    if (statusesEqual(channelStatuses_[status.channelIndex], status)) {
+    if (hasSameDisplayedState(channelStatuses_[status.channelIndex], status)) {
         return false;
     }
 
     channelStatuses_[status.channelIndex] = status;
     return status.channelIndex / visibleChannelCount == areaIndex_;
-}
-
-/**
- * @brief         단일 채널 장비 상태를 UI에 반영합니다.
- * @param status  갱신할 채널 상태
- */
-void DeviceStatusPanel::setChannelStatus(const DeviceChannelStatus& status) {
-    if (storeChannelStatus(status)) {
-        refreshChannels();
-    }
 }
 
 /**

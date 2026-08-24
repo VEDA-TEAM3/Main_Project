@@ -1,6 +1,5 @@
 #include "network/gateways/SlackReportGateway.h"
 
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -11,7 +10,12 @@
 
 namespace {
 constexpr int requestTimeoutMsec = 10000;
-const QString slackApiBaseUrl = QStringLiteral("https://slack.com/api/");
+/// 전송이 계속 실패하는 동안에도 신고 버튼은 계속 눌린다. 대기열에 상한이 없으면 Slack이나
+/// 회선이 죽어 있는 내내 대기열만 자란다. 넘친 신고는 조용히 버리지 않고 실패로 알려
+/// 운영자가 다른 수단을 쓰게 한다
+constexpr qsizetype maximumPendingReports = 32;
+// QLatin1StringView는 constexpr이라 정적 초기화에서 할당도 예외도 없다
+constexpr auto slackApiBaseUrl = QLatin1StringView("https://slack.com/api/");
 
 QString slackApiErrorMessage(const QString& errorCode) {
     if (errorCode == QStringLiteral("account_inactive")) {
@@ -62,9 +66,17 @@ SlackReportGateway::SlackReportGateway(QString botToken, QString targetType, QSt
 /**
  * @brief         신고 요청을 순차 전송 대기열에 추가합니다.
  * @param request 채널, 위험 단계, 신고 시각을 포함한 신고 정보
+ *
+ * @details 설정이 잘못됐거나 대기열이 가득 차면 대기열에 넣지 않고 reportFailed로 알립니다.
+ *          두 경우 모두 signal은 이벤트 루프를 한 번 돈 뒤에 나가므로, 호출한 쪽이 이 함수가
+ *          돌아온 다음에 연결해도 놓치지 않습니다.
  */
 void SlackReportGateway::sendReport(ReportRequest request) {
-    const QString error = configurationError();
+    QString error = configurationError();
+    if (error.isEmpty() && pendingReports_.size() >= maximumPendingReports) {
+        error = QStringLiteral("Slack 신고 대기열이 가득 찼습니다(%1건). 잠시 후 다시 시도하세요.")
+                    .arg(maximumPendingReports);
+    }
     if (!error.isEmpty()) {
         const int channelNumber = request.channelNumber;
         QTimer::singleShot(0, this, [this, channelNumber, error]() { emit reportFailed(channelNumber, error); });

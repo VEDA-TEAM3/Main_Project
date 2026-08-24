@@ -48,8 +48,8 @@
 #include "video/StreamSessionManager.h"
 
 namespace {
-const QString normalStatusColor = QStringLiteral("#38e86a");
-const QString disconnectedStatusColor = QStringLiteral("#ff4b4b");
+constexpr auto normalStatusColor = QLatin1StringView("#38e86a");
+constexpr auto disconnectedStatusColor = QLatin1StringView("#ff4b4b");
 }  // namespace
 
 /**
@@ -190,13 +190,6 @@ void MainWindow::setReportButtonsEnabled(bool enabled) {
         quickCctvToolbar_->rootObject()->setProperty("reportEnabled", enabled);
     }
 }
-
-/**
- * @brief           현재 표시 구역의 슬롯을 사용자 표시 채널 번호로 변환합니다.
- * @param slotIndex 0부터 3까지의 화면 슬롯 인덱스
- * @return          사용자 표시용 1 기반 채널 번호
- */
-int MainWindow::reportChannelNumberForSlot(int slotIndex) const { return slotIndex + 1; }
 
 /**
  * @brief               신고 시점의 채널 위험 단계를 사용자 표시 문자열로
@@ -493,7 +486,10 @@ QQuickWidget* MainWindow::createQuickView(const QString& qmlFile, QWidget* paren
 
     if (!view->rootObject()) {
         qWarning() << "[MainWindow] Failed to load QML view" << qmlFile << view->errors();
-        delete view;
+        // setSource()가 이 위젯 앞으로 이벤트를 걸어 둔 상태일 수 있어 바로 delete하지 않는다.
+        // 부모에서 먼저 떼어 두면 로딩에 실패한 빈 위젯이 그 사이에 화면에 끼지 않는다
+        view->setParent(nullptr);
+        view->deleteLater();
         return nullptr;
     }
 
@@ -560,7 +556,7 @@ void MainWindow::setupTopBarStatuses() {
  */
 void MainWindow::updateSystemStatus(bool connected) {
     setQuickTopBarProperty("systemStatusText", connected ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
-    setQuickTopBarProperty("systemStatusColor", connected ? normalStatusColor : disconnectedStatusColor);
+    setQuickTopBarProperty("systemStatusColor", QString(connected ? normalStatusColor : disconnectedStatusColor));
 }
 
 /**
@@ -592,7 +588,7 @@ void MainWindow::updateStreamConnectionStatus() {
 
     setQuickTopBarProperty("cctvStatusText",
                            allStreamsReady ? QStringLiteral("● Online") : QStringLiteral("● Connecting"));
-    setQuickTopBarProperty("cctvStatusColor", allStreamsReady ? normalStatusColor : disconnectedStatusColor);
+    setQuickTopBarProperty("cctvStatusColor", QString(allStreamsReady ? normalStatusColor : disconnectedStatusColor));
 }
 
 /** @brief Qt Quick 상단 표시줄의 루트 속성을 안전하게 갱신합니다. */

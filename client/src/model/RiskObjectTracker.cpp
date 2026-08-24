@@ -64,26 +64,6 @@ qint64 pulseRepeatMsec(DigitalTwinRiskLevel riskLevel) {
     return riskLevel == DigitalTwinRiskLevel::Danger ? dangerPulseRepeatMsec : warningPulseRepeatMsec;
 }
 
-bool sameRiskObject(const RiskObjectData& first, const RiskObjectData& second) {
-    return first.globalId == second.globalId && first.objectClass == second.objectClass &&
-           first.worldPosition == second.worldPosition && first.riskLevel == second.riskLevel &&
-           first.nearestId == second.nearestId && first.distance == second.distance && first.zoneId == second.zoneId;
-}
-
-bool sameRiskFrame(const RiskFrameData& first, const RiskFrameData& second) {
-    if (first.sourceTimestamp != second.sourceTimestamp || first.riskLevel != second.riskLevel ||
-        first.objects.size() != second.objects.size()) {
-        return false;
-    }
-
-    for (qsizetype index = 0; index < first.objects.size(); ++index) {
-        if (!sameRiskObject(first.objects.at(index), second.objects.at(index))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool readConfiguredWorldBounds(QRectF& bounds) {
     const QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     bool minXOk = false;
@@ -251,7 +231,7 @@ bool RiskObjectTracker::submitFrame(RiskFrameData frame, qint64 arrivalTimeMsec)
     // 새 프레임입니다. 직전 스냅샷과 timestamp/상태/객체 내용이 모두 같은 실제
     // 중복만 제거합니다. 이 검사는 동일 재전송 때문에 위치 transition이나 위험
     // pulse 상태가 불필요하게 재평가되는 것도 막습니다.
-    if (lastAcceptedInputFrame_.has_value() && sameRiskFrame(frame, *lastAcceptedInputFrame_)) {
+    if (lastAcceptedInputFrame_.has_value() && frame == *lastAcceptedInputFrame_) {
         ++diagnostics_.duplicateCount;
         return false;
     }
@@ -1116,7 +1096,7 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
         // 도중 같은 gid가 돌아왔을 때 그 밝기에서 이어 밝아지는 용도로만 남긴다
         opacity = !knownObject || config_.fadeInMsec <= 0
                       ? 1.0
-                      : qMin(1.0, opacity + static_cast<qreal>(elapsedMsec) / config_.fadeInMsec);
+                      : qMin(1.0, opacity + static_cast<qreal>(elapsedMsec) / static_cast<qreal>(config_.fadeInMsec));
     } else if (missingAgeMsec > config_.missingGraceMsec) {
         // Grace 구간에서는 마지막 opacity를 그대로 들고 있는다. 한 프레임 누락에도 어두워지면
         // 같은 gid가 계속 잡히는데도 깜박이는 것처럼 보인다
@@ -1124,7 +1104,8 @@ qreal RiskObjectTracker::lifecycleOpacity(qint64 objectId, bool present, qint64 
             opacity = 0.0;
         } else {
             const qint64 fadeAgeMsec = missingAgeMsec - config_.missingGraceMsec;
-            const qreal fadeProgress = qBound(0.0, static_cast<qreal>(fadeAgeMsec) / config_.fadeOutMsec, 1.0);
+            const qreal fadeProgress =
+                qBound(0.0, static_cast<qreal>(fadeAgeMsec) / static_cast<qreal>(config_.fadeOutMsec), 1.0);
             opacity = qMin(opacity, 1.0 - fadeProgress);
         }
     }

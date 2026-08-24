@@ -556,7 +556,7 @@ void DigitalTwinMapWidget::publishObjects() {
         fields.append(qmlIconSource(style.iconPath));
         fields.append(visual.planPosition.x());
         fields.append(visual.planPosition.y());
-        fields.append(static_cast<double>(style.iconSize.width()));
+        fields.append(static_cast<double>(style.iconPixels));
         fields.append(visual.visibleRotationDegrees);
         fields.append(static_cast<double>(visual.object.opacity));
         fields.append(style.labelColor.name());

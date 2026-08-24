@@ -1,7 +1,6 @@
 #include "ui/panels/EventLogPanel.h"
 
 #include <QQuickWidget>
-#include <QStringList>
 #include <QVBoxLayout>
 #include <utility>
 

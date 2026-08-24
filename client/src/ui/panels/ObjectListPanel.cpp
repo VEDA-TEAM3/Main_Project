@@ -1,7 +1,6 @@
 #include "ui/panels/ObjectListPanel.h"
 
 #include <QQuickWidget>
-#include <QStringList>
 #include <QVBoxLayout>
 #include <utility>
 

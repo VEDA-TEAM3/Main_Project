@@ -4,28 +4,6 @@
 #include <QTimer>
 #include <utility>
 
-namespace {
-bool sameRiskObject(const RiskObjectData& first, const RiskObjectData& second) {
-    return first.globalId == second.globalId && first.objectClass == second.objectClass &&
-           first.worldPosition == second.worldPosition && first.riskLevel == second.riskLevel &&
-           first.nearestId == second.nearestId && first.distance == second.distance && first.zoneId == second.zoneId;
-}
-
-bool sameRiskFrame(const RiskFrameData& first, const RiskFrameData& second) {
-    if (first.sourceTimestamp != second.sourceTimestamp || first.riskLevel != second.riskLevel ||
-        first.objects.size() != second.objects.size()) {
-        return false;
-    }
-
-    for (qsizetype index = 0; index < first.objects.size(); ++index) {
-        if (!sameRiskObject(first.objects.at(index), second.objects.at(index))) {
-            return false;
-        }
-    }
-    return true;
-}
-}  // namespace
-
 /**
  * @brief         통합 위험 프레임의 최신값 병합 디스패처를 생성합니다.
  * @param config  JSON 검증을 통과한 MQTT dispatcher 설정
@@ -84,7 +62,7 @@ void RiskFrameDispatcher::submitFrame(RiskFrameData frame) {
     // RiskFrame.ts는 frame sequence가 아니므로 timestamp만 같다는 이유로 버리지 않습니다.
     // QoS 0을 유지하되, 직전 승인 프레임과 timestamp/상태/객체 내용이 모두 같은 실제 재전송만 제거합니다.
     // 같은 ts에 객체/위험 상태가 갱신된 프레임은 정상적으로 통과합니다.
-    if (lastAcceptedFrame_.has_value() && sameRiskFrame(frame, *lastAcceptedFrame_)) {
+    if (lastAcceptedFrame_.has_value() && frame == *lastAcceptedFrame_) {
         return;
     }
 

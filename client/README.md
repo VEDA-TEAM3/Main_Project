@@ -3,6 +3,20 @@
 Qt 6와 GStreamer로 구현한 다구역 주차장 안전 관제 애플리케이션입니다. 각 구역은 4개 RTSP 채널로
 구성되며, MQTT 장비 상태, 위험 객체 좌표와 블러 메타데이터를 하나의 대시보드에서 실시간으로 표시합니다.
 
+## 관제 애플리케이션의 목적과 역할
+
+이 애플리케이션은 주차장 CCTV 영상과 서버가 산출한 안전 데이터를 한 화면에 통합하는 Qt 관제 클라이언트입니다.
+운영자는 영상, 디지털 트윈 맵, 위험 객체, 이벤트 및 장비 상태를 함께 확인해 현장 상황을 빠르게 판단할 수 있습니다.
+
+| 구분 | 역할 |
+| --- | --- |
+| 입력 | RTSP CCTV 영상, MQTT 위험 프레임·장비 상태·블러 메타데이터 |
+| 처리 | 채널별 영상 수신, 영상 프레임과 블러 좌표 동기화, 서버 좌표의 화면 표시 변환 |
+| 출력 | CCTV 화면, 디지털 트윈 맵, 객체 목록, 이벤트 로그, 장비 상태 및 위험 알림 |
+
+위험도와 `zoneId` 판정은 서버가 담당하며, 클라이언트는 전달받은 결과를 재계산하지 않고 표시합니다.
+구역·채널 구성은 설정 파일로 분리하여 다구역 CCTV 환경으로 확장할 수 있도록 설계했습니다.
+
 ## 핵심 기능
 
 - GStreamer 기반 구역별 RTSP CCTV 4채널 수신 및 자동 재연결
@@ -199,6 +213,8 @@ globalChannelIndex = areaIndex * 4 + localChannelIndex
 | `VEDA_MQTT_HOST` | MQTT Broker 주소 |
 | `VEDA_MQTT_PORT` | MQTT TLS 포트 |
 | `VEDA_MQTT_CA_FILE` | CA 인증서 경로 |
+| `VEDA_MQTT_USERNAME` | MQTT Broker 계정 (없으면 익명 접속) |
+| `VEDA_MQTT_PASSWORD` | MQTT Broker 비밀번호 (설정 파일보다 이쪽을 권장) |
 | `VEDA_MQTT_CLIENT_ID` | 고정 MQTT Client ID |
 | `VEDA_MQTT_DEBUG` | MQTT 연결/구독 로그 활성화 (`logging.mqttConnection` 대체) |
 | `VEDA_TOPVIEW_DEBUG` | 탑뷰 좌표 진단 로그 (`0`/`1`/`2`, `logging.topview*` 대체) |

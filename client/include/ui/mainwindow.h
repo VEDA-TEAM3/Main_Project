@@ -96,7 +96,6 @@ private:
     void handleReportFailure(int channelNumber, const QString& error);
     void setReportButtonsEnabled(bool enabled);
     QString reportRiskLevel(int channelNumber) const;
-    int reportChannelNumberForSlot(int slotIndex) const;
     int videoAreaIndexForChannel(int channelIndex) const;
     const QVector<int>& channelsForArea(int areaIndex) const;
     bool isChannelVisible(int channelIndex) const;

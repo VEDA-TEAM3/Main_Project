@@ -43,6 +43,21 @@ void QtMqttTransport::start() {
     client_->setClientId(config_.clientId);
     client_->setKeepAlive(static_cast<quint16>(config_.keepAliveSeconds));
     client_->setCleanSession(true);
+    // 계정이 없으면 익명 CONNECT다. 이 값들은 로그에 절대 싣지 않는다 - 아래 접속 로그가
+    // host/port/clientId만 찍는 이유가 그것이다
+    if (!config_.userName.isEmpty()) {
+        client_->setUsername(config_.userName);
+    }
+    if (!config_.password.isEmpty()) {
+        client_->setPassword(config_.password);
+    }
+    if (config_.userName.isEmpty()) {
+        // 세션당 한 번만 남긴다. broker가 익명 발행까지 허용하면 risk/blur/장비 상태가 전부
+        // 외부 입력이 되므로, 설정을 빠뜨린 현장이 로그에서라도 드러나야 한다
+        qWarning().noquote() << QStringLiteral(
+            "[MQTT] No broker credentials configured; connecting anonymously. "
+            "Set VEDA_MQTT_USERNAME/VEDA_MQTT_PASSWORD unless the broker restricts publishing by certificate.");
+    }
 
     connect(client_.get(), &QMqttClient::connected, this, [this]() {
         if (config_.debugLogging) {

@@ -162,7 +162,7 @@ void MapSettingsDialog::loadZoneIntoForm(int zoneIndex) {
     setQmlValue("zoneName", videoAreas_.at(zoneIndex).name);
     setQmlValue("zoneUser", uniformCredentials ? userName : QString());
     setQmlValue("zonePassword", uniformCredentials ? password : QString());
-    for (qsizetype localChannelIndex = 0; localChannelIndex < zoneUrlProperties.size(); ++localChannelIndex) {
+    for (int localChannelIndex = 0; localChannelIndex < videoChannelsPerArea; ++localChannelIndex) {
         setQmlValue(zoneUrlProperties[localChannelIndex], addresses.value(localChannelIndex));
     }
 }

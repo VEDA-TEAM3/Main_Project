@@ -4,51 +4,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtGlobal>
-#include <cmath>
 #include <utility>
+
+#include "network/parsing/MqttJsonValue.h"
 
 namespace {
 constexpr int blurProtocolVersion = 1;
 constexpr qsizetype maximumBlurRegionsPerFrame = 64;
-
-/**
- * @brief        JSON 필드에서 손실 없는 정수 값을 읽습니다.
- * @param object JSON 객체
- * @param name   필드 이름
- * @param value  읽은 정수
- * @return       유효한 정수이면 true
- */
-bool readBlurInteger(const QJsonObject& object, const QString& name, qint64& value) {
-    const QJsonValue jsonValue = object.value(name);
-    if (!jsonValue.isDouble()) {
-        return false;
-    }
-
-    const qint64 integerValue = jsonValue.toInteger();
-    if (static_cast<double>(integerValue) != jsonValue.toDouble()) {
-        return false;
-    }
-
-    value = integerValue;
-    return true;
-}
-
-/**
- * @brief        JSON 필드에서 유한한 실수 값을 읽습니다.
- * @param object JSON 객체
- * @param name   필드 이름
- * @param value  읽은 실수
- * @return       유효한 실수이면 true
- */
-bool readBlurFiniteNumber(const QJsonObject& object, const QString& name, double& value) {
-    const QJsonValue jsonValue = object.value(name);
-    if (!jsonValue.isDouble() || !std::isfinite(jsonValue.toDouble())) {
-        return false;
-    }
-
-    value = jsonValue.toDouble();
-    return true;
-}
 }  // namespace
 
 /**
@@ -79,9 +41,9 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
     qint64 version = 0;
     qint64 timestamp = 0;
     qint64 payloadChannel = 0;
-    if (!readBlurInteger(object, QStringLiteral("v"), version) || version != blurProtocolVersion ||
-        !readBlurInteger(object, QStringLiteral("ts"), timestamp) || timestamp <= 0 ||
-        !readBlurInteger(object, QStringLiteral("ch"), payloadChannel) || payloadChannel < 0 ||
+    if (!readMqttInteger(object, QStringLiteral("v"), version) || version != blurProtocolVersion ||
+        !readMqttInteger(object, QStringLiteral("ts"), timestamp) || timestamp <= 0 ||
+        !readMqttInteger(object, QStringLiteral("ch"), payloadChannel) || payloadChannel < 0 ||
         payloadChannel >= channelCount) {
         error = QStringLiteral("Invalid v, ts or ch field on %1").arg(topic);
         return false;
@@ -116,7 +78,7 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
         const QJsonValue classValue = blur.value(QStringLiteral("cls"));
         const QJsonValue boxValue = blur.value(QStringLiteral("box"));
         qint64 id = 0;
-        if (!readBlurInteger(blur, QStringLiteral("id"), id) || !classValue.isString() || !boxValue.isObject()) {
+        if (!readMqttInteger(blur, QStringLiteral("id"), id) || !classValue.isString() || !boxValue.isObject()) {
             error = QStringLiteral("Invalid blur target fields on %1").arg(topic);
             return false;
         }
@@ -132,10 +94,10 @@ bool BlurMessageParser::parse(const QByteArray& payload, const QString& topic, i
         double top = 0.0;
         double right = 0.0;
         double bottom = 0.0;
-        if (!readBlurFiniteNumber(box, QStringLiteral("l"), left) ||
-            !readBlurFiniteNumber(box, QStringLiteral("t"), top) ||
-            !readBlurFiniteNumber(box, QStringLiteral("r"), right) ||
-            !readBlurFiniteNumber(box, QStringLiteral("b"), bottom) || left >= right || top >= bottom) {
+        if (!readMqttFiniteNumber(box, QStringLiteral("l"), left) ||
+            !readMqttFiniteNumber(box, QStringLiteral("t"), top) ||
+            !readMqttFiniteNumber(box, QStringLiteral("r"), right) ||
+            !readMqttFiniteNumber(box, QStringLiteral("b"), bottom) || left >= right || top >= bottom) {
             error = QStringLiteral("Invalid blur box on %1").arg(topic);
             return false;
         }

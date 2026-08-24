@@ -5,7 +5,6 @@
 #include <QHash>
 #include <QObject>
 #include <QString>
-#include <QTimer>
 #include <QVector>
 #include <QtGlobal>
 #include <memory>

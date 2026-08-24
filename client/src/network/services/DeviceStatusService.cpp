@@ -1,5 +1,6 @@
 #include "network/services/DeviceStatusService.h"
 
+#include <QDebug>
 #include <QMetaObject>
 #include <QMetaType>
 #include <QThread>
@@ -14,19 +15,8 @@
 namespace {
 constexpr int maximumRecentReportKeys = 128;
 constexpr int uiFlushIntervalMsec = 50;
-
-/**
- * @brief        화면에 표시되는 장비 상태가 같은지 확인합니다.
- * @details      원본 timestamp는 상태 최신성 판단용이며 UI 표시값이 아니므로 비교하지 않습니다.
- */
-bool hasSameDisplayedState(const DeviceChannelStatus& left, const DeviceChannelStatus& right) {
-    return left.channelIndex == right.channelIndex && left.outputs.ledRed == right.outputs.ledRed &&
-           left.outputs.ledYellow == right.outputs.ledYellow && left.outputs.ledGreen == right.outputs.ledGreen &&
-           left.outputs.beacon == right.outputs.beacon && left.outputs.buzzer == right.outputs.buzzer &&
-           left.hasConfirmedState == right.hasConfirmedState && left.sensorHealth == right.sensorHealth &&
-           left.feedbackHealth == right.feedbackHealth && left.sensorDetail == right.sensorDetail &&
-           left.detail == right.detail;
-}
+/// gateway thread가 quit()에 응답할 때까지 기다리는 한도. 정상 종료는 수십 ms면 끝난다
+constexpr unsigned long gatewayThreadStopTimeoutMsec = 5000;
 }  // namespace
 
 /**
@@ -125,7 +115,18 @@ void DeviceStatusService::stop() {
     }
 
     gatewayThread_->quit();
-    gatewayThread_->wait();
+    if (!gatewayThread_->wait(gatewayThreadStopTimeoutMsec)) {
+        // ponytail: 종료 경로 전용 최후 수단. terminate()는 스레드를 임의 지점에서 끊어 뮤텍스와
+        // 힙을 정리하지 못한 채 남긴다. 그래도 여기서 무한히 기다리는 편이 더 나쁘다 - 관제 PC에
+        // 창 없는 좀비 프로세스가 남고, 다음 실행이 같은 clientId로 붙으면서 브로커가 앞 세션을
+        // 끊는 것을 반복한다. 정석은 gateway가 event loop를 막지 않게 고치는 것이고, 그때 지운다.
+        // terminate() 뒤의 wait()는 반드시 필요하다 - 스레드가 아직 도는 채로 QThread를 파괴하면
+        // Qt가 qFatal로 프로세스를 죽인다
+        qWarning() << "[DeviceStatusService] Gateway thread did not stop within" << gatewayThreadStopTimeoutMsec
+                   << "ms; terminating";
+        gatewayThread_->terminate();
+        gatewayThread_->wait();
+    }
     gateway_.reset();
     gatewayThread_.reset();
     blurFrameBuffer_->clear();
@@ -390,7 +391,10 @@ void DeviceStatusService::storeChannelStatus(DeviceChannelStatus status) {
  * @param status  UI에 표시할 출력 및 피드백 상태
  */
 void DeviceStatusService::queueChannelStatus(DeviceChannelStatus status) {
-    pendingStatuses_.insert(status.channelIndex, std::move(status));
+    // 키를 먼저 꺼낸다. 한 호출 안에서 인자 평가 순서는 정해져 있지 않으므로, QMap::insert가
+    // 언젠가 rvalue 오버로드를 갖게 되면 이미 옮겨진 status에서 channelIndex를 읽을 수 있다
+    const int channelIndex = status.channelIndex;
+    pendingStatuses_.insert(channelIndex, std::move(status));
     scheduleUiFlush();
 }
 

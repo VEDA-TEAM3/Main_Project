@@ -17,12 +17,19 @@ struct RiskObjectData {
     qint64 nearestId = 0;
     double distance = -1.0;
     int zoneId = -1;
+
+    // 전 필드 비교다. tracker와 dispatcher가 각자 같은 비교 함수를 들고 있다가 한쪽만
+    // 갱신되면, 바뀐 프레임이 "같다"로 판정돼 화면에서 조용히 사라진다
+    bool operator==(const RiskObjectData& other) const = default;
 };
 
 struct RiskFrameData {
     qint64 sourceTimestamp = 0;
     DigitalTwinRiskLevel riskLevel = DigitalTwinRiskLevel::Normal;
     QVector<RiskObjectData> objects;
+
+    /// QVector의 비교가 원소별로 위의 operator==를 부른다
+    bool operator==(const RiskFrameData& other) const = default;
 };
 
 enum class BlurTargetType {

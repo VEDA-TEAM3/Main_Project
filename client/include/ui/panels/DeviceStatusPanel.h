@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QString>
 #include <QVector>
 #include <QWidget>
 
@@ -16,7 +15,6 @@ public:
 
     void setChannelCount(int channelCount);
     void setAreaIndex(int areaIndex);
-    void setChannelStatus(const DeviceChannelStatus& status);
     void setChannelStatuses(const QVector<DeviceChannelStatus>& statuses);
 
 private:

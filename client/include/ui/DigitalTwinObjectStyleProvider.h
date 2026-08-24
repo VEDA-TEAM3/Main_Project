@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QColor>
-#include <QSize>
 #include <QString>
 
 #include "model/DigitalTwinRuntimeConfig.h"
@@ -9,10 +8,10 @@
 
 struct DigitalTwinObjectVisualStyle {
     QString iconPath;
-    QSize iconSize;
+    /// 아이콘은 항상 정사각형이라 한 변만 있으면 된다
+    int iconPixels = 0;
     QColor labelColor;
     QColor trailColor;
-    QColor fallbackColor;
 };
 
 class DigitalTwinObjectStyleProvider {

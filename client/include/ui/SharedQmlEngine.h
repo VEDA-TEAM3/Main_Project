@@ -81,7 +81,10 @@ inline QQuickWidget* createQmlPanelView(const QString& qmlFile, QWidget* parent,
 
     if (!view->rootObject()) {
         qWarning() << "[Qml] failed to load" << qmlFile << view->errors();
-        delete view;
+        // setSource()가 이 위젯 앞으로 이벤트를 걸어 둔 상태일 수 있어 바로 delete하지 않는다.
+        // 부모에서 먼저 떼어 두면 로딩에 실패한 빈 위젯이 그 사이에 화면에 끼지 않는다
+        view->setParent(nullptr);
+        view->deleteLater();
         return nullptr;
     }
 
