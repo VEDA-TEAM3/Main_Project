@@ -16,6 +16,7 @@
    일어나지 않으면 그 자리에서 에러를 낸다.
 """
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -24,6 +25,15 @@ import tempfile
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 INC = TOOLS.parent / "Core" / "Inc"
+
+# Windows 는 확장자가 없으면 만들어진 파일을 실행하지 못한다(MinGW 는 -o 이름을 그대로 쓴다).
+EXE = ".exe" if os.name == "nt" else ""
+
+# !! 빌드 결과물을 %TEMP% 에 두지 않는다. Application Control(WDAC/AppLocker) 이 설정된
+#    PC 에서는 임시 폴더의 실행 파일이 차단되어 "An Application Control policy has blocked
+#    this file" 로 죽는다. 소스와 같은 폴더 아래에서 만들고 지운다 -- 여기서는 이미
+#    test_sched_loop.exe 등이 정상 실행되므로 정책상 허용된 위치다.
+WORK = TOOLS / ".muttmp"
 
 # (설명, 대상 파일, 찾을 것, 바꿀 것)
 MUTANTS = [
@@ -36,6 +46,16 @@ MUTANTS = [
      "sched_dispatch.inc",
      "  if (ok != 0U)\n  {\n    channel_ctrl[channel_index].applied_risk = risk_level;",
      "  if (1)\n  {\n    channel_ctrl[channel_index].applied_risk = risk_level;"),
+
+    # 이 뮤턴트가 곧 Case E("옛 ACK 가 그 사이 바뀐 새 상태를 적용됐다고 기록")를 코드로 옮긴
+    # 것이다. 스냅샷한 want 대신 '지금의 desired' 를 applied 에 쓰면, ACK 를 기다리는 동안
+    # ctrl_task 가 desired 를 바꾼 경우 보내지도 않은 값이 적용된 것으로 남는다.
+    # !! 이 뮤턴트는 test_sched_loop 의 test_desired_changes_during_ack_wait 없이는
+    #    살아남는다(확인함). 그 검사를 지우면 여기가 먼저 알려 준다.
+    ("ACK 대기 중 바뀐 desired 를 applied 에 기록 (옛 ACK 오염)",
+     "sched_dispatch.inc",
+     "channel_ctrl[channel_index].applied_risk = risk_level;",
+     "channel_ctrl[channel_index].applied_risk = channel_ctrl[channel_index].desired_risk;"),
 
     ("커서를 전진시키지 않음 (라운드로빈 파괴)",
      "sched_dispatch.inc",
@@ -61,6 +81,31 @@ MUTANTS = [
      "sched_select.inc",
      "if (danger_only == 0U && idle >= SCHED_REFRESH_MSEC)",
      "if (idle >= SCHED_REFRESH_MSEC)"),
+
+    ("보내기 전에 큐를 비우지 않음 (늦은 ACK 오인)",
+     "ack_match.inc",
+     "while (ack_queue_take(&discarded, 0U) != 0U)",
+     "while (0)"),
+
+    ("ACK 의 채널을 대조하지 않음",
+     "ack_match.inc",
+     "if (ack.channel == expect_channel && ack.risk_level == risk_level)",
+     "if (ack.risk_level == risk_level)"),
+
+    ("ACK 의 등급을 대조하지 않음",
+     "ack_match.inc",
+     "if (ack.channel == expect_channel && ack.risk_level == risk_level)",
+     "if (ack.channel == expect_channel)"),
+
+    ("남의 ACK 하나에 바로 포기",
+     "ack_match.inc",
+     "    ++stat_ack_mismatch;\n  }",
+     "    ++stat_ack_mismatch;\n    return 0U;\n  }"),
+
+    ("경과 시간을 감김에 취약하게 계산",
+     "ack_match.inc",
+     "const uint32_t elapsed = ack_now_ms() - start;",
+     "const uint32_t elapsed = (ack_now_ms() > start) ? (ack_now_ms() - start) : 0U;"),
 ]
 
 # 상수를 되돌리는 회귀 검사 (테스트 파일 자체를 고친다)
@@ -76,7 +121,7 @@ CONST_REGRESSIONS = [
      "#define SCHED_REFRESH_MSEC 20000U"),
 ]
 
-TESTS = ["test_sched_select.c", "test_ack_parse.c", "test_sched_loop.c"]
+TESTS = ["test_sched_select.c", "test_ack_parse.c", "test_ack_match.c", "test_sched_loop.c"]
 
 
 def apply(text, find, replace, what):
@@ -87,10 +132,10 @@ def apply(text, find, replace, what):
     return text.replace(find, replace, 1)
 
 
-def run_suite(inc_dir, tools_dir):
+def run_suite(inc_dir, tools_dir, out_dir):
     """세 테스트를 모두 돌려 하나라도 실패하면 (False, 메시지) 를 준다."""
     for test in TESTS:
-        binary = pathlib.Path(tempfile.gettempdir()) / (test + ".bin")
+        binary = out_dir / (test[:-2] + "_mut" + EXE)
         build = subprocess.run(
             ["gcc", "-w", f"-I{inc_dir}", str(tools_dir / test), "-o", str(binary)],
             capture_output=True, text=True)
@@ -104,14 +149,21 @@ def run_suite(inc_dir, tools_dir):
 
 
 def main():
+    if shutil.which("gcc") is None:
+        sys.exit("!! gcc 를 찾을 수 없다. MinGW/MSYS2 터미널에서 돌리거나 PATH 를 확인할 것.")
+
+    if WORK.exists():
+        shutil.rmtree(WORK, ignore_errors=True)
+    WORK.mkdir(parents=True)
+
     survived = []
     print("=" * 78)
     print("뮤테이션 검사 — 일부러 망가뜨린 코드를 테스트가 잡아내는가")
     print("=" * 78)
 
     for desc, filename, find, replace in MUTANTS:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = pathlib.Path(tmp)
+        if True:
+            tmp = WORK
             for inc in INC.glob("*.inc"):
                 shutil.copy(inc, tmp / inc.name)
             target = tmp / filename
@@ -119,7 +171,7 @@ def main():
                 apply(target.read_text(encoding="utf-8"), find, replace, desc),
                 encoding="utf-8")
 
-            caught, msg = run_suite(tmp, TOOLS)
+            caught, msg = run_suite(tmp, TOOLS, WORK)
             caught = not caught
             print(f"  {'[검출]' if caught else '[생존]'} {desc}")
             if caught:
@@ -134,11 +186,10 @@ def main():
 
     loop_src = (TOOLS / "test_sched_loop.c").read_text(encoding="utf-8")
     for desc, find, replace in CONST_REGRESSIONS:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = pathlib.Path(tmp)
-            mutated = tmp / "test_sched_loop.c"
+        if True:
+            mutated = WORK / "test_sched_loop_const.c"
             mutated.write_text(apply(loop_src, find, replace, desc), encoding="utf-8")
-            binary = tmp / "bin"
+            binary = WORK / ("const_mut" + EXE)
             subprocess.run(["gcc", "-w", f"-I{INC}", str(mutated), "-o", str(binary)],
                            capture_output=True, text=True, check=True)
             run = subprocess.run([str(binary)], capture_output=True, text=True)
@@ -162,4 +213,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(WORK, ignore_errors=True)

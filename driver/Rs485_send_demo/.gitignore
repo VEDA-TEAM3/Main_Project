@@ -33,3 +33,7 @@
 Thumbs.db
 *.swp
 *~
+
+# 뮤테이션 검사 작업 폴더 (실행 중에만 존재)
+/tools/.muttmp/
+/tools/_mut_*.exe

@@ -12,6 +12,7 @@
 |---|---|---|
 | 1. 호스트 단위 테스트 | 선택 규칙, 우선순위, 굶주림, 시간 계산 | `tools/test_sched_select.c` |
 | 1. 호스트 단위 테스트 | ACK 줄 조립·해석 (ISR 문맥이라 실기 관찰 불가) | `tools/test_ack_parse.c` |
+| 1. 호스트 단위 테스트 | 늦은·남의 ACK 대조 (큐+시간이 얽혀 실기 재현 불가) | `tools/test_ack_match.c` |
 | 1.5 호스트 닫힌-루프 sim | 상태 전이(applied/retry), 수렴, 고장 격리, 복구, **지연 상한** | `tools/test_sched_loop.c` |
 | 2. 온타깃 + 가짜 전송로 | 스택, 틱 주기 실측, volatile/최적화, 태스크 경합 | 보드 + UART 로그 / GPIO 토글 |
 | 3. 실기 수용 테스트 | 복구, 동기, 사람이 보는 동작 | RPi + Slave 2대 |

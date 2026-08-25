@@ -35,6 +35,7 @@
 #define SCHED_REFRESH_MSEC 2000U
 #define SCHED_RETRY_BACKOFF_MSEC 500U
 #define SCHED_NO_CHANNEL 0xFFU
+#define SCHED_RISK_UNKNOWN 0xFFU   /* applied_risk 의 부팅값 = "아직 확인 안 됨" */
 #define RS485_ACK_REQUIRED 1
 #define RS485_ACK_TIMEOUT_MSEC 100U
 #define VEDA_UPLINK_REASON_ACK 0
@@ -184,6 +185,30 @@ static uint32_t stat_ack_slot_lost;
 static uint32_t slave_last_apply[CHANNEL_COUNT];
 static uint32_t slave_max_gap[CHANNEL_COUNT];
 
+/**
+ * ACK 를 기다리는 '도중'에 ctrl_task 가 desired 를 바꾸는 상황을 재현할지 여부.
+ *
+ * 왜 따로 필요한가: run() 은 주입과 틱을 번갈아 처리하므로 inject_random() 이 언제나
+ * sched_tick() '사이'에서만 돈다. 그런데 실기에서 ctrl_task 와 sched_task 는 같은 우선순위의
+ * 별개 태스크이고 ACK 대기가 최대 100ms 라, RPi 명령이 그보다 촘촘하면
+ * **dispatch_channel() 이 ACK 를 기다리는 동안 desired 가 바뀌는 일이 일상적으로 일어난다.**
+ * 그 인터리빙이 지금까지 한 번도 검사되지 않았다.
+ *
+ * 이것이 노리는 고장은 하나다: 늦게 도착한(또는 다른 등급의) ACK 가 그 사이 바뀐 새 상태를
+ * 적용된 것으로 기록하는 것 -- 이 시스템에서 가장 위험한 거짓말이다.
+ * 아래 last_sent_risk[] 불변식이 그것을 직접 잡는다.
+ */
+static int interleave_enabled;
+
+/**
+ * 채널별로 가장 최근에 회선에 실제로 나간 등급. dispatch_channel() 이 스냅샷한 want 다.
+ *
+ * 불변식: applied_risk 가 바뀌었다면 그 새 값은 **반드시 이 값과 같아야 한다.**
+ * 옛 ACK 가 현재 상태를 갱신하면 여기서 즉시 걸린다 -- desired 가 그 사이 무엇으로 바뀌었든
+ * 상관없이 성립하는 검사라, 인터리빙이 있든 없든 그대로 쓸 수 있다.
+ */
+static uint8_t last_sent_risk[CHANNEL_COUNT];
+
 /** send: 회선에 바이트를 밀어넣는 데는 언제나 성공한다(HAL 관점). Slave 가 살아 있으면
  *  그 프레임을 받아 실제로 적용한다. 죽어 있으면 아무 일도 안 일어난다 -- 실패는 ACK 없음으로만
  *  드러난다. 실기의 send_channel_command() 주석과 같은 의미다. */
@@ -193,6 +218,7 @@ static uint8_t send_channel_command(uint8_t channel_index, uint8_t risk_level)
 
   ++tx_count;
   ++tx_per_channel[channel_index];
+  last_sent_risk[channel_index] = risk_level;   /* applied 전이 불변식의 기준값 */
   fake_now += TX_TIME_MSEC;          /* 프레임이 회선을 지나가는 시간 */
 
   if (!slave[channel_index].reachable)
@@ -238,10 +264,25 @@ static uint8_t send_channel_command(uint8_t channel_index, uint8_t risk_level)
  * 성공이면 Slave 의 폴링 지연만큼, 실패면 Master 의 타임아웃만큼 시간이 실제로 흐른다.
  * 이 시간이 곧 실패한 채널이 버스를 붙잡는 시간이라, 지연 상한 검사의 핵심 입력이다.
  */
+/** 아래에 정의. 인터리빙 주입이 ctrl_task 와 정확히 같은 경로를 타게 하려고 앞당겨 선언한다. */
+static void set_desired(uint8_t ch, uint8_t risk);
+
 static uint8_t wait_for_slave_ack(uint8_t channel_index, uint8_t risk_level)
 {
   const uint8_t b = (uint8_t)(channel_index / CHANNELS_PER_SLAVE);
   const uint8_t want_channel = (uint8_t)(channel_index + 1U);
+
+  /* ACK 대기 '도중'의 desired 변경(실기의 ctrl_task 선점). 이 자리인 이유:
+   * dispatch_channel() 은 want 를 이미 스냅샷했고 프레임도 이미 회선에 나갔다. 즉 지금부터
+   * ACK 가 돌아올 때까지가 정확히 문제의 창이다.
+   * 절반은 지금 대기 중인 바로 그 채널을, 절반은 아무 채널을 건드려 둘 다 훑는다 --
+   * 같은 채널을 바꾸는 쪽이 "보낸 값과 desired 가 어긋난 채 ACK 가 온다"는 어려운 경우다. */
+  if (interleave_enabled && (rand() % 3) == 0)
+  {
+    const uint8_t ch = (rand() % 2) ? channel_index
+                                    : (uint8_t)(rand() % CHANNEL_COUNT);
+    set_desired(ch, (uint8_t)(rand() % 3));
+  }
 
   if (slave[channel_index].reachable && slave[channel_index].will_ack &&
       board[b].armed &&
@@ -337,6 +378,9 @@ static void check_safety(void)
   for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
   {
     const uint8_t a = channel_ctrl[ch].applied_risk;
+    /* 부팅값(미확인)은 아직 아무 것도 확인되지 않았다는 뜻이라 아래 두 검사의 대상이 아니다.
+     * 이 값은 회선에 나가지도, 상행에 실리지도 않는다 -- 나가는 것은 언제나 desired 쪽이다. */
+    if (a == SCHED_RISK_UNKNOWN) { continue; }
     CHECK(a <= 2U, "applied out of range: ch=%u applied=%u", ch, a);
     CHECK(ever_desired[ch][a], "applied value never desired: ch=%u applied=%u", ch, a);
   }
@@ -392,8 +436,34 @@ static void run(uint32_t duration_ms, int inject)
       }
       next_tick += SCHED_TICK_MSEC;
 
-      /* sched_tick() 안에서 송신·ACK 대기로 시간이 흐른다. */
-      sched_tick();
+      /* sched_tick() 안에서 송신·ACK 대기로 시간이 흐른다.
+       *
+       * applied 전이 불변식을 그 앞뒤로 건다: 이번 틱에 applied 가 바뀌었다면 그 새 값은
+       * **방금 회선에 나간 값**이어야 한다. 늦은 ACK 나 남의 ACK 가 현재 상태를 갱신하면
+       * 여기서 즉시 걸린다 -- desired 가 그 사이 무엇으로 바뀌었든 상관없이 성립하므로
+       * 인터리빙 주입과 함께 쓸 수 있다. */
+      {
+        uint8_t before[CHANNEL_COUNT];
+        uint8_t c;
+
+        for (c = 0U; c < CHANNEL_COUNT; ++c)
+        {
+          before[c] = channel_ctrl[c].applied_risk;
+        }
+
+        sched_tick();
+
+        for (c = 0U; c < CHANNEL_COUNT; ++c)
+        {
+          if (channel_ctrl[c].applied_risk != before[c])
+          {
+            CHECK(channel_ctrl[c].applied_risk == last_sent_risk[c],
+                  "applied changed to a value that was not just sent: "
+                  "ch=%u %u -> %u, last sent %u",
+                  c, before[c], channel_ctrl[c].applied_risk, last_sent_risk[c]);
+          }
+        }
+      }
       check_safety();
 
       /* osDelayUntil 의 동작을 그대로 흉내낸다: 목표 시각이 이미 지났으면 재우지 않고
@@ -431,6 +501,8 @@ static void reset_world(unsigned seed)
   memset(board, 0, sizeof(board));
   uplink_count = 0U;
   memset(ever_desired, 0, sizeof(ever_desired));
+  memset(last_sent_risk, 0, sizeof(last_sent_risk));   /* 부팅 상태 = NONE */
+  interleave_enabled = 0;   /* 켜는 것은 그 검사가 reset_world 뒤에 직접 한다 */
 
   for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
   {
@@ -449,6 +521,20 @@ static void reset_world(unsigned seed)
     slave[ch].applied = VEDA_RISK_NONE;
     slave_last_apply[ch] = fake_now;
     slave_max_gap[ch] = 0U;
+  }
+}
+
+/** 전원을 막 켠 직후로 되돌린다. main.c 의 channel_boot_state_init() 과 같아야 한다. */
+static void boot_world(unsigned seed)
+{
+  uint8_t ch;
+
+  reset_world(seed);
+  memset(channel_status, 0, sizeof(channel_status));   /* LED 전부 0 = 아직 확인 안 됨 */
+  for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
+  {
+    channel_ctrl[ch].applied_risk = SCHED_RISK_UNKNOWN;
+    channel_ctrl[ch].retry = 0U;
   }
 }
 
@@ -476,6 +562,47 @@ static void test_healthy_soak_converges(void)
             ch, channel_ctrl[ch].desired_risk, channel_ctrl[ch].applied_risk);
       CHECK(slave[ch].applied == channel_ctrl[ch].desired_risk,
             "ch=%u slave out of sync: desired=%u slave=%u",
+            ch, channel_ctrl[ch].desired_risk, slave[ch].applied);
+    }
+  }
+}
+
+/**
+ * ACK 를 기다리는 '도중'에 desired 가 바뀌어도 상태가 오염되지 않고 결국 수렴한다.
+ *
+ * 왜 이 검사가 따로 필요한가: 위 test_healthy_soak_converges 를 포함한 모든 검사에서
+ * inject_random() 은 sched_tick() '사이'에서만 돈다. 그래서 실기에서 가장 자주 일어나는
+ * 동시성 상황 -- ctrl_task 가 ACK 대기 중인 sched_task 를 선점하는 것 -- 이 한 번도
+ * 재현되지 않았다. ACK 대기는 최대 100ms 이고 RPi 명령은 그보다 촘촘할 수 있다.
+ *
+ * 노리는 고장은 하나다: **옛 명령의 ACK 가 그 사이 바뀐 새 상태를 '적용됐다'고 기록하는 것.**
+ * 지금 코드는 세 겹으로 막고 있다 -- dispatch_channel() 이 want 를 스냅샷하고,
+ * 보내기 직전 drain_ack_queue() 로 큐를 비우고, wait_for_slave_ack() 가 채널과 등급을
+ * 둘 다 대조한다. 이 검사는 그 성질이 앞으로도 유지되는지를 지킨다.
+ *
+ * 실제 검출은 두 곳에서 일어난다:
+ *   - run() 의 applied 전이 불변식 (매 틱, 오염을 즉시 잡는다)
+ *   - 아래 수렴 검사 (주입을 멈춘 뒤 desired == applied == Slave 실제 상태)
+ */
+static void test_desired_changes_during_ack_wait(void)
+{
+  unsigned s;
+  for (s = 0U; s < SEED_COUNT; ++s)
+  {
+    uint8_t ch;
+    reset_world(s);
+    interleave_enabled = 1;   /* reset_world 가 0 으로 되돌리므로 그 뒤에 켠다 */
+    run(SOAK_MSEC, 1);        /* 틱 사이 주입 + ACK 대기 중 주입이 함께 돈다 */
+    interleave_enabled = 0;   /* 조용한 구간에는 주입이 없어야 수렴을 볼 수 있다 */
+    run(QUIET_MSEC, 0);
+
+    for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
+    {
+      CHECK(channel_ctrl[ch].applied_risk == channel_ctrl[ch].desired_risk,
+            "ch=%u did not converge after interleaved soak: desired=%u applied=%u",
+            ch, channel_ctrl[ch].desired_risk, channel_ctrl[ch].applied_risk);
+      CHECK(slave[ch].applied == channel_ctrl[ch].desired_risk,
+            "ch=%u slave out of sync after interleaved soak: desired=%u slave=%u",
             ch, channel_ctrl[ch].desired_risk, slave[ch].applied);
     }
   }
@@ -817,14 +944,73 @@ static void test_cursor_advances_between_contenders(void)
         "cursor is not advancing -- unfair service: ch0=%u ch3=%u", a, b);
 }
 
+/**
+ * 부팅: 확인되기 전에는 초록이라고 말하지 않고, 확인된 그 순간 반드시 한 장 올려 보낸다.
+ *
+ * 이 검사가 지키는 것은 Qt 화면이다. RPi(SerialHwEventDispatcher::reportIndicators)도 Qt 도
+ * 상행 값이 '바뀔 때만' 갱신하므로, Master 가 부팅 순간부터 초록을 싣고 올라가면 전이가 한
+ * 번도 생기지 않아 화면에는 아무 것도 반영되지 않는다(실제로 그랬다). 부팅값이 '미확인'이고
+ * Slave 의 ACK 로 확인될 때 초록으로 바뀌어야, 그 전이 한 번이 Qt 까지 올라간다.
+ *
+ * 동시에 정직성도 함께 건다 -- 아직 응답하지 않은 보드의 채널을 초록이라고 우기면 안 된다.
+ */
+static void test_boot_reports_only_confirmed_state(void)
+{
+  uint8_t ch;
+  uint32_t uplinks_before;
+
+  /* --- 1) 보드 1(채널 2,3)은 아직 부팅 중이라 응답하지 않는다 ---------------------- */
+  boot_world(0U);
+  set_board_alive(1U, 0);
+
+  for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
+  {
+    CHECK(channel_status[ch].led_green == 0U,
+          "ch=%u claimed green before any ACK -- boot state is a guess, not a report", ch);
+  }
+
+  uplinks_before = uplink_count;
+  run(1000U, 0);
+
+  CHECK(channel_ctrl[0].applied_risk == VEDA_RISK_NONE,
+        "live ch0 never confirmed at boot: applied=%u", channel_ctrl[0].applied_risk);
+  CHECK(channel_status[0].led_green == 1U,
+        "live ch0 confirmed but never reported green -- Qt would still show nothing");
+  CHECK(uplink_count > uplinks_before,
+        "no uplink was queued for the boot state -- the transition never reaches Qt");
+
+  CHECK(channel_ctrl[2].applied_risk == SCHED_RISK_UNKNOWN,
+        "ch2 marked confirmed without an ACK: applied=%u", channel_ctrl[2].applied_risk);
+  CHECK(channel_status[2].led_green == 0U,
+        "ch2 reported green while its board was still down");
+
+  /* --- 2) 늦게 뜬 보드도 재시도/리프레시가 확인해 준다 ------------------------------ */
+  uplinks_before = uplink_count;
+  set_board_alive(1U, 1);
+  run(SCHED_REFRESH_MSEC + 1000U, 0);
+
+  for (ch = 0U; ch < CHANNEL_COUNT; ++ch)
+  {
+    CHECK(channel_ctrl[ch].applied_risk == VEDA_RISK_NONE,
+          "ch=%u never converged after its board came up: applied=%u",
+          ch, channel_ctrl[ch].applied_risk);
+    CHECK(channel_status[ch].led_green == 1U,
+          "ch=%u confirmed but not reported green", ch);
+  }
+  CHECK(uplink_count > uplinks_before,
+        "late board's confirmation was never reported upward");
+}
+
 int main(void)
 {
+  test_boot_reports_only_confirmed_state();
   test_latency_bounds();
   test_refresh_period_guarantee();
   test_danger_dispatched_first();
   test_cursor_advances_between_contenders();
   test_coalescing_bounds_traffic();
   test_healthy_soak_converges();
+  test_desired_changes_during_ack_wait();
   test_dead_board_isolation();
   test_board_recovers();
   test_refresh_resyncs_silent_reset();
