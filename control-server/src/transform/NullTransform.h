@@ -9,5 +9,6 @@
 
 class NullTransform : public ILocalToWorldTransform {
 public:
-    void transform(std::vector<veda::TopViewFrame>& frames) override;
+    /// @warning 좌표를 그대로 복사만 함 -- 로컬 좌표가 월드 좌표인 척 통과하므로 테스트 전용
+    void transform(const std::vector<veda::TopViewFrame>& in, std::vector<domain::ObservationFrame>& out) override;
 };

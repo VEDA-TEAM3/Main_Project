@@ -1,32 +1,65 @@
 #include "core/AppContext.h"
 
-#include "aggregate/TimeWindowAggregator.h"
-#include "dispatch/ConsoleDispatcher.h"
-#include "fuse/ConcatFuser.h"
+#include <string>
+
+#include "Logger.h"
+#include "aggregate/TimeWindowAggregatorV2.h"
+#include "dispatch/SerialHwEventDispatcher.h"
+#include "fuse/GridFuser.h"
 #include "metric/EuclideanMetric.h"
-#include "receive/NullReceiver.h"
+#include "parking/StationaryParkingPolicy.h"
+#include "receive/MqttChannelReceiver.h"
 #include "risk/ThresholdRiskPolicy.h"
-#include "sink/ConsoleSink.h"
+#include "sink/MqttTransport.h"
 #include "time/SystemClock.h"
-#include "transform/NullTransform.h"
-#include "zone/AngleZoneMapper.h"
+#include "transform/AffineLocalToWorldTransform.h"
+#include "zone/SpatialZoneMapper.h"
+
+namespace {
+constexpr const char* kIface = "AppContext";
+}  // namespace
 
 AppContext::AppContext(const AppConfig& config) : config_(config) {}
 
 std::shared_ptr<Controller> AppContext::buildController() {
+    config_.validateForStartup();
+
     auto clock = std::make_shared<SystemClock>();
     auto metric = std::make_shared<EuclideanMetric>();
 
-    auto receiver = std::make_shared<NullReceiver>();
-    auto aggregator = std::make_shared<TimeWindowAggregator>(clock, config_.windowSizeMs);
-    auto transform = std::make_shared<NullTransform>();
-    auto fuser = std::make_shared<ConcatFuser>(metric, config_.risk.dedupMergeDistance);
-    auto zoneMapper = std::make_shared<AngleZoneMapper>(config_.zoneBoundaries);
-    auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk.warningDistance,
-                                                            config_.risk.dangerousDistance, config_.channelCount);
-    auto dispatcher = std::make_shared<ConsoleDispatcher>();
-    auto sink = std::make_shared<ConsoleSink>();
+    // receiver(수신)와 sink(발행)가 mosquitto 클라이언트/연결 하나를 공유함
+    // -- 각자 별도 인스턴스를 만들면 TLS 연결이 두 개로 늘어나 지연시간과 리소스를 낭비함
+    auto sink = std::make_shared<MqttTransport>(config_);
+    auto receiver = std::make_shared<MqttChannelReceiver>(sink, config_.channelCount,
+                                                          config_.mqttReceiverRetryIntervalMs,
+                                                          config_.demoPedestrianProxy);
+    auto aggregator = std::make_shared<TimeWindowAggregatorV2>(clock, config_.windowSizeMs, config_.channelCount);
+    auto transform = std::make_shared<AffineLocalToWorldTransform>(config_.cameraCalibrations,
+                                                                   /*dropUncalibrated=*/true, config_.worldBounds);
+    auto fuser =
+        std::make_shared<GridFuser>(metric, config_.risk.dedupMergeDistance, config_.risk.trackMaxDistance,
+                                    config_.risk.positionJitterRadius);
+    auto parkingPolicy = std::make_shared<StationaryParkingPolicy>(config_.parking);
+    auto zoneMapper = std::make_shared<SpatialZoneMapper>(config_.zones, config_.hysteresisMargin,
+                                                          config_.cameraCalibrations,
+                                                          config_.directionalZoneMapping);
+    auto riskPolicy = std::make_shared<ThresholdRiskPolicy>(metric, config_.risk, config_.channelCount);
 
-    return std::make_shared<Controller>(receiver, aggregator, transform, fuser, zoneMapper, riskPolicy, dispatcher,
-                                        sink);
+    // 하드웨어 디스패처는 실제 STM32 UART 링크로 고정
+    auto dispatcher = std::make_shared<SerialHwEventDispatcher>(
+        config_.hwHealthCheck.devicePath, config_.hwHealthCheck.heartbeatIntervalMs,
+        config_.hwHealthCheck.missedBeatsForTimeout, config_.hwHealthCheck.mismatchRetryCount,
+        config_.hwHealthCheck.mismatchEscalateAfterRetries);
+
+    logSuccess(kIface, "주차 정책 적용 (spaces=" + std::to_string(config_.parking.spaces.size()) +
+                           ", stationaryDurationMs=" + std::to_string(config_.parking.stationaryDurationMs) +
+                           ", maxObservationGapMs=" + std::to_string(config_.parking.maxObservationGapMs) +
+                           ", movementToleranceM=" + std::to_string(config_.parking.movementToleranceM) + ")");
+
+    logSuccess(kIface,
+               "파이프라인 조립 완료 (receiver=MqttChannelReceiver, transform=AffineLocalToWorldTransform, "
+               "zoneMapper=SpatialZoneMapper, sink=MqttTransport, dispatcher=SerialHwEventDispatcher)");
+
+    return std::make_shared<Controller>(receiver, aggregator, transform, fuser, parkingPolicy, zoneMapper, riskPolicy,
+                                        dispatcher, sink, clock, config_.channelCount);
 }

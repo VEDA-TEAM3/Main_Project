@@ -18,6 +18,12 @@ class IFrameAggregator {
 public:
     virtual ~IFrameAggregator() = default;
 
+    /** @brief 시간 기반 집계 작업을 시작한다. 동기식 구현은 기본 no-op을 사용한다. */
+    virtual void start() {}
+
+    /** @brief 시간 기반 집계 작업을 중지하고 대기 중인 작업을 정리한다. */
+    virtual void stop() {}
+
     /**
      * @brief 시간 윈도우 내에 모인 프레임들의 묶음
      */
@@ -25,8 +31,13 @@ public:
 
     /**
      * @brief 윈도우가 닫혀 집계가 완료되었을 때 호출될 콜백 함수 타입
+     *
+     * @warning 값이 아니라 const 참조로 받는다. 집계기가 이 버퍼를 '풀에서 빌려' 넘기고
+     *          콜백이 반환하는 즉시 회수하기 때문이다 -- 그래서 윈도우마다 새 벡터를 만들지 않는다.
+     *          구현체는 이 참조를 **저장하거나 콜백 밖으로 넘기면 안 된다.** 필요하면 복사할 것.
+     *          (반환 후 버퍼는 다음 윈도우에서 덮어써진다)
      */
-    using AggregationCallback = std::function<void(AggregatedFrames)>;
+    using AggregationCallback = std::function<void(const AggregatedFrames&)>;
 
     /**
      * @brief 집계 완료 콜백 등록

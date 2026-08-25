@@ -25,10 +25,6 @@ struct RawPacket {
     /**
      * @brief Pi 측 도착 시각
      * @details Δ = recvTime - (패킷 내 Timestamp) 측정
-     *
-     * @note
-     * -- Debug / Log 용도
-     * -- 추후에 IClock으로 추출 가능성
      */
     std::chrono::system_clock::time_point recvTime;
 };

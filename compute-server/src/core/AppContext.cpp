@@ -2,27 +2,69 @@
 
 #include "ground/BottomCenterExtractor.h"
 #include "mapper/AffineImageCoordinateMapper.h"
+#include "mqtt/MqttTransport.h"
 #include "parser/OnvifParser.h"
 #include "route/ParentBasedRouter.h"
 #include "sanitize/ContainmentSanitizer.h"
-#include "sink/ConsoleSink.h"
-#include "source/RtspOnvifSource.h"
+#include "sink/MqttBlurSink.h"
+#include "sink/MqttTopViewSink.h"
+#include "source/RtspOnvifSourceV2.h"
 #include "transform/HomographyTransform.h"
 
-AppContext::AppContext(const AppConfig& config) {
-    source_ = std::make_shared<RtspOnvifSource>(config);
+namespace {
 
-    auto parser = std::make_shared<OnvifParser>();
+/// @brief AppConfig의 문자열 정책을 pipeline 열거형으로 변환
+RiskEdgePolicy toRiskEdgePolicy(const std::string& value) {
+    if (value == "keep") {
+        return RiskEdgePolicy::Keep;
+    }
+
+    if (value == "dropAnyEdge") {
+        return RiskEdgePolicy::DropAnyEdge;
+    }
+
+    return RiskEdgePolicy::DropBottomTruncated;
+}
+
+HomographyTransform::Options toHomographyOptions(const AppConfig& config) {
+    HomographyTransform::Options options;
+    options.pixelSpace = config.homographySpace == "pixel";
+    options.imageWidth = config.imageWidth;
+    options.imageHeight = config.imageHeight;
+    options.boundsEnabled = config.localBoundsEnabled;
+    options.minX = config.localMinX;
+    options.maxX = config.localMaxX;
+    options.minY = config.localMinY;
+    options.maxY = config.localMaxY;
+    return options;
+}
+
+}  // namespace
+
+AppContext::AppContext(const AppConfig& config) {
+    source_ = std::make_shared<RtspOnvifSourceV2>(config);
+
+    auto parser = std::make_shared<OnvifParser>(config.edgeEpsilon);
     auto imageMapper = std::make_shared<AffineImageCoordinateMapper>(config.imageMapScaleX, config.imageMapScaleY,
-                                                                     config.imageMapOffsetX, config.imageMapOffsetY);
+                                                                     config.imageMapOffsetX, config.imageMapOffsetY,
+                                                                     config.blurBoxScale);
     auto sanitizer = std::make_shared<ContainmentSanitizer>(config.sanitizerIouThresh, config.sanitizerContainThresh);
     auto router = std::make_shared<ParentBasedRouter>();
     auto ground = std::make_shared<BottomCenterExtractor>();
-    auto transform = std::make_shared<HomographyTransform>(config.homography);
+    auto transform = std::make_shared<HomographyTransform>(config.homography, toHomographyOptions(config));
 
-    auto riskSink = std::make_shared<ConsoleTopViewSink>();
-    auto blurSink = std::make_shared<ConsoleBlurSink>();
+    transport_ = std::make_shared<MqttTransport>(config);
 
-    pipeline_ =
-        std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink, blurSink);
+    auto riskSink = std::make_shared<MqttTopViewSink>(transport_, config);
+    auto blurSink = std::make_shared<MqttBlurSink>(transport_, config);
+    riskSink->start();
+    blurSink->start();
+
+    transport_->start();
+
+    PipelineOptions options;
+    options.edgePolicy = toRiskEdgePolicy(config.riskEdgePolicy);
+
+    pipeline_ = std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink,
+                                           blurSink, options);
 }

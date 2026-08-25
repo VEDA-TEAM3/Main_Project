@@ -1,0 +1,341 @@
+#include "receive/MqttChannelReceiver.h"
+
+#include <charconv>
+#include <cmath>
+#include <cstddef>
+#include <utility>
+
+#include "Logger.h"
+#include "sink/MqttTransport.h"
+
+namespace {
+
+constexpr const char* kIface = "MqttChannelReceiver";
+constexpr std::string_view kChannelPrefix = "veda/ch/";
+constexpr std::size_t kMaxObjectsPerFrame = 256;
+
+bool isValidTopViewFrame(const veda::TopViewFrame& frame, int channelCount) noexcept {
+    if (frame.v != veda::kSchemaVersion || frame.ts <= 0 || frame.ch < 0 || frame.ch >= channelCount) {
+        return false;
+    }
+    if (frame.objects.size() > kMaxObjectsPerFrame) {
+        return false;
+    }
+    for (const veda::TopViewObject& object : frame.objects) {
+        if (!veda::isRiskClass(object.cls) || !std::isfinite(object.pos.x) || !std::isfinite(object.pos.y)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+MqttChannelReceiver::MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount,
+                                         std::uint64_t retryIntervalMs, bool demoPedestrianProxy)
+    : transport_(std::move(transport)),
+      channelCount_(channelCount),
+      retryInterval_(retryIntervalMs),
+      demoPedestrianProxy_(demoPedestrianProxy) {}
+
+MqttChannelReceiver::~MqttChannelReceiver() { stop(); }
+
+void MqttChannelReceiver::setCallback(FrameCallback callback) {
+    std::lock_guard lock(callbackMutex_);
+    frameCallback_ = std::move(callback);
+}
+
+void MqttChannelReceiver::setAliveCallback(AliveCallback callback) {
+    std::lock_guard lock(callbackMutex_);
+    aliveCallback_ = std::move(callback);
+}
+
+void MqttChannelReceiver::start() {
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+    if (transport_ == nullptr) {
+        running_.store(false, std::memory_order_release);
+        logError(kIface, "transport가 null임 (AppContext에서 공유 MqttTransport 주입 필요)");
+        return;
+    }
+
+    // 켜져 있는 줄 모른 채 운영에 나가면 실제 보행자가 전부 차량으로 판정된다.
+    // 기본 로그 레벨(info)에서도 보이도록 에러 레벨로 남긴다.
+    if (demoPedestrianProxy_) {
+        logError(kIface,
+                 "[데모 모드] demoPedestrianProxy=true — 수신되는 Human 을 전부 Vehicle 로 치환함. "
+                 "운영 배포에서는 반드시 false 로 둘 것");
+    }
+
+    // PipelineWorker 를 먼저 띄운다 (메시지가 들어오기 전에 소비자 준비). mosquitto 콜백 스레드를
+    // 무거운 디코드/fusion 으로부터 보호하기 위한 전용 파이프라인 스레드.
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queueStopping_ = false;
+    }
+    pipelineThread_ = std::thread(&MqttChannelReceiver::pipelineLoop, this);
+
+    transport_->setMessageHandler(
+        [this](std::string_view topic, std::string_view payload) { handleMessage(topic, payload); });
+    transport_->setConnectionHandler([this](bool connected, int) { handleConnection(connected); });
+
+    if (!tryConnect()) {
+        logError(kIface, "start 실패 (구독 또는 transport 시작 실패) — " + std::to_string(retryInterval_.count()) +
+                             "ms 간격으로 백그라운드 재시도함");
+        retryThread_ = std::thread(&MqttChannelReceiver::retryLoop, this);
+    }
+}
+
+void MqttChannelReceiver::stop() {
+    if (!running_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    retryCv_.notify_all();
+    if (retryThread_.joinable()) {
+        retryThread_.join();
+    }
+
+    // PipelineWorker 정지: 남은 큐는 버리고 워커를 join (running_=false 이후라 새 enqueue 는 없음)
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queueStopping_ = true;
+        queue_.clear();
+        queuedBytes_ = 0;
+    }
+    queueCv_.notify_all();
+    if (pipelineThread_.joinable()) {
+        pipelineThread_.join();
+    }
+
+    if (transport_ != nullptr) {
+        // transport_는 sink(발행 경로)와 공유하는 연결이므로 여기서 stop()하지 않고
+        // 이 receiver가 등록한 핸들러만 해제함 (연결 자체의 수명주기는 AppContext 몫)
+        transport_->setMessageHandler({});
+        transport_->setConnectionHandler({});
+    }
+}
+
+bool MqttChannelReceiver::tryConnect() noexcept {
+    if (!transport_->subscribe(std::string(veda::topic::kTopViewAll), veda::qos::kTopView) ||
+        !transport_->subscribe(std::string(veda::topic::kAliveAll), veda::qos::kAlive) || !transport_->start()) {
+        return false;
+    }
+
+    logSuccess(kIface, "구독 시작 (topView=" + std::string(veda::topic::kTopViewAll) +
+                           ", alive=" + std::string(veda::topic::kAliveAll) + ")");
+    return true;
+}
+
+void MqttChannelReceiver::retryLoop() noexcept {
+    std::unique_lock<std::mutex> lock(retryMutex_);
+    while (running_.load(std::memory_order_acquire)) {
+        const bool stopped =
+            retryCv_.wait_for(lock, retryInterval_, [this] { return !running_.load(std::memory_order_acquire); });
+        if (stopped) {
+            return;
+        }
+
+        lock.unlock();
+        const bool connected = tryConnect();
+        lock.lock();
+
+        if (connected) {
+            return;
+        }
+        logError(kIface, "재시도 실패, " + std::to_string(retryInterval_.count()) + "ms 후 다시 시도함");
+    }
+}
+
+std::uint64_t MqttChannelReceiver::receivedCount() const noexcept {
+    return receivedCount_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t MqttChannelReceiver::droppedCount() const noexcept {
+    return droppedCount_.load(std::memory_order_relaxed);
+}
+
+void MqttChannelReceiver::handleMessage(std::string_view topic, std::string_view payload) noexcept {
+    // [네트워크 스레드 분리] mosquitto 콜백 스레드에서는 payload 를 복사해 큐에 넣기만 한다.
+    // 무거운 nlohmann 디코드 + fusion/dispatch 는 pipelineLoop(워커 스레드)에서 수행 -> 파이프라인이
+    // 밀려도 mosquitto 네트워크 수신 루프가 막히지 않는다 (Principle #7: 네트워크 스레드 보호).
+    if (!running_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // 신뢰할 수 없는 MQTT payload를 복사하거나 nlohmann DOM으로 확장하기 전에 차단한다.
+    // alive는 wire 계약상 정확히 1 byte("0" 또는 "1")이며, TopView/기타 메시지는
+    // 정상 최대 256-object 프레임에 여유를 둔 64 KiB까지만 허용한다.
+    const std::size_t maxPayloadBytes =
+        topic.ends_with("/alive") ? 1U : kMaxTopViewPayloadBytes;
+    if (payload.size() > maxPayloadBytes) {
+        recordDrop(topic, "payload too large");
+        return;
+    }
+
+    RawMessage incoming{std::string(topic), std::string(payload)};
+    const std::size_t incomingBytes = incoming.byteSize();
+    if (incomingBytes > kMaxQueuedPayloadBytes) {
+        recordDrop(topic, "message exceeds queue byte limit");
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if (queueStopping_) {
+            return;
+        }
+
+        // 메시지 개수와 총 바이트를 함께 제한한다. 단일 payload 상한만 두면
+        // 64 KiB × 4096건으로 payload 문자열만 약 256 MiB까지 적체될 수 있다.
+        while (!queue_.empty() &&
+               (queue_.size() >= kMaxQueuedMessages ||
+                queuedBytes_ + incomingBytes > kMaxQueuedPayloadBytes)) {
+            queuedBytes_ -= queue_.front().byteSize();
+            queue_.pop_front();  // drop-oldest: 실시간 좌표라 오래된 프레임보다 최신이 항상 유용
+            queueDroppedCount_.fetch_add(1, std::memory_order_relaxed);
+        }
+        queue_.push_back(std::move(incoming));
+        queuedBytes_ += incomingBytes;
+    }
+    queueCv_.notify_one();
+}
+
+void MqttChannelReceiver::pipelineLoop() noexcept {
+    while (true) {
+        RawMessage message;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueCv_.wait(lock, [this] { return queueStopping_ || !queue_.empty(); });
+            if (queueStopping_) {
+                return;  // 종료: 남은 큐는 버리고 빠져나감
+            }
+            message = std::move(queue_.front());
+            queuedBytes_ -= message.byteSize();
+            queue_.pop_front();
+        }
+        // 무거운 작업(디코드 + fusion/dispatch 파이프라인 전체)은 전부 이 워커 스레드에서 수행
+        processMessage(message.topic, message.payload);
+    }
+}
+
+void MqttChannelReceiver::processMessage(std::string_view topic, std::string_view payload) noexcept {
+    if (const auto channel = parseChannel(topic, "/topview")) {
+        veda::TopViewFrame frame = veda::decode<veda::TopViewFrame>(payload);
+        if (!isValidTopViewFrame(frame, channelCount_)) {
+            recordDrop(topic, "invalid TopViewFrame");
+            return;
+        }
+        if (frame.ch != *channel) {
+            recordDrop(topic, "topic/payload channel mismatch");
+            return;
+        }
+
+        // [데모 전용 엣지 치환] 사람을 차량으로 바꿔 넣는다. 위험 판정은 차량 중심이라
+        // (원칙 1: 차량이 없으면 전부 None) 사람만 걸어서는 경보가 하나도 울리지 않는데,
+        // 판정 규칙을 데모용으로 고치면 시연한 것과 배포하는 것이 달라진다. 그래서 핵심
+        // 로직(ThresholdRiskPolicy/Fuser/ZoneMapper)은 전혀 건드리지 않고 파이프라인
+        // 최외곽 -- 디코드/검증 직후, 집계기에 들어가기 전 -- 에서 cls 만 바꾼다.
+        // 하류는 이것이 원래부터 차량이었던 것처럼 처리한다.
+        if (demoPedestrianProxy_) {
+            for (veda::TopViewObject& object : frame.objects) {
+                if (object.cls == veda::ObjectClass::Human) {
+                    object.cls = veda::ObjectClass::Vehicle;
+                }
+            }
+        }
+
+        FrameCallback callback;
+        {
+            std::lock_guard lock(callbackMutex_);
+            callback = frameCallback_;
+        }
+        if (callback) {
+            try {
+                callback(frame);
+                receivedCount_.fetch_add(1, std::memory_order_relaxed);
+            } catch (...) {
+                recordDrop(topic, "frame callback exception");
+            }
+        }
+        return;
+    }
+
+    if (const auto channel = parseChannel(topic, "/alive")) {
+        if (payload != "0" && payload != "1") {
+            recordDrop(topic, "alive payload must be 0 or 1");
+            return;
+        }
+
+        AliveCallback callback;
+        {
+            std::lock_guard lock(callbackMutex_);
+            callback = aliveCallback_;
+        }
+        if (callback) {
+            try {
+                callback(*channel, payload == "1");
+            } catch (...) {
+                recordDrop(topic, "alive callback exception");
+            }
+        }
+        return;
+    }
+
+    recordDrop(topic, "unsupported topic");
+}
+
+void MqttChannelReceiver::handleConnection(bool connected) noexcept {
+    if (connected || !running_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    AliveCallback callback;
+    {
+        std::lock_guard lock(callbackMutex_);
+        callback = aliveCallback_;
+    }
+    if (!callback) {
+        return;
+    }
+
+    for (veda::ChannelId channel = 0; channel < channelCount_; ++channel) {
+        try {
+            callback(channel, false);
+        } catch (...) {
+            recordDrop("<connection>", "alive callback exception");
+            return;
+        }
+    }
+}
+
+std::optional<veda::ChannelId> MqttChannelReceiver::parseChannel(std::string_view topic,
+                                                                 std::string_view suffix) const noexcept {
+    if (!topic.starts_with(kChannelPrefix) || !topic.ends_with(suffix)) {
+        return std::nullopt;
+    }
+
+    const std::size_t numberBegin = kChannelPrefix.size();
+    const std::size_t numberLength = topic.size() - kChannelPrefix.size() - suffix.size();
+    if (numberLength == 0) {
+        return std::nullopt;
+    }
+
+    veda::ChannelId channel = -1;
+    const char* begin = topic.data() + numberBegin;
+    const char* end = begin + numberLength;
+    const auto [parsedEnd, error] = std::from_chars(begin, end, channel);
+    if (error != std::errc{} || parsedEnd != end || channel < 0 || channel >= channelCount_) {
+        return std::nullopt;
+    }
+    return channel;
+}
+
+void MqttChannelReceiver::recordDrop(std::string_view topic, const char* reason) noexcept {
+    const std::uint64_t count = droppedCount_.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (count == 1 || count % 100 == 0) {
+        logError(kIface, "드랍 누적 " + std::to_string(count) + "건, topic=" + std::string(topic) +
+                             ", 사유=" + std::string(reason != nullptr ? reason : "unknown"));
+    }
+}

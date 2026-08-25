@@ -35,7 +35,7 @@ public:
      * @brief   정규화된 bbox정보를 바탕으로 지면 접촉점으로 간주할 좌표를 추출
      *
      * @param   box 추출 대상 객체의 정규화된 bbox 정보
-     * @return  ImagePoint 이미지 평면 상의 추출된 지면 좌표 (월드 좌표 아님)
+     * @return  ImagePoint 이미지 평면 상의 추출된 지면 좌표 (로컬 좌표)
      */
     virtual domain::ImagePoint extract(const domain::NormBox& box) = 0;
 };

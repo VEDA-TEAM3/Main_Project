@@ -1,0 +1,47 @@
+name: Build Check
+
+on:
+  pull_request:
+    branches: [ "main", "develop" ]
+    paths:
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+
+jobs:
+  build-check:
+    name: 🔨 Build Check
+    runs-on: self-hosted  
+    env:
+      CC: gcc-10
+      CXX: g++-10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates g++-10 gcc-10 \
+          libopencv-dev libssl-dev nlohmann-json3-dev libmosquitto-dev
+
+      - name: Build all CMake projects
+        run: |
+          find . -type f -name "CMakeLists.txt" -not -path "*/\.github/*" -not -path "*/build/*" -not -path "*/third_party/*" | while read -r file; do
+            dir=$(dirname "$file")
+            echo "========================================="
+            echo "Building project in: $dir"
+            echo "========================================="
+            cmake -S "$dir" -B "$dir/build"
+            cmake --build "$dir/build" -j$(nproc)
+          done
+
+      - name: Send Slack Alert (Build)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Build 에러] 코드가 컴파일되지 않습니다. 오타나 문법 에러를 확인하세요!"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
