@@ -1,0 +1,51 @@
+name: Format Check
+
+on:
+  pull_request:
+    branches: [ "main", "develop" ]
+    paths:
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+
+jobs:
+  format-check:
+    name: 🎨 Format Check
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          FILES=$(find . \
+            -type f \( \
+              -name "*.c" -o \
+              -name "*.cpp" -o \
+              -name "*.h" \
+            \) \
+            -not -path "./build/*" \
+            -not -path "./device-rpi/kernel/*" \
+            -not -path "./.git/*")
+
+          if [ -z "$FILES" ]; then
+            echo "No C/C++ files found."
+            exit 0
+          fi
+
+          clang-format-18 --dry-run --Werror $FILES
+
+      - name: Send Slack Alert (Format)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          fields: repo,message,commit,author
+          text: "[Format 에러] 코드 띄어쓰기/포맷이 프로젝트 컨벤션에 어긋납니다. (Shift+Alt+F 사용 요망)"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

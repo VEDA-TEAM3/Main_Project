@@ -1,0 +1,493 @@
+#include "network/services/DeviceStatusService.h"
+
+#include <QDebug>
+#include <QMetaObject>
+#include <QMetaType>
+#include <QThread>
+#include <optional>
+#include <utility>
+
+#include "network/gateways/DeviceStatusGateway.h"
+#include "network/gateways/DeviceStatusGatewayFactory.h"
+#include "network/realtime/LatestBlurFrameBuffer.h"
+#include "network/realtime/LatestRiskFrameBuffer.h"
+
+namespace {
+constexpr int maximumRecentReportKeys = 128;
+constexpr int uiFlushIntervalMsec = 50;
+/// gateway thread가 quit()에 응답할 때까지 기다리는 한도. 정상 종료는 수십 ms면 끝난다
+constexpr unsigned long gatewayThreadStopTimeoutMsec = 5000;
+}  // namespace
+
+/**
+ * @brief                 장비 상태 service를 생성하고 UI 갱신 병합기를
+ * 준비합니다.
+ * @param gatewayFactory  장비 상태 gateway 생성 factory
+ * @param channelCount    설정된 전체 채널 수
+ * @param parent          Qt 객체 소유권을 연결할 부모 객체
+ */
+DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory, int channelCount,
+                                         QObject* parent)
+    : DeviceStatusService(std::move(gatewayFactory), std::make_shared<LatestBlurFrameBuffer>(),
+                          std::make_shared<LatestRiskFrameBuffer>(), channelCount, parent) {}
+
+/**
+ * @brief                  장비 상태 service를 교체 가능한 실시간 프레임 버퍼와
+ * 함께 생성합니다.
+ * @param gatewayFactory   장비 상태 gateway 생성 factory
+ * @param blurFrameBuffer  채널별 최신 블러 프레임 버퍼
+ * @param riskFrameBuffer  최신 위험 프레임 버퍼
+ * @param channelCount     설정된 전체 채널 수
+ * @param parent           Qt 객체 소유권을 연결할 부모 객체
+ */
+DeviceStatusService::DeviceStatusService(std::shared_ptr<DeviceStatusGatewayFactory> gatewayFactory,
+                                         std::shared_ptr<BlurFrameBuffer> blurFrameBuffer,
+                                         std::shared_ptr<RiskFrameBuffer> riskFrameBuffer, int channelCount,
+                                         QObject* parent)
+    : QObject(parent),
+      gatewayFactory_(std::move(gatewayFactory)),
+      blurFrameBuffer_(blurFrameBuffer ? std::move(blurFrameBuffer) : std::make_shared<LatestBlurFrameBuffer>()),
+      riskFrameBuffer_(riskFrameBuffer ? std::move(riskFrameBuffer) : std::make_shared<LatestRiskFrameBuffer>()),
+      channelCount_(qMax(0, channelCount)) {
+    qRegisterMetaType<DeviceOutputState>("DeviceOutputState");
+    qRegisterMetaType<DeviceStatusReport>("DeviceStatusReport");
+    qRegisterMetaType<DeviceChannelStatus>("DeviceChannelStatus");
+    qRegisterMetaType<QVector<DeviceChannelStatus>>("QVector<DeviceChannelStatus>");
+    qRegisterMetaType<RiskFrameData>("RiskFrameData");
+    qRegisterMetaType<BlurRegionData>("BlurRegionData");
+    qRegisterMetaType<BlurFrameData>("BlurFrameData");
+    qRegisterMetaType<CentralEventData>("CentralEventData");
+
+    uiFlushTimer_.setInterval(uiFlushIntervalMsec);
+    uiFlushTimer_.setSingleShot(true);
+    uiFlushTimer_.setTimerType(Qt::CoarseTimer);
+    connect(&uiFlushTimer_, &QTimer::timeout, this, &DeviceStatusService::flushPendingStatuses);
+}
+
+/**
+ * @brief   장비 상태 gateway와 worker thread를 종료합니다.
+ */
+DeviceStatusService::~DeviceStatusService() { stop(); }
+
+/**
+ * @brief   gateway worker thread를 구성하고 상태 수신을 시작합니다.
+ */
+void DeviceStatusService::start() {
+    if (gatewayThread_) {
+        return;
+    }
+
+    setupGateway();
+
+    if (gateway_ && gatewayThread_) {
+        gatewayThread_->start();
+    }
+}
+
+/**
+ * @brief   gateway 수신을 중지하고 worker thread를 안전하게 정리합니다.
+ */
+void DeviceStatusService::stop() {
+    uiFlushTimer_.stop();
+    pendingStatuses_.clear();
+    blurFrameBuffer_->clear();
+    riskFrameBuffer_->clear();
+
+    if (!gatewayThread_) {
+        return;
+    }
+
+    if (gateway_ && gatewayThread_->isRunning()) {
+        DeviceStatusGateway* gateway = gateway_.get();
+        QThread* serviceThread = thread();
+        const bool stopped = QMetaObject::invokeMethod(
+            gateway,
+            [gateway, serviceThread]() {
+                gateway->stop();
+                gateway->moveToThread(serviceThread);
+            },
+            Qt::BlockingQueuedConnection);
+
+        if (!stopped) {
+            qWarning() << "[DeviceStatusService] Failed to stop gateway in its "
+                          "worker thread";
+        }
+    }
+
+    gatewayThread_->quit();
+    if (!gatewayThread_->wait(gatewayThreadStopTimeoutMsec)) {
+        // ponytail: 종료 경로 전용 최후 수단. terminate()는 스레드를 임의 지점에서 끊어 뮤텍스와
+        // 힙을 정리하지 못한 채 남긴다. 그래도 여기서 무한히 기다리는 편이 더 나쁘다 - 관제 PC에
+        // 창 없는 좀비 프로세스가 남고, 다음 실행이 같은 clientId로 붙으면서 브로커가 앞 세션을
+        // 끊는 것을 반복한다. 정석은 gateway가 event loop를 막지 않게 고치는 것이고, 그때 지운다.
+        // terminate() 뒤의 wait()는 반드시 필요하다 - 스레드가 아직 도는 채로 QThread를 파괴하면
+        // Qt가 qFatal로 프로세스를 죽인다
+        qWarning() << "[DeviceStatusService] Gateway thread did not stop within" << gatewayThreadStopTimeoutMsec
+                   << "ms; terminating";
+        gatewayThread_->terminate();
+        gatewayThread_->wait();
+    }
+    gateway_.reset();
+    gatewayThread_.reset();
+    blurFrameBuffer_->clear();
+    riskFrameBuffer_->clear();
+}
+
+/**
+ * @brief   gateway를 전용 스레드로 이동하고 도메인 보고 signal을 연결합니다.
+ */
+void DeviceStatusService::setupGateway() {
+    if (!gatewayFactory_) {
+        return;
+    }
+
+    gatewayThread_ = std::make_shared<QThread>();
+    gateway_ = gatewayFactory_->create();
+
+    if (!gateway_) {
+        gatewayThread_.reset();
+        return;
+    }
+
+    if (!gateway_->moveToThread(gatewayThread_.get())) {
+        qWarning() << "[DeviceStatusService] Failed to move gateway to worker thread";
+        gateway_.reset();
+        gatewayThread_.reset();
+        return;
+    }
+
+    connect(gatewayThread_.get(), &QThread::started, gateway_.get(), &DeviceStatusGateway::start);
+    connect(gateway_.get(), &DeviceStatusGateway::reportReceived, this, &DeviceStatusService::handleReport,
+            Qt::QueuedConnection);
+    connect(
+        gateway_.get(), &DeviceStatusGateway::riskFrameReceived, this,
+        [this](RiskFrameData frame) { queueRiskFrame(std::move(frame)); }, Qt::DirectConnection);
+    connect(
+        gateway_.get(), &DeviceStatusGateway::blurFrameReceived, this,
+        [this](BlurFrameData frame) { queueBlurFrame(std::move(frame)); }, Qt::DirectConnection);
+    connect(gateway_.get(), &DeviceStatusGateway::centralEventReceived, this,
+            &DeviceStatusService::centralEventReceived, Qt::QueuedConnection);
+    connect(gateway_.get(), &DeviceStatusGateway::brokerConnectionChanged, this,
+            &DeviceStatusService::handleBrokerConnection, Qt::QueuedConnection);
+}
+
+/**
+ * @brief        MQTT worker에서 받은 블러 프레임을 채널별 최신값으로 병합합니다.
+ * @param frame  채널과 UTC timestamp 검증을 마친 블러 프레임
+ */
+void DeviceStatusService::queueBlurFrame(BlurFrameData frame) {
+    if (!blurFrameBuffer_->submit(std::move(frame))) {
+        return;
+    }
+
+    const bool invoked = QMetaObject::invokeMethod(this, [this]() { flushPendingBlurFrames(); }, Qt::QueuedConnection);
+    if (!invoked) {
+        blurFrameBuffer_->cancelPendingDelivery();
+        qWarning() << "[DeviceStatusService] Failed to schedule blur metadata delivery";
+    }
+}
+
+/**
+ * @brief UI 이벤트 루프에는 대기 중인 채널별 최신 블러 프레임만 전달합니다.
+ */
+void DeviceStatusService::flushPendingBlurFrames() {
+    QVector<BlurFrameData> frames = blurFrameBuffer_->takeLatestFrames();
+    for (BlurFrameData& frame : frames) {
+        emit blurFrameReceived(std::move(frame));
+    }
+}
+
+/**
+ * @brief        MQTT 작업 스레드에서 받은 위험 프레임을 최신값 버퍼에
+ * 병합합니다.
+ * @param frame  timestamp 정렬과 계약 검증을 통과한 위험 프레임
+ */
+void DeviceStatusService::queueRiskFrame(RiskFrameData frame) {
+    if (!riskFrameBuffer_->submit(std::move(frame))) {
+        return;
+    }
+
+    const bool invoked = QMetaObject::invokeMethod(this, [this]() { flushPendingRiskFrame(); }, Qt::QueuedConnection);
+    if (!invoked) {
+        riskFrameBuffer_->cancelPendingDelivery();
+        qWarning() << "[DeviceStatusService] Failed to schedule risk metadata delivery";
+    }
+}
+
+/** @brief UI 이벤트 루프에는 대기 중인 가장 최신 위험 프레임 하나만 전달합니다.
+ */
+void DeviceStatusService::flushPendingRiskFrame() {
+    std::optional<RiskFrameData> frame = riskFrameBuffer_->takeLatestFrame();
+    if (frame.has_value()) {
+        emit riskFrameReceived(std::move(*frame));
+    }
+}
+
+void DeviceStatusService::handleBrokerConnection(bool connected) {
+    emit brokerConnectionChanged(connected);
+
+    if (connected) {
+        return;
+    }
+
+    for (int channelIndex = 0; channelIndex < channelCount_; ++channelIndex) {
+        DeviceChannelStatus status = channelStatuses_.value(channelIndex);
+        status.channelIndex = channelIndex;
+        status.sensorHealth = SensorHealth::Unknown;
+        status.feedbackHealth = DeviceFeedbackHealth::Unknown;
+        status.sensorDetail = QStringLiteral("broker_disconnected");
+        channelStatuses_.insert(channelIndex, status);
+        queueChannelStatus(std::move(status));
+    }
+}
+
+/**
+ * @brief         gateway가 변환한 상태 보고를 종류별 정책에 따라 처리합니다.
+ * @param report  수신된 controller 또는 HW 피드백 보고
+ */
+void DeviceStatusService::handleReport(DeviceStatusReport report) {
+    if (isDuplicateReport(report)) {
+        return;
+    }
+
+    switch (report.type) {
+        case DeviceStatusReportType::ChannelStatusSnapshot:
+            handleChannelStatusSnapshot(report);
+            return;
+        case DeviceStatusReportType::ControllerOnline:
+            return;
+        case DeviceStatusReportType::SensorOnline:
+            handleSensorHealth(report, SensorHealth::Online);
+            return;
+        case DeviceStatusReportType::SensorOffline:
+            handleSensorHealth(report, SensorHealth::Offline);
+            return;
+        case DeviceStatusReportType::FeedbackConfirmed:
+            handleConfirmedFeedback(report);
+            return;
+        case DeviceStatusReportType::FeedbackAcknowledged:
+            handleAcknowledgedFeedback(report);
+            return;
+        case DeviceStatusReportType::FeedbackFailed:
+            handleFailedFeedback(report);
+            return;
+        case DeviceStatusReportType::ProtocolError:
+            return;
+    }
+}
+
+/**
+ * @brief         채널 상태 스냅샷에서 HW 연결 상태와 유효한 출력 상태를 함께
+ * 반영합니다.
+ * @param report  shared/Contract.h의 ChannelStatus 규약으로 검증된 보고
+ */
+void DeviceStatusService::handleChannelStatusSnapshot(const DeviceStatusReport& report) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
+        return;
+    }
+
+    DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    status.channelIndex = report.channelIndex;
+    status.sensorHealth = report.hardwareAlive ? SensorHealth::Online : SensorHealth::Offline;
+    status.sensorDetail =
+        report.hardwareAlive ? QStringLiteral("hardware_alive") : QStringLiteral("hardware_unavailable");
+    status.detail = status.sensorDetail;
+
+    if (!report.hardwareAlive || !report.hasOutputState) {
+        status.feedbackHealth = DeviceFeedbackHealth::Unknown;
+    } else if (!isStaleConfirmedState(status, report.sourceTimestamp)) {
+        // 늦게 도착한 지난 스냅샷은 출력 상태만 무시하고 HW 연결 상태는 그대로 반영한다
+        status.outputs = report.outputs;
+        status.hasConfirmedState = true;
+        status.feedbackHealth = DeviceFeedbackHealth::Confirmed;
+        status.confirmedSourceTimestamp = report.sourceTimestamp;
+    }
+
+    storeChannelStatus(std::move(status));
+}
+
+void DeviceStatusService::handleSensorHealth(const DeviceStatusReport& report, SensorHealth health) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
+        return;
+    }
+
+    DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    status.channelIndex = report.channelIndex;
+    status.sensorHealth = health;
+    status.sensorDetail = report.detail;
+
+    storeChannelStatus(std::move(status));
+}
+
+void DeviceStatusService::handleAcknowledgedFeedback(const DeviceStatusReport& report) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
+        return;
+    }
+
+    DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    status.channelIndex = report.channelIndex;
+    status.detail = report.detail;
+
+    storeChannelStatus(std::move(status));
+}
+
+/**
+ * @brief         성공적으로 확인된 실제 HW 출력만 마지막 확정 상태로
+ * 저장합니다.
+ * @param report  state가 검증된 성공 피드백 보고
+ */
+void DeviceStatusService::handleConfirmedFeedback(const DeviceStatusReport& report) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_ || !report.hasOutputState) {
+        return;
+    }
+
+    DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    if (isStaleConfirmedState(status, report.sourceTimestamp)) {
+        return;
+    }
+
+    status.channelIndex = report.channelIndex;
+    status.outputs = report.outputs;
+    status.hasConfirmedState = true;
+    status.feedbackHealth = DeviceFeedbackHealth::Confirmed;
+    status.detail = report.detail;
+    status.confirmedSourceTimestamp = report.sourceTimestamp;
+
+    storeChannelStatus(std::move(status));
+}
+
+/**
+ * @brief         실패 Payload의 state를 무시하고 마지막 확정 출력 상태를
+ * 유지합니다.
+ * @param report  UART timeout 등 상태 확인 실패 보고
+ */
+void DeviceStatusService::handleFailedFeedback(const DeviceStatusReport& report) {
+    if (report.channelIndex < 0 || report.channelIndex >= channelCount_) {
+        return;
+    }
+
+    DeviceChannelStatus status = channelStatuses_.value(report.channelIndex);
+    status.channelIndex = report.channelIndex;
+    status.feedbackHealth = DeviceFeedbackHealth::Failed;
+    status.detail = report.detail;
+
+    storeChannelStatus(std::move(status));
+}
+
+/**
+ * @brief         최신 상태를 저장하고 화면 표시값이 바뀐 경우에만 UI 갱신을 예약합니다.
+ * @param status  저장할 채널 상태
+ */
+void DeviceStatusService::storeChannelStatus(DeviceChannelStatus status) {
+    const DeviceChannelStatus previousStatus = channelStatuses_.value(status.channelIndex);
+    channelStatuses_.insert(status.channelIndex, status);
+    if (!hasSameDisplayedState(previousStatus, status)) {
+        queueChannelStatus(std::move(status));
+    }
+}
+
+/**
+ * @brief         채널별 최신 상태를 UI 반영 대기열에 저장합니다.
+ * @param status  UI에 표시할 출력 및 피드백 상태
+ */
+void DeviceStatusService::queueChannelStatus(DeviceChannelStatus status) {
+    // 키를 먼저 꺼낸다. 한 호출 안에서 인자 평가 순서는 정해져 있지 않으므로, QMap::insert가
+    // 언젠가 rvalue 오버로드를 갖게 되면 이미 옮겨진 status에서 channelIndex를 읽을 수 있다
+    const int channelIndex = status.channelIndex;
+    pendingStatuses_.insert(channelIndex, std::move(status));
+    scheduleUiFlush();
+}
+
+/**
+ * @brief   아직 예약되지 않은 경우에만 UI 병합 갱신을 예약합니다.
+ */
+void DeviceStatusService::scheduleUiFlush() {
+    if (!pendingStatuses_.isEmpty() && !uiFlushTimer_.isActive()) {
+        uiFlushTimer_.start();
+    }
+}
+
+/**
+ * @brief   채널별 최신 상태를 하나의 UI frame으로 묶어 전달합니다.
+ */
+void DeviceStatusService::flushPendingStatuses() {
+    if (pendingStatuses_.isEmpty()) {
+        return;
+    }
+
+    QVector<DeviceChannelStatus> statuses;
+    statuses.reserve(pendingStatuses_.size());
+
+    for (auto iterator = pendingStatuses_.cbegin(); iterator != pendingStatuses_.cend(); ++iterator) {
+        statuses.append(iterator.value());
+    }
+
+    pendingStatuses_.clear();
+    emit channelStatusesReceived(std::move(statuses));
+}
+
+/**
+ * @brief         QoS 1 재전송으로 이미 처리한 보고인지 확인합니다.
+ * @param report  중복 여부를 검사할 상태 보고
+ * @return        최근 처리 key와 동일하면 true
+ */
+bool DeviceStatusService::isDuplicateReport(const DeviceStatusReport& report) {
+    const QString key = reportKey(report);
+
+    if (key.isEmpty()) {
+        return false;
+    }
+
+    if (recentReportKeys_.contains(key)) {
+        return true;
+    }
+
+    rememberReportKey(key);
+    return false;
+}
+
+/**
+ * @brief                  이미 반영한 확정 출력보다 오래된 보고인지 봅니다.
+ * @param status           채널의 현재 상태
+ * @param sourceTimestamp  들어온 보고의 원본 시각
+ * @return                 더 오래된 보고이면 true
+ *
+ * @details 재전송이나 지연 배달로 지난 상태가 최신 상태 뒤에 도착하면 패널이 과거로
+ *          되돌아간다. 같은 timestamp는 받아들인다 - 완전히 같은 재전송은 이미
+ *          isDuplicateReport가 걸러내므로, 여기까지 온 동일 timestamp는 내용이 다르다.
+ */
+bool DeviceStatusService::isStaleConfirmedState(const DeviceChannelStatus& status, qint64 sourceTimestamp) {
+    return status.hasConfirmedState && sourceTimestamp > 0 && sourceTimestamp < status.confirmedSourceTimestamp;
+}
+
+/**
+ * @brief         수정할 수 없는 Payload 필드 조합으로 중복 판별 key를
+ * 생성합니다.
+ * @param report  key를 만들 상태 보고
+ * @return        timestamp가 없으면 빈 문자열, 있으면 bounded cache용 key
+ */
+QString DeviceStatusService::reportKey(const DeviceStatusReport& report) const {
+    if (report.sourceTimestamp <= 0) {
+        return {};
+    }
+
+    return QStringLiteral("%1|%2|%3|%4|%5")
+        .arg(report.node)
+        .arg(report.channelIndex)
+        .arg(report.sourceTimestamp)
+        .arg(static_cast<int>(report.type))
+        .arg(report.detail);
+}
+
+/**
+ * @brief      최근 중복 판별 key를 제한 개수만 보관합니다.
+ * @param key  새로 처리한 보고 key
+ */
+void DeviceStatusService::rememberReportKey(QString key) {
+    recentReportKeys_.insert(key);
+    reportKeyOrder_.enqueue(std::move(key));
+
+    while (reportKeyOrder_.size() > maximumRecentReportKeys) {
+        recentReportKeys_.remove(reportKeyOrder_.dequeue());
+    }
+}

@@ -1,0 +1,113 @@
+#pragma once
+
+/**
+ * @file    MqttChannelReceiver.h
+ * @brief   MqttTransport를 통해 TopViewFrame과 채널별 alive 상태를 수신
+ *
+ * @note [ Transport 공유 ]
+ * MqttTransport는 이 receiver와 MQTT sink(발행 경로)가 함께 쓰는 하나의 mosquitto
+ * 클라이언트/연결임 (MqttTransport.h 참고). 반드시 AppContext가 만든 동일 인스턴스를
+ * 주입받아야 하며, 여기서 새 인스턴스를 만들면 커넥션(TLS 포함)이 두 개로 늘어나
+ * 지연시간과 리소스를 낭비하게 됨 -> 그래서 stop()도 transport 자체는 건드리지 않고
+ * 핸들러 등록만 해제함 (transport 수명주기는 공유 소유자인 AppContext/Controller 몫)
+ *
+ * @note [ 최초 연결 실패 시 재시도 ]
+ * IChannelReceiver.h의 계약대로 연결 실패는 예외를 던지지 않고 구현체 내부에서 재시도함.
+ * start() 시점에 transport 구독/시작이 바로 성공하면 재시도 스레드는 만들지 않고,
+ * 실패했을 때만 백그라운드 스레드를 띄워 mqttReceiverRetryIntervalMs 간격으로 재시도함
+ * (mosquitto의 자동 재접속은 "한 번 연결된 뒤 끊긴" 경우만 커버하므로, 최초 연결 자체가
+ * 실패하는 경우는 별도로 재시도해야 함)
+ */
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
+
+#include "interfaces/IChannelReceiver.h"
+
+class MqttTransport;
+
+class MqttChannelReceiver final : public IChannelReceiver {
+public:
+    /**
+     * @param transport         sink와 공유하는 MQTT 연결 (null이면 start()가 실패하고 로그만 남김)
+     * @param channelCount      frame.ch / topic 채널 번호의 유효 범위 [0, channelCount) (AppConfig::channelCount)
+     * @param retryIntervalMs   최초 연결 실패 시 재시도 간격 (AppConfig::mqttReceiverRetryIntervalMs)
+     * @param demoPedestrianProxy [데모 전용] true 면 수신한 Human 을 Vehicle 로 치환
+     *                            (AppConfig::demoPedestrianProxy). 기본 false — 기존 호출부는 그대로 컴파일된다
+     */
+    MqttChannelReceiver(std::shared_ptr<MqttTransport> transport, int channelCount, std::uint64_t retryIntervalMs,
+                        bool demoPedestrianProxy = false);
+    ~MqttChannelReceiver() override;
+
+    MqttChannelReceiver(const MqttChannelReceiver&) = delete;
+    MqttChannelReceiver& operator=(const MqttChannelReceiver&) = delete;
+
+    void setCallback(FrameCallback callback) override;
+    void setAliveCallback(AliveCallback callback) override;
+    void start() override;
+    void stop() override;
+
+    std::uint64_t receivedCount() const noexcept;
+    std::uint64_t droppedCount() const noexcept;
+
+private:
+    bool tryConnect() noexcept;
+    void retryLoop() noexcept;
+
+    void handleMessage(std::string_view topic, std::string_view payload) noexcept;  ///< mosquitto 스레드: enqueue 만
+    void pipelineLoop() noexcept;                                                   ///< PipelineWorker 스레드 루프
+    void processMessage(std::string_view topic, std::string_view payload) noexcept;  ///< 디코드+파이프라인(워커에서)
+    void handleConnection(bool connected) noexcept;
+    std::optional<veda::ChannelId> parseChannel(std::string_view topic, std::string_view suffix) const noexcept;
+    void recordDrop(std::string_view topic, const char* reason) noexcept;
+
+    std::shared_ptr<MqttTransport> transport_;
+    int channelCount_;
+    std::chrono::milliseconds retryInterval_;
+    bool demoPedestrianProxy_;  ///< [데모 전용] processMessage 에서 Human -> Vehicle 치환 (생성 후 불변)
+
+    mutable std::mutex callbackMutex_;
+    FrameCallback frameCallback_;
+    AliveCallback aliveCallback_;
+    std::atomic_bool running_{false};
+    std::atomic_uint64_t receivedCount_{0};
+    std::atomic_uint64_t droppedCount_{0};
+
+    std::mutex retryMutex_;
+    std::condition_variable retryCv_;
+    std::thread retryThread_;
+
+    /// @name 네트워크 스레드 분리 (mosquitto 콜백 -> 큐 -> PipelineWorker)
+    /// @details mosquitto 콜백은 payload 복사+enqueue 만 하고, 무거운 디코드/fusion/dispatch 는 워커에서.
+    ///          단일 생산자(mosquitto 네트워크 스레드) - 단일 소비자(pipelineThread_)라 SPSC 지만,
+    ///          유휴 시 CPU 를 태우지 않도록(라즈베리파이) lock-free 대신 mutex+CV 큐를 씀 (Principle #7).
+    /// @{
+    struct RawMessage {
+        std::string topic;
+        std::string payload;
+
+        std::size_t byteSize() const noexcept { return topic.size() + payload.size(); }
+    };
+    static constexpr std::size_t kMaxTopViewPayloadBytes = 64U * 1024U;
+    static constexpr std::size_t kMaxQueuedPayloadBytes = 8U * 1024U * 1024U;
+    static constexpr std::size_t kMaxQueuedMessages =
+        4096;  ///< 초과 시 drop-oldest (파이프라인 정체 시 무한 증가 방지)
+    std::mutex queueMutex_;
+    std::condition_variable queueCv_;
+    std::deque<RawMessage> queue_;  ///< queueMutex_ 로 보호
+    std::size_t queuedBytes_ = 0;    ///< queueMutex_ 로 보호 (topic + payload 합계)
+    bool queueStopping_ = false;    ///< queueMutex_ 로 보호
+    std::thread pipelineThread_;
+    std::atomic_uint64_t queueDroppedCount_{0};
+    /// @}
+};

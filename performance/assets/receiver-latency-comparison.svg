@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650" role="img" aria-labelledby="title desc">
+  <title id="title">MqttChannelReceiver latency comparison</title>
+  <desc id="desc">Log scale comparison of average processing time before and after TP-210.</desc>
+  <rect width="1120" height="650" rx="18" fill="#0f172a"/>
+  <text x="55" y="55" fill="#f8fafc" font-family="sans-serif" font-size="28" font-weight="700">MqttChannelReceiver — 평균 처리시간 비교</text>
+  <text x="55" y="86" fill="#94a3b8" font-family="sans-serif" font-size="16">001216d vs 8ca541e · 로그 스케일 · 낮을수록 좋음</text>
+
+  <g font-family="sans-serif" font-size="15" fill="#e2e8f0">
+    <text x="55" y="157">Normal 1 object</text>
+    <text x="55" y="267">Normal 256 objects</text>
+    <text x="55" y="377">Oversized 64KiB+1</text>
+    <text x="55" y="487">Oversized 1MiB</text>
+  </g>
+
+  <g font-family="sans-serif" font-size="13" fill="#94a3b8">
+    <text x="220" y="605">0.1us</text>
+    <text x="360" y="605">1us</text>
+    <text x="500" y="605">10us</text>
+    <text x="640" y="605">100us</text>
+    <text x="780" y="605">1ms</text>
+    <text x="920" y="605">10ms</text>
+  </g>
+  <g stroke="#334155" stroke-width="1">
+    <line x1="230" y1="110" x2="230" y2="575"/>
+    <line x1="370" y1="110" x2="370" y2="575"/>
+    <line x1="510" y1="110" x2="510" y2="575"/>
+    <line x1="650" y1="110" x2="650" y2="575"/>
+    <line x1="790" y1="110" x2="790" y2="575"/>
+    <line x1="930" y1="110" x2="930" y2="575"/>
+  </g>
+
+  <g>
+    <rect x="230" y="125" width="278" height="28" rx="6" fill="#f97316"/>
+    <rect x="230" y="160" width="277" height="28" rx="6" fill="#14b8a6"/>
+    <rect x="230" y="235" width="581" height="28" rx="6" fill="#f97316"/>
+    <rect x="230" y="270" width="582" height="28" rx="6" fill="#14b8a6"/>
+    <rect x="230" y="345" width="586" height="28" rx="6" fill="#f97316"/>
+    <rect x="230" y="380" width="4" height="28" rx="2" fill="#14b8a6"/>
+    <rect x="230" y="455" width="763" height="28" rx="6" fill="#f97316"/>
+    <rect x="230" y="490" width="4" height="28" rx="2" fill="#14b8a6"/>
+  </g>
+
+  <g font-family="sans-serif" font-size="14" font-weight="700">
+    <text x="520" y="146" fill="#fdba74">이전 9.808 us</text>
+    <text x="520" y="181" fill="#5eead4">최신 9.786 us</text>
+    <text x="824" y="256" fill="#fdba74">이전 1,441.706 us</text>
+    <text x="824" y="291" fill="#5eead4">최신 1,459.354 us</text>
+    <text x="828" y="366" fill="#fdba74">이전 1,557.004 us</text>
+    <text x="247" y="401" fill="#5eead4">최신 0.107 us · 14,500×</text>
+    <text x="1005" y="476" text-anchor="end" fill="#fdba74">이전 28,852.878 us</text>
+    <text x="247" y="511" fill="#5eead4">최신 0.108 us · 268,199×</text>
+  </g>
+
+  <rect x="55" y="565" width="18" height="11" rx="3" fill="#f97316"/>
+  <text x="82" y="576" fill="#cbd5e1" font-family="sans-serif" font-size="13">001216d</text>
+  <rect x="155" y="565" width="18" height="11" rx="3" fill="#14b8a6"/>
+  <text x="182" y="576" fill="#cbd5e1" font-family="sans-serif" font-size="13">8ca541e</text>
+</svg>

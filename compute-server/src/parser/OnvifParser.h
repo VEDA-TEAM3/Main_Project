@@ -1,0 +1,46 @@
+#pragma once
+
+/**
+ * @file    OnvifParser.h
+ * @brief   ONVIF 메타데이터 파서
+ */
+
+#include "domain/ChannelFrame.h"
+#include "domain/RawPacket.h"
+#include "interfaces/IMetadataParser.h"
+
+/**
+ * @brief 수신된 ONVIF 원본 XML 메타데이터를 파싱
+ */
+class OnvifParser : public IMetadataParser {
+public:
+    /**
+     * @param   edgeEpsilon bbox가 프레임 경계에 닿았다고 볼 정규화 좌표 오차율
+     *                      (AppConfig::edgeEpsilon)
+     *
+     * @note    경계 판정은 이 파서에서만 수행함
+     */
+    explicit OnvifParser(double edgeEpsilon = 0.002);
+
+    /**
+     * @brief   ONVIF 메타데이터 원본 패킷을 파싱하여 내부 파이프라인용 데이터로 변환
+     *
+     * @param   raw ONVIF XML 원본 바이트와 메타데이터가 담긴 원시 패킷
+     * @return  domain::ChannelFrame 추출된 객체 정보가 담긴 프레임
+     *          오류나 예외 발생 시 파이프라인 중단을 막기 위해 빈 프레임을 반환
+     */
+    domain::ChannelFrame parse(const domain::RawPacket& raw) override;
+
+private:
+    double edgeEpsilon_;
+
+    /**
+     * @brief <tt:Frame>을 못 찾은 누적 횟수 (rate-limit 및 진단용)
+     *
+     * @details
+     * 이 실패는 한 프레임이 깨졌다보다 엉뚱한 스트림을 먹고 있다는 신호일 때가 많다.
+     * (예: 메타데이터가 아닌 트랙의 RTP, RTP 헤더 길이 오산으로 어긋난 페이로드)
+     * 그런 상황에서는 패킷마다 실패하므로 rate-limit 없이 찍으면 로그가 도배된다.
+     */
+    std::uint64_t noFrameTagCount_ = 0;
+};
