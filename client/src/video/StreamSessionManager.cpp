@@ -1,0 +1,462 @@
+#include "video/StreamSessionManager.h"
+
+#include <QDateTime>
+#include <QDebug>
+#include <QMetaObject>
+#include <QThread>
+#include <QTimer>
+#include <utility>
+
+#include "network/realtime/LatestBlurFrameBuffer.h"
+#include "video/StreamReceiver.h"
+#include "video/StreamReceiverFactory.h"
+
+namespace {
+/// 정해 둔 출처 채널이 이만큼 조용하면 다시 뽑는다. 서버가 발행 토픽을 바꿔도 블러가 죽지 않게 한다
+constexpr qint64 blurSourceReelectGapMsec = 3000;
+}  // namespace
+
+/**
+ * @brief                  스트림 세션 관리자를 생성합니다.
+ * @param receiverFactory  채널별 StreamReceiver 생성 factory
+ * @param parent           Qt 객체 소유권을 연결할 부모 객체
+ */
+StreamSessionManager::StreamSessionManager(std::shared_ptr<StreamReceiverFactory> receiverFactory,
+                                           int receiverStartSpacingMsec, QObject* parent)
+    : QObject(parent),
+      receiverFactory_(std::move(receiverFactory)),
+      receiverStartSpacingMsec_(receiverStartSpacingMsec) {}
+
+/**
+ * @brief 실행 중인 모든 수신기와 worker thread를 정리합니다.
+ */
+StreamSessionManager::~StreamSessionManager() { stop(); }
+
+/**
+ * @brief          출력 창과 스트림 설정을 등록합니다.
+ * @param bindings 채널별 StreamConfig와 출력 WId 목록
+ */
+void StreamSessionManager::configure(QVector<StreamOutputBinding> bindings) {
+    const bool restartAfterConfigure = startRequested_;
+
+    stopWorkers();
+
+    bindings_ = std::move(bindings);
+    createWorkers();
+
+    if (restartAfterConfigure) {
+        start();
+    }
+}
+
+/**
+ * @brief 구성된 수신기들을 현재 시작 정책에 따라 실행합니다.
+ */
+void StreamSessionManager::start() {
+    if (startRequested_) {
+        return;
+    }
+
+    if (receiverWorkers_.isEmpty()) {
+        createWorkers();
+    }
+
+    if (receiverWorkers_.isEmpty()) {
+        qWarning() << "[StreamSessionManager] No stream receiver is configured";
+        return;
+    }
+
+    startRequested_ = true;
+    startReceiverSequentially(0);
+}
+
+/**
+ * @brief 모든 수신기를 정지하고 worker thread를 종료합니다.
+ */
+void StreamSessionManager::stop() {
+    if (!startRequested_ && receiverWorkers_.isEmpty()) {
+        return;
+    }
+
+    stopWorkers();
+}
+
+void StreamSessionManager::submitBlurFrame(BlurFrameData frame) {
+    if (frame.channelIndex < 0) {
+        return;
+    }
+
+    QString sourceUrl;
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex == frame.channelIndex) {
+            sourceUrl = worker.config.url;
+            break;
+        }
+    }
+    if (sourceUrl.isEmpty()) {
+        return;
+    }
+
+    // 같은 카메라를 여러 구역이 공유하면 채널이 달라도 URL이 같다. 아래 fan-out은 그때 한쪽
+    // 채널로만 오는 metadata를 공유 수신기 전체에 나눠 주려고 있는 것인데, 서버가 두 채널
+    // 토픽에 모두 발행하면 같은 수신기가 서로 다른 두 metadata 흐름을 함께 받게 된다.
+    // BlurProcessor의 이력에는 채널 구분이 없어서 두 흐름이 섞이고, 조회가 그 사이를 오가며
+    // 검출이 튄다. URL마다 처음 받은 채널 하나만 출처로 삼는다.
+    //
+    // 그 채널이 조용해지면 다시 뽑는다. 서버가 어느 토픽으로 내든 하나는 잡히게 하려는 것이고,
+    // 고정해 두면 발행 토픽이 바뀌었을 때 블러가 조용히 꺼진다
+    const qint64 arrivalMsec = QDateTime::currentMSecsSinceEpoch();
+    const auto sourceIterator = blurSourceChannelByUrl_.constFind(sourceUrl);
+    const bool hasSource = sourceIterator != blurSourceChannelByUrl_.cend();
+    const qint64 lastArrivalMsec = blurSourceArrivalMsecByUrl_.value(sourceUrl, 0);
+    const bool sourceWentQuiet = hasSource && arrivalMsec - lastArrivalMsec > blurSourceReelectGapMsec;
+    if (hasSource && !sourceWentQuiet && sourceIterator.value() != frame.channelIndex) {
+        return;
+    }
+
+    blurSourceChannelByUrl_.insert(sourceUrl, frame.channelIndex);
+    blurSourceArrivalMsecByUrl_.insert(sourceUrl, arrivalMsec);
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.url != sourceUrl || !worker.receiver || !worker.thread || !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        const auto frameBuffer = worker.blurFrameBuffer;
+        if (!frameBuffer) {
+            continue;
+        }
+
+        BlurFrameData routedFrame = frame;
+        routedFrame.channelIndex = worker.config.channelIndex;
+        if (!frameBuffer->submit(std::move(routedFrame))) {
+            continue;
+        }
+
+        const bool invoked = QMetaObject::invokeMethod(
+            receiver.get(),
+            [receiver, frameBuffer]() {
+                QVector<BlurFrameData> frames = frameBuffer->takeLatestFrames();
+                for (BlurFrameData& pendingFrame : frames) {
+                    receiver->setBlurFrame(std::move(pendingFrame));
+                }
+            },
+            Qt::QueuedConnection);
+        if (!invoked) {
+            frameBuffer->cancelPendingDelivery();
+            qWarning() << "[StreamSessionManager] Failed to deliver blur metadata for channel"
+                       << worker.config.channelIndex;
+        }
+    }
+}
+
+/**
+ * @brief                     모든 채널 수신기의 블러 대상 유형을 설정합니다.
+ * @param faceEnabled         얼굴 블러 활성화 여부
+ * @param licensePlateEnabled 차량 번호판 블러 활성화 여부
+ */
+void StreamSessionManager::setBlurTargetsEnabled(bool faceEnabled, bool licensePlateEnabled) {
+    faceBlurEnabled_ = faceEnabled;
+    licensePlateBlurEnabled_ = licensePlateEnabled;
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (!worker.receiver || !worker.thread || !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(),
+            [receiver, faceEnabled, licensePlateEnabled]() {
+                receiver->setBlurTargetsEnabled(faceEnabled, licensePlateEnabled);
+            },
+            Qt::QueuedConnection);
+    }
+}
+
+/**
+ * @brief          모든 채널 worker에 동일한 영상 전처리 설정을 비동기로 전달합니다.
+ * @param settings 적용할 영상 전처리 설정
+ */
+void StreamSessionManager::setVideoPreprocessingSettings(const VideoPreprocessingSettings& settings) {
+    preprocessingSettings_ = settings;
+    preprocessingSettingsByChannel_.clear();
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (!worker.receiver || !worker.thread || !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, settings]() { receiver->setVideoPreprocessingSettings(settings); },
+            Qt::QueuedConnection);
+    }
+}
+
+/**
+ * @brief              지정한 채널 worker에 영상 전처리 설정을 비동기로 전달합니다.
+ * @param channelIndex 적용할 0 기반 채널 인덱스
+ * @param settings     적용할 영상 전처리 설정
+ */
+void StreamSessionManager::setVideoPreprocessingSettings(int channelIndex, const VideoPreprocessingSettings& settings) {
+    preprocessingSettingsByChannel_.insert(channelIndex, settings);
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex != channelIndex || !worker.receiver || !worker.thread ||
+            !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, settings]() { receiver->setVideoPreprocessingSettings(settings); },
+            Qt::QueuedConnection);
+        break;
+    }
+}
+
+/**
+ * @brief              지정한 채널의 디코더 이후 영상 처리와 출력을 전환합니다.
+ * @param channelIndex 적용할 0 기반 채널 인덱스
+ * @param active       true면 화면 출력, false면 RTSP와 디코더만 워밍 상태로 유지
+ */
+void StreamSessionManager::setPresentationActive(int channelIndex, bool active) {
+    presentationActiveByChannel_.insert(channelIndex, active);
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        if (worker.config.channelIndex != channelIndex || !worker.receiver || !worker.thread ||
+            !worker.thread->isRunning()) {
+            continue;
+        }
+
+        const auto receiver = worker.receiver;
+        QMetaObject::invokeMethod(
+            receiver.get(), [receiver, active]() { receiver->setPresentationActive(active); }, Qt::QueuedConnection);
+        break;
+    }
+}
+
+/**
+ * @brief 등록된 출력 정보에 맞춰 receiver와 전용 worker thread를 생성합니다.
+ */
+void StreamSessionManager::createWorkers() {
+    if (!receiverWorkers_.isEmpty()) {
+        return;
+    }
+
+    if (!receiverFactory_) {
+        qWarning() << "[StreamSessionManager] Stream receiver factory is not configured";
+        return;
+    }
+
+    receiverWorkers_.reserve(bindings_.size());
+
+    for (const StreamOutputBinding& binding : bindings_) {
+        const StreamConfig& config = binding.config;
+
+        if (!config.enabled) {
+            continue;
+        }
+
+        if (binding.outputWindowHandle == 0) {
+            const QString errorText = QStringLiteral("Output window handle is invalid");
+
+            qWarning().noquote() << QStringLiteral("[StreamSessionManager] %1: %2").arg(config.cameraId, errorText);
+
+            emit errorOccurred(config.channelIndex, errorText);
+            continue;
+        }
+
+        auto receiverThread = std::make_shared<QThread>();
+        receiverThread->setObjectName(QStringLiteral("%1-worker").arg(config.cameraId));
+
+        auto receiver = receiverFactory_->create(binding.outputWindowHandle);
+
+        if (!receiver) {
+            const QString errorText = QStringLiteral("Failed to create stream receiver");
+
+            qWarning().noquote() << QStringLiteral("[StreamSessionManager] %1: %2").arg(config.cameraId, errorText);
+
+            emit errorOccurred(config.channelIndex, errorText);
+            continue;
+        }
+
+        receiver->setObjectName(config.cameraId);
+        receiver->setUrl(config.url);
+        receiver->setBlurTargetsEnabled(faceBlurEnabled_, licensePlateBlurEnabled_);
+        receiver->setVideoPreprocessingSettings(
+            preprocessingSettingsByChannel_.value(config.channelIndex, preprocessingSettings_));
+        receiver->setPresentationActive(presentationActiveByChannel_.value(config.channelIndex, true));
+        receiver->moveInternalObjectsToThread(receiverThread.get());
+
+        if (receiver->thread() != receiverThread.get()) {
+            const QString errorText = QStringLiteral("Failed to move stream receiver to worker thread");
+
+            qWarning().noquote() << QStringLiteral("[StreamSessionManager] %1: %2").arg(config.cameraId, errorText);
+
+            emit errorOccurred(config.channelIndex, errorText);
+            continue;
+        }
+
+        ReceiverWorker worker;
+        worker.config = config;
+        worker.thread = std::move(receiverThread);
+        worker.receiver = std::move(receiver);
+        worker.blurFrameBuffer = std::make_shared<LatestBlurFrameBuffer>();
+
+        connectReceiverSignals(worker);
+
+        worker.thread->start();
+        receiverWorkers_.append(std::move(worker));
+    }
+}
+
+/**
+ * @brief        receiver의 상태 signal을 채널 인덱스가 포함된 manager signal로 중계합니다.
+ * @param worker 연결할 receiver와 채널 설정
+ */
+void StreamSessionManager::connectReceiverSignals(const ReceiverWorker& worker) {
+    if (!worker.receiver) {
+        return;
+    }
+
+    const int channelIndex = worker.config.channelIndex;
+    const QString cameraId = worker.config.cameraId;
+    const QString cameraName = worker.config.name;
+
+    connect(
+        worker.receiver.get(), &StreamReceiver::loadingChanged, this,
+        [this, channelIndex](bool loading) { emit loadingChanged(channelIndex, loading); }, Qt::QueuedConnection);
+
+    connect(
+        worker.receiver.get(), &StreamReceiver::statusChanged, this,
+        [this, channelIndex, cameraId, cameraName](const QString& status) {
+            qDebug().noquote() << QStringLiteral("[%1 Status]").arg(cameraId) << cameraName << status;
+            emit statusChanged(channelIndex, status);
+        },
+        Qt::QueuedConnection);
+
+    connect(
+        worker.receiver.get(), &StreamReceiver::errorOccurred, this,
+        [this, channelIndex, cameraId, cameraName](const QString& error) {
+            qWarning().noquote() << QStringLiteral("[%1 Error]").arg(cameraId) << cameraName << error;
+            emit errorOccurred(channelIndex, error);
+        },
+        Qt::QueuedConnection);
+
+    connect(
+        worker.receiver.get(), &StreamReceiver::firstFrameReceived, this,
+        [this, channelIndex]() { emit firstFrameReceived(channelIndex); }, Qt::QueuedConnection);
+}
+
+/**
+ * @brief                지정된 수신기를 시작하고 다음 수신기 시작을 예약합니다.
+ * @param receiverIndex  시작할 receiverWorkers_ 인덱스
+ */
+void StreamSessionManager::startReceiverSequentially(qsizetype receiverIndex) {
+    if (!startRequested_) {
+        return;
+    }
+
+    if (receiverIndex >= receiverWorkers_.size()) {
+        qDebug() << "[StreamSessionManager] All stream receivers requested";
+        return;
+    }
+
+    const ReceiverWorker& worker = receiverWorkers_[receiverIndex];
+
+    if (!worker.receiver || !worker.thread || !worker.thread->isRunning()) {
+        qWarning().noquote()
+            << QStringLiteral("[StreamSessionManager] Receiver is not available: %1").arg(worker.config.cameraId);
+
+        QTimer::singleShot(0, this, [this, receiverIndex]() { startReceiverSequentially(receiverIndex + 1); });
+
+        return;
+    }
+
+    const auto receiver = worker.receiver;
+
+    qDebug().noquote() << QStringLiteral("[%1] start").arg(worker.config.cameraId);
+
+    const bool invoked =
+        QMetaObject::invokeMethod(receiver.get(), [receiver]() { receiver->start(); }, Qt::QueuedConnection);
+
+    if (!invoked) {
+        const QString errorText = QStringLiteral("Failed to request stream receiver start");
+
+        qWarning().noquote() << QStringLiteral("[StreamSessionManager] %1: %2").arg(worker.config.cameraId, errorText);
+
+        emit errorOccurred(worker.config.channelIndex, errorText);
+    }
+
+    QTimer::singleShot(receiverStartSpacingMsec_, this,
+                       [this, receiverIndex]() { startReceiverSequentially(receiverIndex + 1); });
+}
+
+/**
+ * @brief 실행 중인 receiver를 정지하고 모든 worker thread를 종료합니다.
+ */
+void StreamSessionManager::stopWorkers() {
+    startRequested_ = false;
+    blurSourceChannelByUrl_.clear();
+    blurSourceArrivalMsecByUrl_.clear();
+
+    if (receiverWorkers_.isEmpty()) {
+        return;
+    }
+
+    QThread* ownerThread = thread();
+    QThread* currentThread = QThread::currentThread();
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        const auto& receiver = worker.receiver;
+
+        if (worker.blurFrameBuffer) {
+            worker.blurFrameBuffer->clear();
+        }
+
+        if (!receiver) {
+            continue;
+        }
+
+        QThread* receiverThread = receiver->thread();
+
+        if (receiverThread && receiverThread != currentThread && receiverThread->isRunning()) {
+            const bool invoked = QMetaObject::invokeMethod(
+                receiver.get(),
+                [receiver = receiver.get(), ownerThread]() {
+                    receiver->stop();
+                    receiver->moveInternalObjectsToThread(ownerThread);
+                },
+                Qt::BlockingQueuedConnection);
+
+            if (!invoked) {
+                qWarning().noquote()
+                    << QStringLiteral("[StreamSessionManager] Failed to stop receiver: %1").arg(worker.config.cameraId);
+            }
+
+            continue;
+        }
+
+        receiver->stop();
+
+        if (receiver->thread() == currentThread && receiver->thread() != ownerThread) {
+            receiver->moveInternalObjectsToThread(ownerThread);
+        }
+    }
+
+    for (const ReceiverWorker& worker : receiverWorkers_) {
+        const auto& receiverThread = worker.thread;
+
+        if (!receiverThread) {
+            continue;
+        }
+
+        receiverThread->quit();
+        receiverThread->wait();
+    }
+
+    receiverWorkers_.clear();
+}

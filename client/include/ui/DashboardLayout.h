@@ -1,0 +1,134 @@
+#pragma once
+
+#include <QMainWindow>
+#include <QSizePolicy>
+#include <QWidget>
+
+namespace DashboardLayout {
+inline int recommendedBottomSectionHeight(int windowHeight) {
+    constexpr int minimumBottomSectionHeight = 260;
+    constexpr int maximumBottomSectionHeight = 320;
+    constexpr int bottomSectionHeightRatioPercent = 30;
+
+    const int scaledHeight = windowHeight * bottomSectionHeightRatioPercent / 100;
+
+    if (scaledHeight < minimumBottomSectionHeight) {
+        return minimumBottomSectionHeight;
+    }
+
+    if (scaledHeight > maximumBottomSectionHeight) {
+        return maximumBottomSectionHeight;
+    }
+
+    return scaledHeight;
+}
+
+template <typename UiMainWindow>
+inline void adjustBottomSectionHeight(QMainWindow* window, UiMainWindow* ui) {
+    if (!window || !ui) {
+        return;
+    }
+
+    ui->bottomSectionFrame->setFixedHeight(recommendedBottomSectionHeight(window->height()));
+}
+
+template <typename UiMainWindow>
+inline void alignDeviceStatusCardWidth(UiMainWindow* ui) {
+    if (!ui || ui->cctvCard->width() <= 0) {
+        return;
+    }
+
+    ui->deviceStatusCard->setFixedWidth(ui->cctvCard->width());
+}
+
+template <typename UiMainWindow>
+inline void orderSectionWidgets(UiMainWindow* ui) {
+    if (!ui) {
+        return;
+    }
+
+    ui->topSectionLayout->removeWidget(ui->cctvCard);
+    ui->topSectionLayout->removeWidget(ui->mapCard);
+    ui->topSectionLayout->insertWidget(0, ui->mapCard);
+    ui->topSectionLayout->insertWidget(1, ui->cctvCard);
+
+    ui->bottomSectionLayout->removeWidget(ui->objectListCard);
+    ui->bottomSectionLayout->removeWidget(ui->eventLogCard);
+    ui->bottomSectionLayout->removeWidget(ui->deviceStatusCard);
+
+    ui->bottomSectionLayout->insertWidget(0, ui->objectListCard);
+    ui->bottomSectionLayout->insertWidget(1, ui->eventLogCard);
+    ui->bottomSectionLayout->insertWidget(2, ui->deviceStatusCard);
+}
+
+template <typename UiMainWindow>
+inline void apply(QMainWindow* window, UiMainWindow* ui) {
+    if (!window || !ui) {
+        return;
+    }
+
+    window->setMinimumSize(1280, 720);
+
+    ui->mainContentLayout->setContentsMargins(18, 0, 26, 14);
+    ui->topBarLayout->setContentsMargins(18, 0, 8, 0);
+    ui->topSectionLayout->setContentsMargins(0, 0, 0, 0);
+    ui->bottomSectionLayout->setContentsMargins(0, 0, 0, 0);
+
+    ui->topBarFrame->setFixedHeight(62);
+    ui->legendFrame->setFixedHeight(46);
+
+    ui->topSectionFrame->setMinimumHeight(0);
+    ui->topSectionFrame->setMaximumHeight(QWIDGETSIZE_MAX);
+    ui->topSectionFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    adjustBottomSectionHeight(window, ui);
+    ui->bottomSectionFrame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    ui->cctvCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    ui->mapCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    ui->eventLogCard->setMinimumWidth(0);
+    ui->deviceStatusCard->setMinimumWidth(0);
+    ui->objectListCard->setMinimumWidth(0);
+    ui->eventLogBodyFrame->setMinimumWidth(0);
+    ui->deviceStatusBodyFrame->setMinimumWidth(0);
+    ui->objectListBodyFrame->setMinimumWidth(0);
+
+    ui->eventLogCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    ui->deviceStatusCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    ui->objectListCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    orderSectionWidgets(ui);
+
+    ui->mainContentLayout->setStretch(0, 0);
+    ui->mainContentLayout->setStretch(1, 1);
+    ui->mainContentLayout->setStretch(2, 0);
+    ui->mainContentLayout->setStretch(3, 0);
+
+    ui->topSectionLayout->setStretch(0, 10);
+    ui->topSectionLayout->setStretch(1, 9);
+
+    ui->bottomSectionLayout->setStretch(0, 25);
+    ui->bottomSectionLayout->setStretch(1, 28);
+    ui->bottomSectionLayout->setStretch(2, 47);
+
+    ui->cctvCardLayout->setStretch(0, 0);
+    ui->cctvCardLayout->setStretch(1, 1);
+    ui->mapCardLayout->setStretch(0, 0);
+    ui->mapCardLayout->setStretch(1, 1);
+
+    ui->eventLogLayout->setStretch(0, 0);
+    ui->eventLogLayout->setStretch(1, 1);
+    ui->deviceStatusLayout->setStretch(0, 0);
+    ui->deviceStatusLayout->setStretch(1, 1);
+    ui->objectListLayout->setStretch(0, 0);
+    ui->objectListLayout->setStretch(1, 1);
+
+    for (auto* videoGridLayout : {ui->videoGridLayoutArea1, ui->videoGridLayoutArea2}) {
+        videoGridLayout->setRowStretch(0, 1);
+        videoGridLayout->setRowStretch(1, 1);
+        videoGridLayout->setColumnStretch(0, 1);
+        videoGridLayout->setColumnStretch(1, 1);
+    }
+}
+}  // namespace DashboardLayout
