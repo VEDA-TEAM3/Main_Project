@@ -9,121 +9,13 @@
 #include <cmath>
 #include <cstdlib>
 #include <iterator>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 #include <utility>
 
 namespace {
-/**
- * @brief               한 열에서 원 안쪽으로 허용되는 세로 거리 제곱을 구합니다.
- * @param x             픽셀 X 좌표
- * @param centerX       원의 중심 X 좌표
- * @param centerY       원의 중심 Y 좌표
- * @param radius        원의 반지름
- * @return              세로 거리 제곱의 상한. 음수면 그 열은 원 밖이다
- *
- * @details 열이 바뀔 때만 달라지는 항이라 안쪽 세로 루프 밖으로 뺀다. 픽셀마다 남는 계산은
- *          세로 차이 제곱 하나와 비교 하나뿐이다.
- */
-double verticalDistanceLimit(int x, double centerX, double radius) {
-    const double deltaX = static_cast<double>(x) + 0.5 - centerX;
-    return radius * radius - deltaX * deltaX;
-}
-
-/**
- * @brief                 픽셀이 원형 블러 영역의 세로 범위 안인지 확인합니다.
- * @param y               픽셀 Y 좌표
- * @param centerY         원의 중심 Y 좌표
- * @param distanceLimit   verticalDistanceLimit()이 구한 상한
- * @return                원 안쪽이면 true
- */
-bool isInsideVerticalRange(int y, double centerY, double distanceLimit) {
-    const double deltaY = static_cast<double>(y) + 0.5 - centerY;
-    return deltaY * deltaY <= distanceLimit;
-}
-
-/**
- * @brief             한 행에서 세로 패스가 실제로 읽어 가는 가로 거리 제곱의 상한을 구합니다.
- * @param y           픽셀 Y 좌표
- * @param centerY     원의 중심 Y 좌표
- * @param radius      원의 반지름
- * @param blurRadius  box blur 반경(샘플)
- * @return            가로 거리 제곱의 상한. 음수면 그 행은 어느 열에서도 읽히지 않는다
- *
- * @details 세로 패스는 출력 픽셀마다 위아래 blurRadius만큼의 중간값을 읽으므로, 원 밖의 행이라도
- *          원 안쪽 행에서 blurRadius 안에 들면 가로 패스가 채워 두어야 한다. 딱 그만큼만 넓힌
- *          범위라 세로 패스가 읽는 칸은 전부 덮이고, 그 밖은 계산하지 않는다.
- */
-double horizontalDistanceLimit(int y, double centerY, double radius, int blurRadius) {
-    const double deltaY = qAbs(static_cast<double>(y) + 0.5 - centerY);
-    const double outside = qMax(0.0, deltaY - static_cast<double>(blurRadius));
-    return radius * radius - outside * outside;
-}
-
-/**
- * @brief                 픽셀이 가로 패스가 채워야 할 범위 안인지 확인합니다.
- * @param x               픽셀 X 좌표
- * @param centerX         원의 중심 X 좌표
- * @param distanceLimit   horizontalDistanceLimit()이 구한 상한
- * @return                채워야 하면 true
- */
-bool isInsideHorizontalRange(int x, double centerX, double distanceLimit) {
-    const double deltaX = static_cast<double>(x) + 0.5 - centerX;
-    return deltaX * deltaX <= distanceLimit;
-}
-
-/** @brief 곱셈 역수의 소수 비트 수. 아래 오차 한계 계산이 이 값에 기대고 있다 */
-constexpr int blurReciprocalShift = 32;
-
-/** @brief 설정 로더가 허용하는 blur 반경의 상한. 역수 표의 크기가 여기에 맞춰져 있다 */
+/** @brief 설정 로더가 허용하는 blur 반경의 상한 */
 constexpr int maximumSupportedRadius = 2048;
-
-/**
- * @brief        정수 나눗셈을 곱셈으로 바꿀 역수를 구합니다.
- * @param count  나눌 값(창 안의 샘플 수)
- * @return       2^32을 count로 나눈 값의 올림
- */
-quint64 blurReciprocal(int count) {
-    constexpr quint64 scale = Q_UINT64_C(1) << blurReciprocalShift;
-    const quint64 divisor = static_cast<quint64>(count);
-    return scale / divisor + (scale % divisor != 0 ? 1 : 0);
-}
-
-/**
- * @brief   창 크기로 색인하는 고정소수점 역수 표를 돌려줍니다.
- * @return  index가 창 안의 샘플 수인 역수 배열
- *
- * @details 창이 잘리는 것은 영역 양 끝 radius칸뿐이지만, 반경이 상한(28)에 붙는 흔한 설정에서는
- *          그 양 끝이 한 줄의 절반 가까이를 차지한다. 그 픽셀마다 64비트 정수 나눗셈을 하던 자리가
- *          커널에서 가장 비싼 구간이었다.
- *
- *          값이 창 크기에만 달려 있어 프레임·영역·반경이 바뀌어도 그대로 쓸 수 있으므로 설정이
- *          허용하는 최대 창까지 한 번만 채워 둔다(32 KB). 만든 뒤에는 읽기만 하므로 채널별 영상
- *          스레드가 그대로 공유한다.
- *
- *          올림 역수를 쓰면 결과가 커질 수 있지만 그 오차는 255*count/2^32 이하이고 sum/count의
- *          소수부 간격 1/count보다 항상 작으므로(255*count^2 < 2^32, 즉 count <= 4103) 내림 결과는
- *          나눗셈과 **완전히 같다**. 창의 상한은 2*2048+1 = 4097이라 표 전체가 이 범위 안에 있다.
- */
-const quint64* blurReciprocals() {
-    static const std::vector<quint64> table = [] {
-        std::vector<quint64> values(2 * maximumSupportedRadius + 2, 0);
-        for (size_t count = 1; count < values.size(); ++count) {
-            values[count] = blurReciprocal(static_cast<int>(count));
-        }
-        return values;
-    }();
-    return table.data();
-}
-
-/**
- * @brief               창 합을 샘플 수로 나눈 평균을 구합니다.
- * @param sum           창 안 샘플의 합
- * @param count         창 안 샘플 수
- * @param reciprocals   blurReciprocals()가 돌려준 표
- * @return              평균값. 정수 나눗셈과 완전히 같다
- */
-guint8 averagedSample(quint64 sum, int count, const quint64* reciprocals) {
-    return static_cast<guint8>((sum * reciprocals[count]) >> blurReciprocalShift);
-}
 
 /**
  * @brief        실수 픽셀 좌표를 내림한 뒤 영상 범위로 제한합니다.
@@ -301,163 +193,51 @@ BlurRegionGeometry chromaRegionGeometry(const BlurRegionGeometry& luma) {
 }
 
 /**
- * @brief                 평면 하나의 지정 영역에 2-pass box blur를 적용합니다.
- * @tparam componentCount 픽셀 안에서 블러할 성분 개수이자 샘플 간격
- * @param pixels          평면 시작 주소
- * @param stride          평면 한 줄의 바이트 수
- * @param region          평면 좌표 기준 원형 영역
- * @param radius          box blur 반경(샘플)
- * @param scratch         재사용할 중간 버퍼
+ * @brief          평면 하나의 지정 원형 영역에 box blur를 적용합니다.
+ * @param plane    평면 전체를 감싼 행렬(휘도 CV_8UC1, 색차 CV_8UC2)
+ * @param region   평면 좌표 기준 원형 영역
+ * @param radius   box blur 반경(샘플)
  *
- * @details 가로 패스는 슬라이딩 합이라 반경과 무관하게 영역 면적에 선형이다. NV12는 휘도
- *          평면(성분 1개, 간격 1바이트)과 색차 평면(U,V 2개, 간격 2바이트)을 각각 호출한다.
+ * @details 색차 평면은 U와 V가 번갈아 놓인 2채널로 감쌉니다. cv::blur가 채널별로 따로
+ *          처리하므로 예전처럼 성분 개수를 템플릿 인자로 넘길 필요가 없습니다.
  *
- *          성분 개수는 인자가 아니라 템플릿 인자다. 값이 1과 2뿐인데 인자로 받으면 픽셀마다
- *          도는 안쪽 루프가 펼쳐지지 않고 샘플 주소마다 곱셈이 남는다.
+ *          블러는 외접 사각형 전체에 걸고 **원 안쪽만 되돌려 씁니다.** 원 밖 모서리까지
+ *          계산하게 되지만(면적으로 약 1.27배) cv::blur가 SIMD로 도는 쪽이 원 안만 스칼라로
+ *          훑던 것보다 빠릅니다. 마스크가 없으면 상자 모서리가 각지게 드러납니다.
+ *
+ *          경계 처리가 예전과 다릅니다. 예전에는 영역 가장자리에서 창을 줄여 실제 개수로
+ *          나눴고, 지금은 부모 평면의 바깥 픽셀을 그대로 읽습니다(BORDER_ISOLATED를 주지
+ *          않습니다). 영역 밖은 어차피 원본 영상이라 가장자리가 더 자연스럽게 이어집니다.
  */
-template <int componentCount>
-void blurPlaneRegion(guint8* pixels, int stride, const BlurRegionGeometry& region, int radius,
-                     std::vector<guint8>& scratch) {
-    // NV12에서는 성분 수가 곧 샘플 간격이다. 휘도는 1바이트 간격에 성분 1개, 색차는 U와 V가
-    // 번갈아 놓여 2바이트 간격에 성분 2개다. 둘 다 컴파일 시점에 정해져야 안쪽 루프가 펼쳐진다
-    constexpr int pixelStride = componentCount;
-    if (!pixels || region.width < 2 || region.height < 2 || radius < 1 || radius > maximumSupportedRadius) {
+void blurPlaneRegion(cv::Mat& plane, const BlurRegionGeometry& region, int radius) {
+    if (plane.empty() || region.width < 2 || region.height < 2 || radius < 1 || radius > maximumSupportedRadius) {
         return;
     }
 
-    const size_t scratchSize = static_cast<size_t>(region.width) * region.height * componentCount;
-    if (scratch.size() < scratchSize) {
-        scratch.resize(scratchSize);
+    // 영역은 blurRegionGeometry가 이미 평면 안으로 잘라 두지만, 색차 평면은 홀수 크기에서
+    // 반올림이 들어가므로 한 번 더 맞춘다. 여기서 벗어나면 cv::Mat이 예외를 던진다
+    const cv::Rect bounds(0, 0, plane.cols, plane.rows);
+    const cv::Rect box = cv::Rect(region.left, region.top, region.width, region.height) & bounds;
+    if (box.width < 2 || box.height < 2) {
+        return;
     }
 
-    const quint64* reciprocals = blurReciprocals();
+    // 프레임마다 다시 할당하지 않는다. 채널마다 영상 스레드가 하나씩이라 thread_local이
+    // 곧 채널별 버퍼가 된다(예전 scratch_ 멤버와 같은 수명이다)
+    thread_local cv::Mat blurred;
+    thread_local cv::Mat mask;
 
-    // 가로 패스도 세로 패스가 실제로 읽어 갈 칸만 채운다. 상자 전체를 채우면 원 바깥 모서리까지
-    // 계산하는데, 그 값은 아무도 읽지 않는다. scratch는 프레임 사이에 재사용되지만 세로 패스가
-    // 읽는 범위는 여기서 빠짐없이 덮으므로(위 horizontalDistanceLimit 주석 참고) 남은 값을
-    // 읽는 경로는 생기지 않는다.
-    for (int localY = 0; localY < region.height; ++localY) {
-        const double rowLimit = horizontalDistanceLimit(region.top + localY, region.centerY, region.radius, radius);
-        if (rowLimit < 0.0) {
-            continue;
-        }
+    cv::Mat roi = plane(box);
+    const int kernelSize = 2 * radius + 1;
+    cv::blur(roi, blurred, cv::Size(kernelSize, kernelSize));
 
-        const int centerColumn = qBound(0, static_cast<int>(region.centerX) - region.left, region.width - 1);
-        if (!isInsideHorizontalRange(region.left + centerColumn, region.centerX, rowLimit)) {
-            continue;
-        }
+    // 마스크는 매번 지운다. 앞 영역이 더 컸으면 그 자국이 남아 원 밖까지 덮어쓴다
+    mask.create(box.height, box.width, CV_8UC1);
+    mask.setTo(cv::Scalar(0));
+    const cv::Point center(static_cast<int>(region.centerX) - box.x, static_cast<int>(region.centerY) - box.y);
+    cv::circle(mask, center, static_cast<int>(region.radius), cv::Scalar(255), cv::FILLED);
 
-        int firstNeededX = centerColumn;
-        while (firstNeededX > 0 && isInsideHorizontalRange(region.left + firstNeededX - 1, region.centerX, rowLimit)) {
-            --firstNeededX;
-        }
-        int lastNeededX = centerColumn;
-        while (lastNeededX < region.width - 1 &&
-               isInsideHorizontalRange(region.left + lastNeededX + 1, region.centerX, rowLimit)) {
-            ++lastNeededX;
-        }
-
-        // 행 오프셋은 ptrdiff_t로 곱한다. int로 곱하면 stride x 높이가 int 범위를 넘는 순간
-        // 음수로 돌아 평면 밖을 가리키고, 그대로 픽셀을 읽고 쓴다
-        const guint8* sourceRow = pixels + static_cast<ptrdiff_t>(region.top + localY) * stride +
-                                  static_cast<ptrdiff_t>(region.left) * pixelStride;
-        quint64 sum[componentCount] = {};
-        int windowStart = std::max(0, firstNeededX - radius);
-        int windowEnd = std::min(region.width - 1, firstNeededX + radius);
-        for (int x = windowStart; x <= windowEnd; ++x) {
-            for (int component = 0; component < componentCount; ++component) {
-                sum[component] += sourceRow[x * pixelStride + component];
-            }
-        }
-
-        for (int x = firstNeededX; x <= lastNeededX; ++x) {
-            windowStart = std::max(0, x - radius);
-            windowEnd = std::min(region.width - 1, x + radius);
-            const int count = windowEnd - windowStart + 1;
-            guint8* targetSample = &scratch[(static_cast<size_t>(localY) * region.width + x) * componentCount];
-            const int removeX = x - radius;
-            const int addX = x + radius + 1;
-            for (int component = 0; component < componentCount; ++component) {
-                targetSample[component] = averagedSample(sum[component], count, reciprocals);
-                if (removeX >= 0) {
-                    sum[component] -= sourceRow[removeX * pixelStride + component];
-                }
-                if (addX < region.width) {
-                    sum[component] += sourceRow[addX * pixelStride + component];
-                }
-            }
-        }
-    }
-
-    for (int localX = 0; localX < region.width; ++localX) {
-        const double distanceLimit = verticalDistanceLimit(region.left + localX, region.centerX, region.radius);
-        if (distanceLimit < 0.0) {
-            // 이 열은 통째로 원 밖이라 세로 합을 굴릴 필요가 없다
-            continue;
-        }
-
-        // 원 안쪽 Y 범위는 열마다 한 번만 정한다. 기존처럼 모든 픽셀에서 실수 제곱을 반복하지
-        // 않고, 실제로 출력할 구간만 세로 blur를 진행한다.
-        //
-        // 경계는 sqrt로 한 번에 구하지 않고 중심 행에서 위아래로 훑어 찾는다. 이 MinGW 구성에서
-        // 우리 TU가 libm을 직접 부르면 실행 즉시 32비트 pseudo relocation으로 죽기 때문이다
-        // (같은 이유로 이 파일은 floor/ceil도 boundedFloorPixel/boundedCeilPixel로 대신한다).
-        // 안쪽 집합은 중심을 감싸는 연속 구간이라 이렇게 찾아도 정확하고, 훑는 양은 실제로
-        // 출력할 픽셀 수에 비례한다.
-        // centerY에 가장 가까운 행은 floor(centerY)다. 평면 좌표라 항상 0 이상이므로 절단이 곧 내림이다.
-        // 구간 밖으로 잘리면 남은 행 중 중심에 가장 가까운 쪽이 되므로, 그 행이 밖이면 이 열은 전부 밖이다
-        const int centerRow = qBound(0, static_cast<int>(region.centerY) - region.top, region.height - 1);
-        if (!isInsideVerticalRange(region.top + centerRow, region.centerY, distanceLimit)) {
-            // 중심에 가장 가까운 행조차 원 밖이면 이 열에는 그릴 것이 없다
-            continue;
-        }
-
-        int firstInsideY = centerRow;
-        while (firstInsideY > 0 &&
-               isInsideVerticalRange(region.top + firstInsideY - 1, region.centerY, distanceLimit)) {
-            --firstInsideY;
-        }
-        int lastInsideY = centerRow;
-        while (lastInsideY < region.height - 1 &&
-               isInsideVerticalRange(region.top + lastInsideY + 1, region.centerY, distanceLimit)) {
-            ++lastInsideY;
-        }
-
-        quint64 sum[componentCount] = {};
-        int windowStart = std::max(0, firstInsideY - radius);
-        int windowEnd = std::min(region.height - 1, firstInsideY + radius);
-        for (int y = windowStart; y <= windowEnd; ++y) {
-            const guint8* scratchSample = &scratch[(static_cast<size_t>(y) * region.width + localX) * componentCount];
-            for (int component = 0; component < componentCount; ++component) {
-                sum[component] += scratchSample[component];
-            }
-        }
-
-        for (int localY = firstInsideY; localY <= lastInsideY; ++localY) {
-            windowStart = std::max(0, localY - radius);
-            windowEnd = std::min(region.height - 1, localY + radius);
-            const int count = windowEnd - windowStart + 1;
-            guint8* targetPixel = pixels + static_cast<ptrdiff_t>(region.top + localY) * stride +
-                                  static_cast<ptrdiff_t>(region.left + localX) * pixelStride;
-            const int removeY = localY - radius;
-            const int addY = localY + radius + 1;
-            const guint8* removeSample =
-                removeY >= 0 ? &scratch[(static_cast<size_t>(removeY) * region.width + localX) * componentCount]
-                             : nullptr;
-            const guint8* addSample =
-                addY < region.height ? &scratch[(static_cast<size_t>(addY) * region.width + localX) * componentCount]
-                                     : nullptr;
-            for (int component = 0; component < componentCount; ++component) {
-                targetPixel[component] = averagedSample(sum[component], count, reciprocals);
-                if (removeSample) {
-                    sum[component] -= removeSample[component];
-                }
-                if (addSample) {
-                    sum[component] += addSample[component];
-                }
-            }
-        }
-    }
+    blurred.copyTo(roi, mask);
 }
 
 /**
@@ -469,8 +249,7 @@ void blurPlaneRegion(guint8* pixels, int stride, const BlurRegionGeometry& regio
  * @details 디코더가 내는 NV12를 그대로 처리해 BGRA 변환을 없앤다. 같은 영역이라도 다루는
  *          바이트가 4바이트/픽셀에서 1.5바이트/픽셀로 줄어 연산량도 함께 줄어든다.
  */
-void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<guint8>& scratch,
-                   const BlurProcessorConfig& config) {
+void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, const BlurProcessorConfig& config) {
     BlurRegionGeometry luma;
     if (!blurRegionGeometry(sourceBox, GST_VIDEO_FRAME_WIDTH(&frame), GST_VIDEO_FRAME_HEIGHT(&frame), config, luma)) {
         return;
@@ -478,13 +257,17 @@ void applyNv12Blur(GstVideoFrame& frame, const QRectF& sourceBox, std::vector<gu
 
     const int lumaRadius = std::clamp(std::min(luma.width, luma.height) / config.radiusDivisor, config.minimumRadius,
                                       config.maximumRadius);
-    blurPlaneRegion<1>(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0)),
-                       GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0), luma, lumaRadius, scratch);
+    // NV12 평면을 복사 없이 감싼다. 색공간 변환이 없으므로 프레임당 추가 비용은 블러 자체뿐이다
+    cv::Mat lumaPlane(GST_VIDEO_FRAME_HEIGHT(&frame), GST_VIDEO_FRAME_WIDTH(&frame), CV_8UC1,
+                      GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
+                      static_cast<size_t>(GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0)));
+    blurPlaneRegion(lumaPlane, luma, lumaRadius);
 
-    // 색차는 U와 V가 번갈아 놓인 절반 해상도 평면이라 반경도 절반으로 본다
-    blurPlaneRegion<2>(static_cast<guint8*>(GST_VIDEO_FRAME_PLANE_DATA(&frame, 1)),
-                       GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1), chromaRegionGeometry(luma), std::max(1, lumaRadius / 2),
-                       scratch);
+    // 색차는 U와 V가 번갈아 놓인 절반 해상도 평면이라 2채널로 감싸고 반경도 절반으로 본다
+    cv::Mat chromaPlane(GST_VIDEO_FRAME_HEIGHT(&frame) / 2, GST_VIDEO_FRAME_WIDTH(&frame) / 2, CV_8UC2,
+                        GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
+                        static_cast<size_t>(GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1)));
+    blurPlaneRegion(chromaPlane, chromaRegionGeometry(luma), std::max(1, lumaRadius / 2));
 }
 }  // namespace
 
@@ -626,7 +409,7 @@ void BlurProcessor::apply(GstVideoFrame& frame) {
     }
 
     for (const QRectF& region : regions) {
-        applyNv12Blur(frame, region, scratch_, config_);
+        applyNv12Blur(frame, region, config_);
     }
 
     if (config_.debugLogIntervalMsec <= 0) {

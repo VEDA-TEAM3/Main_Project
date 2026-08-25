@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "video/BlurVideoFilter.h"
+#include "video/VideoPreprocessFilter.h"
 
 namespace {
 /**
@@ -395,6 +396,12 @@ void GstRtspReceiver::startPipeline() {
     if (!BlurVideoFilter::ensureRegistered()) {
         emit errorOccurred("Failed to register blur video filter");
         scheduleReconnect("blur filter registration failed");
+        return;
+    }
+
+    if (!VideoPreprocessFilter::ensureRegistered()) {
+        emit errorOccurred("Failed to register video preprocess filter");
+        scheduleReconnect("preprocess filter registration failed");
         return;
     }
 
@@ -1176,11 +1183,9 @@ QString GstRtspReceiver::videoChainDescription(bool systemMemoryChain) const {
     if (systemMemoryChain) {
         description += QStringLiteral("videoconvert ! video/x-raw,format=NV12 ! ");
         description += renderQueue;
-        description += QStringLiteral(
-            "videobalance name=balance brightness=0.0 contrast=1.0 "
-            "saturation=1.0 ! "
-            "gamma name=gammafilter gamma=1.0 ! "
-            "qtblur name=blur ! ");
+        // 밝기·대비·감마는 qtpreprocess 하나가 룩업 한 번으로 처리한다. 예전에는 videobalance와
+        // gamma 두 요소가 Y 평면을 각각 한 번씩, 모두 두 번 훑었다. 값은 그때와 완전히 같다
+        description += QStringLiteral("qtpreprocess name=preprocess ! qtblur name=blur ! ");
     } else {
         description += renderQueue;
     }
@@ -1206,26 +1211,14 @@ void GstRtspReceiver::applyVideoPreprocessingSettings() {
         return;
     }
 
-    GstElement* balance = gst_bin_get_by_name(GST_BIN(videoChain), "balance");
-    GstElement* gamma = gst_bin_get_by_name(GST_BIN(videoChain), "gammafilter");
+    GstElement* preprocess = gst_bin_get_by_name(GST_BIN(videoChain), "preprocess");
     gst_object_unref(videoChain);
 
     const bool enabled = config_.preprocessing.enabled;
-    const gdouble brightness = enabled ? static_cast<gdouble>(config_.preprocessing.brightness) / 100.0 : 0.0;
-    const gdouble contrast = enabled ? config_.preprocessing.contrast : 1.0;
-    const gdouble gammaValue = enabled ? config_.preprocessing.gamma : 1.0;
-
-    if (balance) {
-        g_object_set(balance, "brightness", brightness, "contrast", contrast, nullptr);
-        gst_base_transform_set_passthrough(
-            GST_BASE_TRANSFORM(balance),
-            !enabled || (config_.preprocessing.brightness == 0 && config_.preprocessing.contrast == 1.0));
-        gst_object_unref(balance);
-    }
-    if (gamma) {
-        g_object_set(gamma, "gamma", gammaValue, nullptr);
-        gst_base_transform_set_passthrough(GST_BASE_TRANSFORM(gamma), !enabled || config_.preprocessing.gamma == 1.0);
-        gst_object_unref(gamma);
+    if (preprocess) {
+        // 표를 다시 만들고 항등이면 passthrough까지 필터가 스스로 정한다
+        VideoPreprocessFilter::setSettings(preprocess, config_.preprocessing);
+        gst_object_unref(preprocess);
     }
     qDebug().noquote() << QStringLiteral("[VIDEO PREPROCESS] enabled=%1 brightness=%2 contrast=%3 gamma=%4")
                               .arg(enabled)

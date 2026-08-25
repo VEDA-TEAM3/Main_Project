@@ -9,6 +9,14 @@ include(ProcessorCount)
 
 find_package(Qt6 REQUIRED COMPONENTS Mqtt Network Quick QuickControls2 QuickShapes QuickWidgets Widgets)
 
+# 영상 전처리(밝기/대비/감마)의 룩업 표 생성과 적용에 쓴다.
+# std::pow 는 이 클라이언트에서 쓸 수 없다 - GStreamer 를 링크하면 pseudo relocation 으로
+# 실행 즉시 죽는다. cv::pow 는 계산이 DLL 안에서 끝나 그 문제를 피한다.
+# MinGW 용 공식 배포본이 없어 소스 빌드가 필요하다 (core+imgproc, BUILD_SHARED_LIBS=ON).
+# 자세한 빌드 절차는 README 참고.
+set(OpenCV_DIR "C:/opencv-mingw" CACHE PATH "MinGW 로 빌드한 OpenCV 설치 경로")
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+
 set(GSTREAMER_ROOT "C:/Program Files/gstreamer/1.0/mingw_x86_64" CACHE PATH
     "GStreamer MinGW x86_64 runtime root")
 
@@ -90,6 +98,10 @@ qt_add_executable(Qtcctvclient
     src/video/VideoUtcClockMapper.cpp
     include/video/BlurVideoFilter.h
     src/video/BlurVideoFilter.cpp
+    include/video/VideoPreprocessLut.h
+    src/video/VideoPreprocessLut.cpp
+    include/video/VideoPreprocessFilter.h
+    src/video/VideoPreprocessFilter.cpp
 
     include/model/DigitalTwinTypes.h
     include/model/DigitalTwinRuntimeConfig.h
@@ -325,6 +337,9 @@ target_link_directories(Qtcctvclient PRIVATE
 )
 
 target_link_libraries(Qtcctvclient PRIVATE
+    opencv_core
+    opencv_imgproc
+
     Qt6::Widgets
     Qt6::Mqtt
     Qt6::Network
@@ -480,6 +495,37 @@ if(QTCCTV_BUILD_CHECKS)
         gstbase-1.0
         gstrtsp-1.0
         gstvideo-1.0
+        gobject-2.0
+        glib-2.0
+        intl
+    )
+
+    add_executable(video_preprocess_lut_check
+        tests/VideoPreprocessLutCheck.cpp
+        src/video/VideoPreprocessLut.cpp
+    )
+
+    target_include_directories(video_preprocess_lut_check PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_include_directories(video_preprocess_lut_check SYSTEM PRIVATE
+        "${GSTREAMER_ROOT}/include/gstreamer-1.0"
+        "${GSTREAMER_ROOT}/include/glib-2.0"
+        "${GSTREAMER_ROOT}/lib/glib-2.0/include"
+    )
+
+    target_link_directories(video_preprocess_lut_check PRIVATE
+        "${GSTREAMER_ROOT}/lib"
+    )
+
+    # 예전 videobalance ! gamma 체인을 실제로 돌려 값을 대조하므로 gstapp 이 필요하다
+    target_link_libraries(video_preprocess_lut_check PRIVATE
+        opencv_core
+        gstapp-1.0
+        gstvideo-1.0
+        gstbase-1.0
+        gstreamer-1.0
         gobject-2.0
         glib-2.0
         intl
