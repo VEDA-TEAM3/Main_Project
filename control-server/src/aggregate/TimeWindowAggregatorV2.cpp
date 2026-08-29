@@ -203,15 +203,15 @@ void TimeWindowAggregatorV2::push(const veda::TopViewFrame& frame) {
 void TimeWindowAggregatorV2::flushLoop() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (running_) {
-        windowCv_.wait(lock, [this] { return !running_ || !activeChannels_.empty(); });
+        windowCv_.wait(lock,
+                       [this] { return !running_ || windowDeadline_ != std::chrono::steady_clock::time_point{}; });
         if (!running_) {
             return;
         }
 
         const auto deadline = windowDeadline_;
-        if (windowCv_.wait_until(lock, deadline, [this, deadline] {
-                return !running_ || activeChannels_.empty() || windowDeadline_ != deadline;
-            })) {
+        if (windowCv_.wait_until(lock, deadline,
+                                 [this, deadline] { return !running_ || windowDeadline_ != deadline; })) {
             continue;
         }
 
@@ -227,7 +227,7 @@ void TimeWindowAggregatorV2::flushLoop() {
             clearSlotsLocked();
         }
         windowStartTime_ = clock_->now();
-        windowDeadline_ = {};
+        windowDeadline_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(windowSizeMs_);
 
         lock.unlock();
         if (callbackCopy) {
@@ -248,8 +248,8 @@ void TimeWindowAggregatorV2::flushLoop() {
                 logDebug(kIface, "타이머 윈도우 마감, " + std::to_string(flushedCount) + "채널 집계 완료");
             }
         } else if (missedChannelCount > 0) {
-            logError(kIface,
-                     "타이머 윈도우 마감했지만 콜백 미등록 - " + std::to_string(missedChannelCount) + "채널 데이터 유실");
+            logError(kIface, "타이머 윈도우 마감했지만 콜백 미등록 - " + std::to_string(missedChannelCount) +
+                                 "채널 데이터 유실");
         }
         lock.lock();
     }

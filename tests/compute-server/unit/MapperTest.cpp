@@ -45,18 +45,24 @@ domain::DetectedObject makeObject(veda::ObjectId id, double l, double t, double 
 }
 
 /// @brief 아래를 내려다보는 전형적 CCTV 를 흉내낸 비특이 호모그래피
-std::array<double, 9> sampleHomography() {
-    return {{1.0, 0.0, -0.5, 0.0, 0.5, 0.2, 0.0, -0.4, 1.0}};
-}
+std::array<double, 9> sampleHomography() { return {{1.0, 0.0, -0.5, 0.0, 0.5, 0.2, 0.0, -0.4, 1.0}}; }
 
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -96,7 +102,8 @@ TEST(MapperTest, Homography_PixelSpaceRequiresPositiveResolution) {
     opts.imageWidth = 0.0;  // 누락된 해상도
     opts.imageHeight = 1080.0;
 
-    EXPECT_THROW({ HomographyTransform h(sampleHomography(), opts); }, std::invalid_argument)
+    EXPECT_THROW(
+        { HomographyTransform h(sampleHomography(), opts); }, std::invalid_argument)
         << "pixelSpace 인데 해상도가 0 이하면 환산이 불가능하므로 던져야 함";
 }
 
@@ -203,7 +210,8 @@ TEST(MapperTest, Homography_ScaleInvarianceOfProjection) {
     // 호모그래피는 스칼라배 불변 — 전체에 상수를 곱해도 사상 결과가 같아야 한다.
     auto m = sampleHomography();
     auto scaled = m;
-    for (double& v : scaled) v *= 3.0;
+    for (double& v : scaled)
+        v *= 3.0;
 
     HomographyTransform h1(m);
     HomographyTransform h2(scaled);
@@ -227,7 +235,8 @@ TEST(MapperTest, Affine_ValidParametersConstruct) {
 
 TEST(MapperTest, Affine_NonPositiveScaleThrows) {
     EXPECT_THROW({ AffineImageCoordinateMapper m(0.0, 1.0, 0.0, 0.0); }, std::invalid_argument);
-    EXPECT_THROW({ AffineImageCoordinateMapper m(1.0, -1.0, 0.0, 0.0); }, std::invalid_argument)
+    EXPECT_THROW(
+        { AffineImageCoordinateMapper m(1.0, -1.0, 0.0, 0.0); }, std::invalid_argument)
         << "음수 스케일은 좌표계를 뒤집으므로 거부되어야 함";
 }
 
@@ -320,7 +329,8 @@ TEST(MapperTest, Affine_DegenerateBoxAfterClampIsDropped) {
 TEST(MapperTest, Affine_MapIsZeroAllocation) {
     AffineImageCoordinateMapper mapper(1.0, 1.0, 0.0, 0.0);
     std::vector<domain::DetectedObject> objs;
-    for (int i = 0; i < 64; ++i) objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
+    for (int i = 0; i < 64; ++i)
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
 
     g_allocCount = 0;
     g_allocCounting = true;
@@ -333,7 +343,8 @@ TEST(MapperTest, Affine_MapIsZeroAllocation) {
 TEST(MapperTest, Affine_PreservesCapacityOnFiltering) {
     AffineImageCoordinateMapper mapper(1.0, 1.0, 5.0, 5.0);  // 전부 화면 밖으로
     std::vector<domain::DetectedObject> objs;
-    for (int i = 0; i < 16; ++i) objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
+    for (int i = 0; i < 16; ++i)
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
     const std::size_t capBefore = objs.capacity();
 
     mapper.map(objs, 0);
@@ -353,7 +364,8 @@ TEST(MapperTest, Affine_LinearCostOverManyObjects) {
     // O(N) 특성 확인: 대량 입력에서도 크래시 없이 선형 처리
     AffineImageCoordinateMapper mapper(1.0, 1.0, 0.0, 0.0);
     std::vector<domain::DetectedObject> objs;
-    for (int i = 0; i < 256; ++i) objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
+    for (int i = 0; i < 256; ++i)
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), 0.1, 0.1, 0.2, 0.2));
 
     EXPECT_NO_THROW(mapper.map(objs, 0));
     EXPECT_EQ(objs.size(), 256u);

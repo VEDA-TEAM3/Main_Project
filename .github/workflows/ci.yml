@@ -5,11 +5,7 @@ name: CI
 # 매퍼 특이행렬 거부, Source lost-wakeup 수정 등)이 조용히 회귀하지 않도록
 # 모든 push/PR 에서 빌드 + 테스트를 강제한다.
 #
-# [ 빌드 범위와 테스트 범위가 다르다 ]
-# - 빌드: 저장소 '전체'(compute-server + control-server). 한쪽 서버의 컴파일이 깨지는 것을
-#         CI 가 놓치지 않기 위해서다 -- 테스트가 닿지 않는 코드도 '빌드되는지'는 보장해야 한다
-# - 테스트: 현재 compute-server 만. control-server 테스트는 아직 완성 전이라
-#           tests/CMakeLists.txt 가 등록하지 않는다 (ctest 에 아예 나타나지 않음)
+# Linux 에서 두 서버와 모든 GTest를, Windows 에서 Qt 클라이언트와 자체 검사를 빌드·실행한다.
 on:
   push:
     branches: [main, develop]
@@ -63,12 +59,9 @@ jobs:
           -DBUILD_TESTING=ON
 
       # 저장소 전체를 빌드한다: compute-server + control-server + 모든 테스트 타깃.
-      # 테스트가 compute-server 범위여도 '빌드'는 전체를 도는 것이 핵심이다
-      # -- 그래야 control-server 쪽 컴파일 깨짐이 CI 에서 즉시 드러난다
       - name: Build
         run: cmake --build build --parallel
 
-      # 현재 등록되는 것은 compute-server 단위 테스트뿐이다 (tests/CMakeLists.txt).
       # GTest 케이스는 gtest_discover_tests 로 개별 등록되므로
       # 실패 시 어느 TEST() 가 깨졌는지 ctest 출력만으로 알 수 있다
       - name: Test
@@ -84,3 +77,113 @@ jobs:
           path: build/Testing/
           if-no-files-found: ignore
           retention-days: 7
+
+  sanitizers:
+    name: ASan/UBSan & Coverage
+    runs-on: self-hosted
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            g++ \
+            pkg-config \
+            libmosquitto-dev \
+            libssl-dev \
+            nlohmann-json3-dev \
+            gcovr
+
+      - name: Configure ASan and UBSan
+        run: >
+          cmake -B build-asan -S .
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+          -DVEDA_BUILD_CONTROL_SERVER=OFF
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build ASan and UBSan
+        run: >
+          cmake --build build-asan --parallel
+          --target compute-server ParserTest SanitizerTest RouterTest MapperTest NetworkTest SourceTest MqttSinkTest DriverProtocolTest ControllerTest AggregatorTest FuserTest TransformEquivalenceTest ZoneMapperEquivalenceTest MetricTest RiskTest ParkingPolicyTest MqttReceiverTest PipelineTrajectoryTest SerialHwEventDispatcherTest
+
+      - name: Test ASan and UBSan
+        run: >
+          ctest --test-dir build-asan --output-on-failure --parallel 2
+          -R "ParserTest|SanitizerTest|RouterTest|MapperTest|NetworkTest|SourceTest|MqttSinkTest|DriverProtocolTest|ControllerTest|AggregatorTest|FuserTest|TransformEquivalenceTest|ZoneMapperEquivalenceTest|MetricTest|RiskTest|ParkingPolicyTest|MqttReceiverTest|PipelineTrajectoryTest|SerialHwEventDispatcherTest"
+
+      - name: Configure coverage
+        run: >
+          cmake -B build-coverage -S .
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+          -DVEDA_BUILD_CONTROL_SERVER=OFF
+          -DCMAKE_CXX_FLAGS="--coverage"
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build coverage targets
+        run: >
+          cmake --build build-coverage --parallel
+          --target compute-server ParserTest SanitizerTest RouterTest MapperTest NetworkTest SourceTest MqttSinkTest
+
+      - name: Test coverage targets
+        run: >
+          ctest --test-dir build-coverage --output-on-failure --parallel 2
+          -R "ParserTest|SanitizerTest|RouterTest|MapperTest|NetworkTest|SourceTest|MqttSinkTest"
+
+      - name: Enforce compute source coverage
+        run: >
+          gcovr --root . --filter "compute-server/src/"
+          --object-directory build-coverage
+          --gcov-ignore-errors=no_working_dir_found
+          --fail-under-line 33 --txt --print-summary
+
+  client-build-and-test:
+    name: Client Build & Test (Windows / UCRT64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW, Qt, and GStreamer
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-opencv
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-mqtt
+
+      - name: Configure
+        shell: msys2 {0}
+        run: >
+          cmake -S client -B client/build-ci -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DQTCCTV_BUILD_CHECKS=ON
+          -DQTCCTV_ENABLE_PCH=OFF
+          -DGSTREAMER_ROOT=C:/msys64/ucrt64
+          -DOpenCV_DIR=C:/msys64/ucrt64/lib/cmake/opencv4
+
+      - name: Build
+        shell: msys2 {0}
+        run: cmake --build client/build-ci --parallel 2
+
+      - name: Test
+        shell: msys2 {0}
+        env:
+          GST_PLUGIN_PATH: C:/msys64/ucrt64/lib/gstreamer-1.0
+        run: ctest --test-dir client/build-ci --output-on-failure --parallel 2

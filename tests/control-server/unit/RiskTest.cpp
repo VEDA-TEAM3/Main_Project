@@ -56,6 +56,7 @@ domain::WorldObject makeObject(veda::GlobalId gid, veda::ObjectClass cls, double
     o.pos.x = x;
     o.pos.y = y;
     o.zoneId = zoneId;
+    o.sourceChannels.add(zoneId >= 0 ? zoneId : 0);
     return o;
 }
 
@@ -68,7 +69,8 @@ domain::WorldFrame makeFrame(std::vector<domain::WorldObject> objects) {
 
 const domain::WorldObject* findByGid(const domain::WorldFrame& f, veda::GlobalId gid) {
     for (const auto& o : f.objects) {
-        if (o.gid == gid) return &o;
+        if (o.gid == gid)
+            return &o;
     }
     return nullptr;
 }
@@ -87,11 +89,19 @@ const LoggerOff g_loggerOff;
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -139,8 +149,8 @@ TEST(RiskTest, AcceptsEqualThresholds) {
 TEST(RiskTest, DistanceInsideDangerousYieldsDanger) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::Danger);
@@ -150,8 +160,8 @@ TEST(RiskTest, DistanceInsideDangerousYieldsDanger) {
 TEST(RiskTest, DistanceBetweenThresholdsYieldsWarning) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 3.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, 3.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::Warning);
@@ -160,8 +170,8 @@ TEST(RiskTest, DistanceBetweenThresholdsYieldsWarning) {
 TEST(RiskTest, DistanceBeyondWarningYieldsNone) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 20.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, 20.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::None);
@@ -172,8 +182,8 @@ TEST(RiskTest, ExactlyAtDangerousBoundaryIsDanger) {
     // <= 이므로 경계값은 '더 위험한 쪽'으로 분류된다 (안전 방향, 의도적).
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, kDanger, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, kDanger, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::Danger) << "경계값은 Danger 에 포함되어야 한다";
@@ -182,8 +192,8 @@ TEST(RiskTest, ExactlyAtDangerousBoundaryIsDanger) {
 TEST(RiskTest, ExactlyAtWarningBoundaryIsWarning) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, kWarning, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, kWarning, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::Warning) << "경계값은 Warning 에 포함되어야 한다";
@@ -197,8 +207,8 @@ TEST(RiskTest, NoVehicleMeansNoRisk) {
     // [원칙 1] 사람만 있으면 아무리 붙어 있어도 전부 None 이다.
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Human, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 0.1, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Human, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, 0.1, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::None);
@@ -210,8 +220,8 @@ TEST(RiskTest, RiskPropagatesToNearestObjectRaiseOnly) {
     // [원칙 3] 최근접 객체에도 레벨을 부여하되 '올리기만' 한다.
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 2)->riskLevel, veda::RiskLevel::Danger) << "최근접 사람에게 전파되어야 한다";
@@ -222,10 +232,9 @@ TEST(RiskTest, PropagationNeverLowersExistingLevel) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
     // 사람(gid 3)이 차량1(1m, Danger)과 차량2(4m, Warning) 양쪽의 최근접이 되도록 배치
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Vehicle, 100.0, 0.0),
-                            makeObject(3, veda::ObjectClass::Human, 1.0, 0.0),
-                            makeObject(4, veda::ObjectClass::Human, 96.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Vehicle, 100.0, 0.0),
+         makeObject(3, veda::ObjectClass::Human, 1.0, 0.0), makeObject(4, veda::ObjectClass::Human, 96.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 3)->riskLevel, veda::RiskLevel::Danger) << "더 높은 레벨이 유지되어야 한다";
@@ -243,7 +252,8 @@ TEST(RiskTest, FrameLevelIsMaxOfZoneLevels) {
 
     veda::RiskLevel expected = veda::RiskLevel::None;
     for (const auto& z : out.zoneLevels) {
-        if (z.level > expected) expected = z.level;
+        if (z.level > expected)
+            expected = z.level;
     }
     EXPECT_EQ(frame.level, expected);
     EXPECT_EQ(frame.level, veda::RiskLevel::Danger) << "zone 1 이 Danger 이므로 프레임 전체도 Danger";
@@ -268,8 +278,8 @@ TEST(RiskTest, VehicleToVehicleDistanceCounts) {
     // [원칙 2] 차량↔차량도 판정 대상이다 (사람↔사람만 제외).
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(2, veda::ObjectClass::Vehicle, 1.5, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(2, veda::ObjectClass::Vehicle, 1.5, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::Danger);
@@ -297,8 +307,8 @@ TEST(RiskTest, NearestObjectWithGidZeroIsStillJudged) {
     // 그 객체가 최근접이면 차량이 판정에서 빠져 경보가 사라졌다.
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(5, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(0, veda::ObjectClass::Human, 1.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(5, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(0, veda::ObjectClass::Human, 1.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 5)->riskLevel, veda::RiskLevel::Danger)
@@ -309,8 +319,8 @@ TEST(RiskTest, NearestObjectWithGidZeroIsStillJudged) {
 TEST(RiskTest, GidZeroObjectReceivesPropagatedLevel) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(5, veda::ObjectClass::Vehicle, 0.0, 0.0),
-                            makeObject(0, veda::ObjectClass::Human, 1.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(5, veda::ObjectClass::Vehicle, 0.0, 0.0), makeObject(0, veda::ObjectClass::Human, 1.0, 0.0)});
     policy.evaluate(frame, out);
 
     EXPECT_EQ(findByGid(frame, 0)->riskLevel, veda::RiskLevel::Danger);
@@ -365,8 +375,8 @@ TEST(RiskTest, NaNObjectDoesNotSuppressOtherJudgements) {
 TEST(RiskTest, NaNVehicleIsExcludedWithoutCrashing) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, kNaN, kNaN),
-                            makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, kNaN, kNaN), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0)});
     EXPECT_NO_THROW(policy.evaluate(frame, out));
 
     EXPECT_EQ(findByGid(frame, 1)->riskLevel, veda::RiskLevel::None) << "위치를 모르는 차량은 판정하지 않는다";
@@ -388,8 +398,8 @@ TEST(RiskTest, InfiniteCoordinateIsExcluded) {
 TEST(RiskTest, NaNOnlyFrameProducesNoRisk) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, kNaN, 0.0),
-                            makeObject(2, veda::ObjectClass::Human, 0.0, kNaN)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, kNaN, 0.0), makeObject(2, veda::ObjectClass::Human, 0.0, kNaN)});
     EXPECT_NO_THROW(policy.evaluate(frame, out));
     EXPECT_EQ(frame.level, veda::RiskLevel::None);
 }
@@ -448,13 +458,13 @@ TEST(RiskTest, EvaluateDoesNotAllocateInSteadyState) {
     // out-parameter 로 바꾸면서 resize 가 no-op 이 되어 0회가 되었다.
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0),
-                            makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0),
-                            makeObject(3, veda::ObjectClass::Vehicle, 10.0, 0.0, 1),
-                            makeObject(4, veda::ObjectClass::Human, 12.0, 0.0, 1),
-                            makeObject(5, veda::ObjectClass::Human, 30.0, 0.0, 2)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0),
+         makeObject(3, veda::ObjectClass::Vehicle, 10.0, 0.0, 1), makeObject(4, veda::ObjectClass::Human, 12.0, 0.0, 1),
+         makeObject(5, veda::ObjectClass::Human, 30.0, 0.0, 2)});
 
-    for (int i = 0; i < 50; ++i) policy.evaluate(frame, out);  // warmup
+    for (int i = 0; i < 50; ++i)
+        policy.evaluate(frame, out);  // warmup
 
     g_allocCount = 0;
     g_allocCounting = true;
@@ -472,8 +482,8 @@ TEST(RiskTest, ReusedOutBufferIsFullyResetBetweenFrames) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
 
-    auto dangerous = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0),
-                                makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0)});
+    auto dangerous = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0)});
     policy.evaluate(dangerous, out);
     ASSERT_EQ(out.zoneLevels[0].level, veda::RiskLevel::Danger);
 
@@ -490,8 +500,8 @@ TEST(RiskTest, ObjectFieldsAreResetEveryFrame) {
     ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
     domain::RiskEvaluation out;
 
-    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0),
-                            makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0)});
+    auto frame = makeFrame(
+        {makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0), makeObject(2, veda::ObjectClass::Human, 1.0, 0.0, 0)});
     policy.evaluate(frame, out);
     ASSERT_EQ(frame.objects[0].riskLevel, veda::RiskLevel::Danger);
 
@@ -511,4 +521,35 @@ TEST(RiskTest, EmptyFrameIsHandledWithoutRisk) {
 
     EXPECT_EQ(frame.level, veda::RiskLevel::None);
     EXPECT_EQ(out.timestamp, frame.timestamp);
+}
+
+TEST(RiskTest, CoastedObjectIsKeptForDisplayButExcludedFromRisk) {
+    ThresholdRiskPolicy policy(makeMetric(), makeConfig(), kChannels);
+    domain::RiskEvaluation out;
+    auto coasted = makeObject(2, veda::ObjectClass::Vehicle, 0.1, 0.0, 0);
+    coasted.sourceChannels = {};
+    auto frame = makeFrame({makeObject(1, veda::ObjectClass::Vehicle, 0.0, 0.0, 0), coasted});
+
+    policy.evaluate(frame, out);
+
+    ASSERT_EQ(frame.objects.size(), 2U);
+    EXPECT_EQ(frame.objects[0].riskLevel, veda::RiskLevel::None);
+    EXPECT_EQ(frame.objects[1].riskLevel, veda::RiskLevel::None);
+    EXPECT_EQ(out.zoneLevels[0].level, veda::RiskLevel::None);
+    EXPECT_EQ(frame.level, veda::RiskLevel::None);
+}
+
+TEST(RiskFrameContractTest, PreservesServerResolvedZoneId) {
+    veda::RiskFrame frame;
+    veda::RiskObject object;
+    object.gid = 7;
+    object.zoneId = 3;
+    frame.objects.push_back(object);
+
+    std::string payload;
+    veda::encodeInto(frame, payload);
+    const auto decoded = nlohmann::json::parse(payload).get<veda::RiskFrame>();
+
+    ASSERT_EQ(decoded.objects.size(), 1U);
+    EXPECT_EQ(decoded.objects.front().zoneId, 3);
 }

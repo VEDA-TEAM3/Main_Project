@@ -6,12 +6,38 @@
 
 #include <cstring>
 #include <iostream>
+#include <utility>
+#include <vector>
+
+#include "dispatch/SerialEventEncoding.h"
+
+namespace {
+
+veda::RiskLevel reportedRiskLevel(const HwIndicatorState& indicators) {
+    if (indicators.ledRed) {
+        return veda::RiskLevel::Danger;
+    }
+    if (indicators.ledYellow) {
+        return veda::RiskLevel::Warning;
+    }
+    return veda::RiskLevel::None;
+}
+
+HwIndicatorState decodeIndicators(const veda_uplink_packet_t& packet) {
+    return {packet.siren_on != 0, packet.buzzer_on != 0, packet.led_red != 0, packet.led_yellow != 0,
+            packet.led_green != 0};
+}
+
+}  // namespace
 
 SerialHwEventDispatcher::SerialHwEventDispatcher(std::string devicePath, uint32_t heartbeatIntervalMs,
-                                                 uint32_t missedBeatsForTimeout)
+                                                 uint32_t missedBeatsForTimeout, uint32_t mismatchRetryCount,
+                                                 bool mismatchEscalateAfterRetries)
     : devicePath_(std::move(devicePath)),
       heartbeatIntervalMs_(heartbeatIntervalMs),
-      missedBeatsForTimeout_(missedBeatsForTimeout) {
+      missedBeatsForTimeout_(missedBeatsForTimeout),
+      mismatchRetryCount_(mismatchRetryCount),
+      mismatchEscalateAfterRetries_(mismatchEscalateAfterRetries) {
     openPort();
 
     running_ = true;
@@ -75,58 +101,83 @@ void SerialHwEventDispatcher::openPort() {
  *          IHwEventDispatcher.h의 @note대로, 비교 기준은 "마지막 전송 성공 값"이어야 유실 시
  *          재전송 누락이 안 생긴다 — write()가 실패하면 lastSentLevel_을 갱신하지 않는다.
  */
-void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
-    if (fd_ < 0) {
-        return;
+bool SerialHwEventDispatcher::sendRiskEventLocked(veda::ChannelId channel, veda::RiskLevel level,
+                                                       veda::TimestampMs timestamp, std::uint16_t distanceMm) {
+    if (fd_ < 0 || !serial_event::isValidChannelId(channel)) {
+        return false;
     }
 
-    for (const auto& zone : eval.zoneLevels) {
-        std::cout << "[Dispatcher] UART 이벤트 통지 → 채널 " << zone.zoneId << "\n";
+    veda_risk_event_t event{};
+    event.channel_id = static_cast<std::uint8_t>(channel);
+    event.risk_level = static_cast<std::uint8_t>(level);
+    veda_write_i64_le(&event.timestamp_ms, timestamp);
+    veda_write_u16_le(&event.dist_mm, distanceMm);
 
-        auto it = lastSentLevel_.find(zone.zoneId);
-        const bool changed = (it == lastSentLevel_.end()) || (it->second != zone.level);
-        if (!changed) {
+    veda_downlink_frame_t frame{};
+    frame.start_byte = VEDA_START_BYTE;
+    frame.payload = event;
+    frame.checksum = veda_downlink_checksum(&event);
+    frame.end_byte = VEDA_END_BYTE;
+
+    const ssize_t written = write(fd_, &frame, sizeof(frame));
+    if (written != static_cast<ssize_t>(sizeof(frame))) {
+        std::cerr << "[SerialHwEventDispatcher] 전송 실패: 채널 " << channel << " (" << strerror(errno) << ")\n";
+        return false;
+    }
+    return true;
+}
+
+void SerialHwEventDispatcher::dispatch(const domain::RiskEvaluation& eval) {
+    std::lock_guard<std::mutex> lock(sendStateMutex_);
+    for (const auto& zone : eval.zoneLevels) {
+        if (!serial_event::isValidChannelId(zone.zoneId)) {
             continue;
         }
-
-        veda_risk_event_t ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.channel_id = static_cast<uint8_t>(zone.zoneId);
-        ev.risk_level = static_cast<uint8_t>(zone.level);
-        ev.timestamp_ms = eval.timestamp;
-        ev.dist_mm = (zone.minDist >= 0.0) ? static_cast<uint16_t>(zone.minDist * 1000.0) : VEDA_DIST_MM_NONE;
-
-        veda_downlink_frame_t frame;
-        frame.start_byte = VEDA_START_BYTE;
-        frame.payload = ev;
-        frame.checksum = veda_downlink_checksum(&ev);
-        frame.end_byte = VEDA_END_BYTE;
-
-        ssize_t written = write(fd_, &frame, sizeof(frame));
-        if (written != static_cast<ssize_t>(sizeof(frame))) {
-            std::cerr << "[SerialHwEventDispatcher] 전송 실패: 채널 " << zone.zoneId << " (" << strerror(errno)
-                      << ")\n";
-            continue;  // lastSentLevel_ 갱신 안 함 -> 다음 프레임에서 재시도됨
+        const auto previous = lastSentLevel_.find(zone.zoneId);
+        if (previous != lastSentLevel_.end() && previous->second == zone.level) {
+            continue;
         }
-
-        lastSentLevel_[zone.zoneId] = zone.level;
+        if (sendRiskEventLocked(zone.zoneId, zone.level, eval.timestamp,
+                                serial_event::encodeDistanceMm(zone.minDist))) {
+            lastSentLevel_[zone.zoneId] = zone.level;
+            mismatchRetryAttempts_[zone.zoneId] = 0;
+        }
     }
 }
 
 /**
  * @details readerLoop()는 콜백 등록 여부와 무관하게 생성 시점부터 계속 heartbeat를 수신해
- *          aliveState_를 갱신해왔다. 여기서 콜백을 뒤늦게 등록하면, 등록 이전에 이미 파악된
- *          채널별 상태는 다음 전환(alive↔dead)이 생길 때까지 통지되지 않으므로,
- *          등록 즉시 현재 aliveState_ 스냅샷을 한 번 통지해 그 공백을 없앤다.
+ *          채널별 상태를 갱신한다. 콜백 등록 즉시 현재 스냅샷을 재생해 등록 전 공백을 없앤다.
  */
 void SerialHwEventDispatcher::setStatusCallback(StatusCallback callback) {
-    std::lock_guard<std::mutex> lock(heartbeatMutex_);
-    statusCallback_ = std::move(callback);
-
-    if (statusCallback_) {
-        for (const auto& [ch, alive] : aliveState_) {
-            statusCallback_(ch, alive);
+    std::vector<std::pair<veda::ChannelId, ReportedState>> snapshot;
+    StatusCallback callbackCopy;
+    {
+        std::lock_guard<std::mutex> lock(heartbeatMutex_);
+        statusCallback_ = std::move(callback);
+        callbackCopy = statusCallback_;
+        if (callbackCopy) {
+            snapshot.assign(reportedState_.begin(), reportedState_.end());
         }
+    }
+    for (const auto& [channel, state] : snapshot) {
+        callbackCopy(channel, state.alive, state.indicators);
+    }
+}
+
+void SerialHwEventDispatcher::setFaultCallback(FaultCallback callback) {
+    std::vector<std::pair<veda::ChannelId, bool>> snapshot;
+    FaultCallback callbackCopy;
+    {
+        std::lock_guard<std::mutex> lock(sendStateMutex_);
+        faultCallback_ = std::move(callback);
+        callbackCopy = faultCallback_;
+        if (callbackCopy) {
+            snapshot.assign(faultState_.begin(), faultState_.end());
+        }
+    }
+    for (const auto& [channel, faulted] : snapshot) {
+        callbackCopy(channel, faulted);
     }
 }
 
@@ -178,7 +229,11 @@ void SerialHwEventDispatcher::readerLoop() {
                 if (byte == VEDA_END_BYTE && veda_checksum(payloadBuf, sizeof(payloadBuf)) == rxChecksum) {
                     veda_uplink_packet_t pkt;
                     memcpy(&pkt, payloadBuf, sizeof(pkt));
-                    handleUplinkFrame(pkt);
+                    if (veda_uplink_payload_is_valid(&pkt)) {
+                        handleUplinkFrame(pkt);
+                    } else {
+                        std::cerr << "[SerialHwEventDispatcher] UART 상행 payload 필드 검증 실패\n";
+                    }
                 }
                 state = WAIT_START;
                 break;
@@ -186,54 +241,105 @@ void SerialHwEventDispatcher::readerLoop() {
     }
 }
 
-void SerialHwEventDispatcher::handleUplinkFrame(const veda_uplink_packet_t& pkt) {
-    if (pkt.reason == VEDA_UPLINK_REASON_HEARTBEAT) {
-        markAlive(static_cast<veda::ChannelId>(pkt.channel_id));
+void SerialHwEventDispatcher::handleUplinkFrame(const veda_uplink_packet_t& packet) {
+    const auto channel = static_cast<veda::ChannelId>(packet.channel_id);
+    const HwIndicatorState indicators = decodeIndicators(packet);
+    reportAlive(channel, indicators);
+
+    FaultCallback callback;
+    bool notifyFault = false;
+    bool faulted = false;
+    {
+        std::lock_guard<std::mutex> lock(sendStateMutex_);
+        const auto expected = lastSentLevel_.find(channel);
+        if (expected == lastSentLevel_.end()) {
+            return;
+        }
+        if (reportedRiskLevel(indicators) == expected->second) {
+            mismatchRetryAttempts_[channel] = 0;
+            auto fault = faultState_.find(channel);
+            if (fault != faultState_.end() && fault->second) {
+                fault->second = false;
+                callback = faultCallback_;
+                notifyFault = true;
+            }
+        } else {
+            auto& attempts = mismatchRetryAttempts_[channel];
+            if (attempts < mismatchRetryCount_) {
+                if (sendRiskEventLocked(channel, expected->second, veda_read_i64_le(&packet.timestamp_ms),
+                                        VEDA_DIST_MM_NONE)) {
+                    ++attempts;
+                }
+            } else if (mismatchEscalateAfterRetries_ && !faultState_[channel]) {
+                faultState_[channel] = true;
+                callback = faultCallback_;
+                notifyFault = true;
+                faulted = true;
+            }
+        }
     }
-    // ACK(reason == VEDA_UPLINK_REASON_ACK)은 지금은 별도 처리 없음.
-    // TODO: 명령-상태 불일치 재시도 정책(mismatchRetryCount)을 여기서 검증하려면
-    // dispatch()가 마지막으로 보낸 값과 이 ACK의 siren/buzzer/led 값을 비교해야 함.
+    if (notifyFault && callback) {
+        callback(channel, faulted);
+    }
 }
 
-void SerialHwEventDispatcher::markAlive(veda::ChannelId ch) {
-    std::lock_guard<std::mutex> lock(heartbeatMutex_);
-    lastHeartbeatAt_[ch] = std::chrono::steady_clock::now();
-
-    auto it = aliveState_.find(ch);
-    const bool wasAlive = (it != aliveState_.end()) && it->second;
-    aliveState_[ch] = true;
-
-    if (!wasAlive && statusCallback_) {
-        statusCallback_(ch, true);
+void SerialHwEventDispatcher::reportAlive(veda::ChannelId channel, const HwIndicatorState& indicators) {
+    StatusCallback callback;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(heartbeatMutex_);
+        lastHeartbeatAt_[channel] = std::chrono::steady_clock::now();
+        auto& state = reportedState_[channel];
+        changed = !state.alive || state.indicators != indicators;
+        state.alive = true;
+        state.indicators = indicators;
+        callback = statusCallback_;
+    }
+    if (changed && callback) {
+        callback(channel, true, indicators);
     }
 }
 
-/**
- * @details heartbeatIntervalMs_마다 깨어나서, 마지막 HEARTBEAT 이후
- *          missedBeatsForTimeout_ * heartbeatIntervalMs_를 넘긴 채널을 dead로 판정한다.
- */
+void SerialHwEventDispatcher::reportDead(veda::ChannelId channel) {
+    StatusCallback callback;
+    HwIndicatorState indicators;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(heartbeatMutex_);
+        auto state = reportedState_.find(channel);
+        if (state != reportedState_.end() && state->second.alive) {
+            state->second.alive = false;
+            indicators = state->second.indicators;
+            callback = statusCallback_;
+            changed = true;
+        }
+    }
+    if (changed && callback) {
+        callback(channel, false, indicators);
+    }
+}
+
 void SerialHwEventDispatcher::watchdogLoop() {
     const auto timeoutDuration = std::chrono::milliseconds(static_cast<uint64_t>(heartbeatIntervalMs_) *
                                                            static_cast<uint64_t>(missedBeatsForTimeout_));
-
     while (running_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(heartbeatIntervalMs_));
-
-        std::lock_guard<std::mutex> lock(heartbeatMutex_);
-        auto now = std::chrono::steady_clock::now();
-
-        for (auto& [ch, alive] : aliveState_) {
-            if (!alive) {
-                continue;
-            }
-            auto lastIt = lastHeartbeatAt_.find(ch);
-            const bool timedOut = (lastIt == lastHeartbeatAt_.end()) || (now - lastIt->second > timeoutDuration);
-            if (timedOut) {
-                alive = false;
-                if (statusCallback_) {
-                    statusCallback_(ch, false);
+        std::vector<veda::ChannelId> timedOutChannels;
+        {
+            std::lock_guard<std::mutex> lock(heartbeatMutex_);
+            const auto now = std::chrono::steady_clock::now();
+            for (const auto& [channel, state] : reportedState_) {
+                if (!state.alive) {
+                    continue;
+                }
+                const auto last = lastHeartbeatAt_.find(channel);
+                if (last == lastHeartbeatAt_.end() || now - last->second > timeoutDuration) {
+                    timedOutChannels.push_back(channel);
                 }
             }
+        }
+        for (const auto channel : timedOutChannels) {
+            reportDead(channel);
         }
     }
 }

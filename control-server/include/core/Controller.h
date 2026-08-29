@@ -13,6 +13,7 @@
  * @endcode
  */
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -63,11 +64,15 @@ public:
     void stop();
 
 private:
+    friend class ControllerTestPeer;
+
     /**
      * @brief 핵심 알고리즘 흐름을 정의한 템플릿 메서드
      * @param frames 시간 윈도우 내에 수집된 프레임 묶음
      */
     void processPipeline(const std::vector<veda::TopViewFrame>& frames);
+    void recordPipelineDuration(std::chrono::steady_clock::time_point startedAt,
+                                std::chrono::steady_clock::time_point completedAt);
 
     std::shared_ptr<IChannelReceiver> receiver_;
     std::shared_ptr<IFrameAggregator> aggregator_;
@@ -87,6 +92,11 @@ private:
     /// @brief 위험 판정 결과 버퍼. processPipeline 단일 스레드 전용이며 매 프레임 재사용된다
     ///        (IRiskPolicy::evaluate 의 out-parameter 규약 -- 프레임당 할당 0)
     domain::RiskEvaluation riskEval_;
+
+    static constexpr std::chrono::milliseconds kPipelineMetricsReportInterval{5000};
+    std::chrono::steady_clock::time_point pipelineMetricsWindowStart_ = std::chrono::steady_clock::now();
+    std::uint64_t pipelineLatencySampleCount_ = 0;
+    std::chrono::nanoseconds totalPipelineDuration_{0};
 
     /**
      * @name 채널 생존 상태 (LWT + STM32 하트비트)

@@ -1,5 +1,8 @@
 #include "core/Pipeline.h"
 
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -54,6 +57,7 @@ Pipeline::Pipeline(std::shared_ptr<IMetadataParser> parser, std::shared_ptr<IIma
       options_(options) {}
 
 void Pipeline::onPacket(const domain::RawPacket& raw) {
+    const auto pipelineStartedAt = std::chrono::steady_clock::now();
     domain::ChannelFrame frame = parser_->parse(raw);
     frame = sanitizer_->sanitize(std::move(frame));
     // 멤버 버퍼를 재사용 → 프레임마다 RouteResult를 새로 만들지 않음 (힙 할당 0)
@@ -111,4 +115,28 @@ void Pipeline::onPacket(const domain::RawPacket& raw) {
         blurFrame.blurs.push_back(toBlurTarget(o));
     }
     blurSink_->send(blurFrame);
+    recordPipelineDuration(pipelineStartedAt, std::chrono::steady_clock::now());
+}
+
+void Pipeline::recordPipelineDuration(std::chrono::steady_clock::time_point startedAt,
+                                      std::chrono::steady_clock::time_point completedAt) {
+    totalPipelineDuration_ += completedAt - startedAt;
+    ++pipelineSampleCount_;
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(completedAt - metricsWindowStart_);
+    if (elapsed < std::chrono::milliseconds(options_.metricsReportIntervalMs)) {
+        return;
+    }
+
+    const double averageMs =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(totalPipelineDuration_).count() /
+        static_cast<double>(pipelineSampleCount_);
+    std::ostringstream report;
+    report << std::fixed << std::setprecision(2) << "최근 " << elapsed.count() << "ms 지표 - compute 전체 파이프라인 "
+           << pipelineSampleCount_ << "회, 평균 처리시간 " << averageMs << "ms";
+    logSuccess(kIface, report.str());
+
+    totalPipelineDuration_ = std::chrono::nanoseconds{0};
+    pipelineSampleCount_ = 0;
+    metricsWindowStart_ = completedAt;
 }

@@ -54,7 +54,8 @@ domain::ChannelFrame makeFrame(std::vector<domain::DetectedObject> objects) {
 
 bool containsId(const domain::ChannelFrame& f, veda::ObjectId id) {
     for (const auto& o : f.objects) {
-        if (o.id == id) return true;
+        if (o.id == id)
+            return true;
     }
     return false;
 }
@@ -62,11 +63,19 @@ bool containsId(const domain::ChannelFrame& f, veda::ObjectId id) {
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -213,8 +222,8 @@ TEST(SanitizerTest, ZeroAllocationDuringSanitizeSteadyState) {
 
     std::vector<domain::DetectedObject> objs;
     for (int i = 0; i < 64; ++i) {
-        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human,
-                                  0.01 * i, 0.01 * i, 0.01 * i + 0.005, 0.01 * i + 0.005));
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human, 0.01 * i, 0.01 * i,
+                                  0.01 * i + 0.005, 0.01 * i + 0.005));
     }
     auto frame = makeFrame(objs);
 
@@ -251,10 +260,10 @@ TEST(SanitizerTest, DegenerateBoxesDoNotCrashOrRemoveValidObjects) {
     ContainmentSanitizer sanitizer(0.5, 0.9);
 
     auto frame = makeFrame({
-        makeObject(1, veda::ObjectClass::Human, 0.5, 0.5, 0.5, 0.5),    // 0 면적
-        makeObject(2, veda::ObjectClass::Human, 0.9, 0.9, 0.1, 0.1),    // 역전 (l>r, t>b)
+        makeObject(1, veda::ObjectClass::Human, 0.5, 0.5, 0.5, 0.5),        // 0 면적
+        makeObject(2, veda::ObjectClass::Human, 0.9, 0.9, 0.1, 0.1),        // 역전 (l>r, t>b)
         makeObject(3, veda::ObjectClass::Vehicle, -5.0, -5.0, -4.0, -4.0),  // 음수 좌표
-        makeObject(4, veda::ObjectClass::Human, 0.2, 0.2, 0.3, 0.3),    // 정상
+        makeObject(4, veda::ObjectClass::Human, 0.2, 0.2, 0.3, 0.3),        // 정상
     });
 
     EXPECT_NO_THROW({

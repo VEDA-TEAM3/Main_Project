@@ -24,6 +24,8 @@ option(QTCCTV_ENABLE_PCH "Enable precompiled headers for faster Qt rebuilds" ON)
 option(QTCCTV_ENABLE_UNITY_BUILD "Enable unity build for faster full rebuilds" OFF)
 option(QTCCTV_BUILD_CHECKS "Build standalone logic self-checks" OFF)
 
+include(CTest)
+
 qt_standard_project_setup()
 
 # 경고를 켜 두지 않으면 지금 0인 상태가 유지된다는 보장이 없다. -Werror는 걸지 않는다 -
@@ -34,9 +36,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 qt_add_executable(Qtcctvclient
-    "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-format"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../.clang-tidy"
-
     src/main.cpp
 
     include/config/ApplicationConfig.h
@@ -559,4 +558,38 @@ if(QTCCTV_BUILD_CHECKS)
         glib-2.0
         intl
     )
+
+    add_executable(blur_message_parser_check
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/client/unit/BlurMessageParserTest.cpp
+        src/network/parsing/BlurMessageParser.cpp
+    )
+    target_include_directories(blur_message_parser_check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(blur_message_parser_check PRIVATE Qt6::Core)
+
+    add_executable(device_status_topic_handler_check
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/client/unit/DeviceStatusTopicHandlerTest.cpp
+        src/network/routing/DeviceStatusTopicHandler.cpp
+        src/network/routing/MqttTopicFilter.cpp
+    )
+    target_include_directories(device_status_topic_handler_check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(device_status_topic_handler_check PRIVATE Qt6::Core)
+
+    foreach(check_target IN ITEMS
+        latest_blur_frame_buffer_check
+        risk_object_tracker_bounds_check
+        digital_twin_heading_check
+        table_model_roles_check
+        config_area_writer_check
+        local_file_auth_gateway_check
+        risk_message_parser_check
+        blur_message_parser_check
+        device_status_topic_handler_check
+        video_utc_clock_mapper_check
+        video_chain_selection_check
+        video_preprocess_lut_check
+        blur_processor_nv12_check
+    )
+        add_test(NAME ${check_target} COMMAND $<TARGET_FILE:${check_target}>)
+        set_tests_properties(${check_target} PROPERTIES TIMEOUT 60)
+    endforeach()
 endif()

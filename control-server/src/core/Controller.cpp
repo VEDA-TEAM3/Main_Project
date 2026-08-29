@@ -1,5 +1,7 @@
 #include "core/Controller.h"
 
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 #include "Logger.h"
@@ -11,9 +13,8 @@ constexpr const char* kIface = "Controller";
 Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_ptr<IFrameAggregator> aggregator,
                        std::shared_ptr<ILocalToWorldTransform> transform, std::shared_ptr<ICrossChannelFuser> fuser,
                        std::shared_ptr<IParkingPolicy> parkingPolicy, std::shared_ptr<IZoneMapper> zoneMapper,
-                       std::shared_ptr<IRiskPolicy> riskPolicy,
-                       std::shared_ptr<IHwEventDispatcher> dispatcher, std::shared_ptr<ISink> sink,
-                       std::shared_ptr<IClock> clock, int channelCount)
+                       std::shared_ptr<IRiskPolicy> riskPolicy, std::shared_ptr<IHwEventDispatcher> dispatcher,
+                       std::shared_ptr<ISink> sink, std::shared_ptr<IClock> clock, int channelCount)
     : receiver_(std::move(receiver)),
       aggregator_(std::move(aggregator)),
       transform_(std::move(transform)),
@@ -41,8 +42,7 @@ Controller::Controller(std::shared_ptr<IChannelReceiver> receiver, std::shared_p
 
     // 집계기가 풀에서 빌려 준 버퍼를 그대로 읽는다 (복사/이동 없음).
     // processPipeline 은 frames 를 읽기만 하고 보관하지 않으므로 참조로 받아도 안전하다.
-    aggregator_->setCallback(
-        [this](const std::vector<veda::TopViewFrame>& frames) { this->processPipeline(frames); });
+    aggregator_->setCallback([this](const std::vector<veda::TopViewFrame>& frames) { this->processPipeline(frames); });
 }
 
 veda::ChannelStatus Controller::buildStatusLocked(std::size_t idx) const {
@@ -137,15 +137,15 @@ void Controller::stop() {
 }
 
 void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) {
-    if (frames.empty()) {
-        return;
-    }
-
+    const auto pipelineStartedAt = std::chrono::steady_clock::now();
     // 로컬(veda::TopViewFrame) -> 월드(domain::ObservationFrame). 타입이 달라지므로 이후 단계에서
     // 로컬 좌표를 실수로 쓰면 컴파일이 실패한다 (예전에는 같은 버퍼를 in-place 로 덮어썼음)
     transform_->transform(frames, observations_);
 
     auto worldFrame = fuser_->fuse(observations_);
+    if (worldFrame.timestamp <= 0 && clock_) {
+        worldFrame.timestamp = clock_->now();
+    }
 
     parkingPolicy_->apply(worldFrame);
 
@@ -159,6 +159,8 @@ void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) 
 
     sink_->send(worldFrame);
 
+    recordPipelineDuration(pipelineStartedAt, std::chrono::steady_clock::now());
+
     // 윈도우마다(기본 100ms = 초당 10회) 도는 정상 경로라 Debug
     // -- 문자열 조립까지 레벨로 걸러냄
     if (isLogEnabled(LogLevel::Debug)) {
@@ -170,4 +172,29 @@ void Controller::processPipeline(const std::vector<veda::TopViewFrame>& frames) 
         logDebug(kIface, std::to_string(frames.size()) + "채널 → 객체 " + std::to_string(worldFrame.objects.size()) +
                              "개 융합, 최고 위험도=" + std::string(veda::toString(maxLevel)));
     }
+}
+
+void Controller::recordPipelineDuration(std::chrono::steady_clock::time_point startedAt,
+                                        std::chrono::steady_clock::time_point completedAt) {
+    totalPipelineDuration_ += completedAt - startedAt;
+    ++pipelineLatencySampleCount_;
+
+    const auto elapsed = completedAt - pipelineMetricsWindowStart_;
+    if (elapsed < kPipelineMetricsReportInterval) {
+        return;
+    }
+
+    const double averageMs =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(totalPipelineDuration_).count() /
+        static_cast<double>(pipelineLatencySampleCount_);
+    std::ostringstream report;
+    report << std::fixed << std::setprecision(2) << "최근 "
+           << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+           << "ms 지표 - control 전체 파이프라인 " << pipelineLatencySampleCount_ << "회, 평균 처리시간 "
+           << averageMs << "ms";
+    logSuccess(kIface, report.str());
+
+    pipelineLatencySampleCount_ = 0;
+    totalPipelineDuration_ = std::chrono::nanoseconds{0};
+    pipelineMetricsWindowStart_ = completedAt;
 }

@@ -31,6 +31,7 @@
  * CCTV로부터 Metadata를 받아오는 단계는 main에서 처리
  */
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 
@@ -60,6 +61,7 @@ enum class RiskEdgePolicy {
  */
 struct PipelineOptions {
     RiskEdgePolicy edgePolicy = RiskEdgePolicy::DropBottomTruncated;
+    int metricsReportIntervalMs = 5000;
 };
 
 /**
@@ -99,6 +101,11 @@ public:
     void onPacket(const domain::RawPacket& raw);
 
 private:
+    friend class PipelineTestPeer;
+
+    void recordPipelineDuration(std::chrono::steady_clock::time_point startedAt,
+                                std::chrono::steady_clock::time_point completedAt);
+
     std::shared_ptr<IMetadataParser> parser_;              ///< Metadata 파서 인스턴스
     std::shared_ptr<IImageCoordinateMapper> imageMapper_;  ///< Metadata 좌표계 → App 좌표계 매핑 인스턴스
     std::shared_ptr<IObjectSanitizer> sanitizer_;          ///< 팬텀 객체 제거 인스턴스
@@ -109,6 +116,9 @@ private:
     std::shared_ptr<ISink<veda::BlurFrame>> blurSink_;     ///< Blur 경로 결과물 출력 싱크 인스턴스
 
     PipelineOptions options_;  ///< 실행 정책
+    std::chrono::steady_clock::time_point metricsWindowStart_ = std::chrono::steady_clock::now();
+    std::chrono::nanoseconds totalPipelineDuration_{0};
+    std::uint64_t pipelineSampleCount_ = 0;
 
     /**
      * @brief   라우터 출력 버퍼 (프레임마다 재사용)

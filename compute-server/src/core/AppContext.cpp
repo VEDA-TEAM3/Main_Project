@@ -64,6 +64,7 @@ AppContext::AppContext(const AppConfig& config) {
 
     PipelineOptions options;
     options.edgePolicy = toRiskEdgePolicy(config.riskEdgePolicy);
+    options.metricsReportIntervalMs = config.metricsReportIntervalMs;
 
     pipeline_ = std::make_unique<Pipeline>(parser, imageMapper, sanitizer, router, ground, transform, riskSink,
                                            blurSink, options);

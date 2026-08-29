@@ -24,8 +24,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "core/AppConfig.h"
@@ -52,6 +54,10 @@ AppConfig makeConfig(const std::string& ip) {
     cfg.channelId = 0;
     cfg.rtspIp = ip;
     cfg.rtspPort = 554;
+    cfg.rtspUser = "viewer";
+    cfg.rtspPass = "secret";
+    cfg.rtspSetupUri = "rtsp://127.0.0.1/metadata";
+    cfg.rtspPlayUri = "rtsp://127.0.0.1/stream";
     cfg.rtspConnectTimeoutSec = 1;
     cfg.rtspRecvTimeoutSec = 1;
     return cfg;
@@ -61,7 +67,8 @@ AppConfig makeConfig(const std::string& ip) {
 void runSessionSequence(INetwork& net, bool playSucceeded) {
     if (net.connect() && net.setup()) {
         net.play();
-        if (playSucceeded) net.run();
+        if (playSucceeded)
+            net.run();
     }
 }
 
@@ -139,7 +146,8 @@ TEST(NetworkTest, Contract_UnsetCallbackIsSafe) {
     MockINetwork net;
     EXPECT_FALSE(static_cast<bool>(net.onPayloadReceived));
     EXPECT_NO_THROW({
-        if (net.onPayloadReceived) net.onPayloadReceived("ignored");
+        if (net.onPayloadReceived)
+            net.onPayloadReceived("ignored");
     });
 }
 
@@ -174,7 +182,7 @@ TEST(NetworkTest, Connect_RejectsEmptyAddress) {
 // ============================================================================
 
 TEST(NetworkTest, Cancel_IsSafeBeforeConnect) {
-    // connect 이전에는 cancelFd_ 가 -1 이므로 shutdown 대상이 없다.
+    // connect 이전에는 보호된 sock_ 가 -1 이므로 shutdown 대상이 없다.
     // 이미 닫힌/열리지 않은 fd 에 shutdown 을 걸면 안 된다.
     RtspClientV2 client(makeConfig("127.0.0.1"));
     EXPECT_NO_THROW(client.cancel()) << "connect 이전 cancel() 은 무해해야 함";
@@ -190,11 +198,33 @@ TEST(NetworkTest, Cancel_IsIdempotent) {
 }
 
 TEST(NetworkTest, Cancel_AfterFailedConnectIsSafe) {
-    // 실패한 connect 는 closeSocket() 으로 fd 를 반납하고 cancelFd_ 를 -1 로 무효화한다.
+    // 실패한 connect 는 closeSocket()으로 fd를 반납하고 보호된 sock_를 -1로 무효화한다.
     // 그 뒤의 cancel() 이 이미 닫힌 fd 를 건드리면 안 된다.
     RtspClientV2 client(makeConfig("not-a-valid-ip"));
     ASSERT_FALSE(client.connect());
     EXPECT_NO_THROW(client.cancel());
+}
+
+TEST(NetworkTest, Cancel_ConcurrentWithConnectIsSafe) {
+    for (int i = 0; i < 100; ++i) {
+        RtspClientV2 client(makeConfig("not-a-valid-ip"));
+        std::thread connector([&client] { (void)client.connect(); });
+        client.cancel();
+        connector.join();
+    }
+}
+
+TEST(NetworkTest, Security_RejectsRtspHeaderInjectionInConfig) {
+    AppConfig config = makeConfig("127.0.0.1");
+    config.rtspUser = "viewer\r\nInjected: true";
+    RtspClientV2 client(config);
+    EXPECT_FALSE(client.connect());
+}
+
+TEST(NetworkTest, Config_BackoffHasFiniteUpperBound) {
+    int value = std::numeric_limits<int>::max();
+    AppConfig::clampRange(value, 1, AppConfig::kMaxRtspPolicySeconds, "testBackoff");
+    EXPECT_EQ(value, AppConfig::kMaxRtspPolicySeconds);
 }
 
 // ============================================================================

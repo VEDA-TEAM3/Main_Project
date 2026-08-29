@@ -28,7 +28,8 @@ public:
      * @param heartbeatIntervalMs     STM32가 HEARTBEAT를 보내기로 되어 있는 주기 (ms)
      * @param missedBeatsForTimeout   연속 몇 번 유실되면 dead 판정할지
      */
-    SerialHwEventDispatcher(std::string devicePath, uint32_t heartbeatIntervalMs, uint32_t missedBeatsForTimeout);
+    SerialHwEventDispatcher(std::string devicePath, uint32_t heartbeatIntervalMs, uint32_t missedBeatsForTimeout,
+                            uint32_t mismatchRetryCount = 2, bool mismatchEscalateAfterRetries = true);
     ~SerialHwEventDispatcher() override;
 
     SerialHwEventDispatcher(const SerialHwEventDispatcher&) = delete;
@@ -36,26 +37,41 @@ public:
 
     void dispatch(const domain::RiskEvaluation& eval) override;
     void setStatusCallback(StatusCallback callback) override;
+    void setFaultCallback(FaultCallback callback) override;
 
 private:
     void openPort();
+    bool sendRiskEventLocked(veda::ChannelId channel, veda::RiskLevel level, veda::TimestampMs timestamp,
+                             std::uint16_t distanceMm);
     void readerLoop();
     void watchdogLoop();
     void handleUplinkFrame(const veda_uplink_packet_t& pkt);
-    void markAlive(veda::ChannelId ch);
+    void reportAlive(veda::ChannelId channel, const HwIndicatorState& indicators);
+    void reportDead(veda::ChannelId channel);
 
     std::string devicePath_;
     uint32_t heartbeatIntervalMs_;
     uint32_t missedBeatsForTimeout_;
+    uint32_t mismatchRetryCount_;
+    bool mismatchEscalateAfterRetries_;
 
     int fd_ = -1;
 
+    std::mutex sendStateMutex_;
     std::unordered_map<veda::ChannelId, veda::RiskLevel> lastSentLevel_;
-    StatusCallback statusCallback_;
+    std::unordered_map<veda::ChannelId, uint32_t> mismatchRetryAttempts_;
+    std::unordered_map<veda::ChannelId, bool> faultState_;
+    FaultCallback faultCallback_;
+
+    struct ReportedState {
+        bool alive = false;
+        HwIndicatorState indicators;
+    };
 
     std::mutex heartbeatMutex_;
     std::unordered_map<veda::ChannelId, std::chrono::steady_clock::time_point> lastHeartbeatAt_;
-    std::unordered_map<veda::ChannelId, bool> aliveState_;
+    std::unordered_map<veda::ChannelId, ReportedState> reportedState_;
+    StatusCallback statusCallback_;
 
     std::atomic<bool> running_{false};
     std::thread readerThread_;

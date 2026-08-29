@@ -1,4 +1,16 @@
-# Wise AI 기반 주차장 디지털 트윈 관제 시스템
+# VEDA Client · 주차장 디지털 트윈 관제
+
+<p>
+  <img src="https://img.shields.io/badge/Qt-6.11-41CD52?style=flat-square&logo=qt&logoColor=white" alt="Qt 6.11">
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus" alt="C++ 20">
+  <img src="https://img.shields.io/badge/GStreamer-1.x-EA1D2C?style=flat-square&logo=gstreamer" alt="GStreamer 1.x">
+  <img src="https://img.shields.io/badge/MQTT-TLS-660066?style=flat-square&logo=mqtt" alt="MQTT TLS">
+</p>
+
+[← 프로젝트 홈](../README.md) · [compute-server](../compute-server/) ·
+[control-server](../control-server/) · [시스템 아키텍처](../manual/system/system_architecture.md)
+
+> CCTV 영상, 위험 객체, 블러 메타데이터와 장비 상태를 하나의 실시간 대시보드로 통합합니다.
 
 Qt 6와 GStreamer로 구현한 다구역 주차장 안전 관제 애플리케이션입니다. 각 구역은 4개 RTSP 채널로
 구성되며, MQTT 장비 상태, 위험 객체 좌표와 블러 메타데이터를 하나의 대시보드에서 실시간으로 표시합니다.
@@ -38,11 +50,12 @@ client/
 │  ├─ config/             설정 모델과 로더
 │  ├─ model/              객체, 이벤트, 장비 상태 모델
 │  ├─ network/            MQTT 전송, 라우팅, 파서, 디스패처
-│  ├─ overlays/           위험 및 장비 상태 오버레이
 │  ├─ ui/                 화면, 패널, 다이얼로그
 │  └─ video/              RTSP 수신과 블러 처리
 ├─ src/                   include와 동일한 계층의 구현 파일
+├─ qml/                   디지털 트윈과 공통 QML 컴포넌트
 ├─ styles/                Qt Style Sheet
+├─ tests/                 독립 로직 검사
 ├─ CMakeLists.txt
 └─ CMakePresets.json
 ```
@@ -57,6 +70,7 @@ MQTT 데이터는 라우터와 타입별 디스패처를 거쳐 queued signal로
 - CMake 3.25 이상
 - Ninja
 - GStreamer 1.x MinGW x86_64 개발 및 런타임 패키지
+- OpenCV core·imgproc
 - C++20 지원 컴파일러
 
 기본 GStreamer 경로는 `C:/Program Files/gstreamer/1.0/mingw_x86_64`입니다. 다른 위치를 사용하면
@@ -329,7 +343,8 @@ CCTV를 늘릴 때는 세 곳의 개수를 같이 맞춥니다.
 | `risk` | `veda/risk` | 위험 객체와 좌표 |
 | `blur` | `veda/ch/+/blur` | 얼굴 및 번호판 블러 영역 |
 
-Payload 계약과 채널 매핑은 [MQTT_INTEGRATION.md](MQTT_INTEGRATION.md)를 참고합니다.
+Payload 계약과 채널 매핑은 [공통 MQTT 계약](../shared/Contract.h)과
+[시스템 아키텍처](../manual/system/system_architecture.md)를 참고합니다.
 
 ## 보안
 
@@ -431,4 +446,4 @@ Payload 계약과 채널 매핑은 [MQTT_INTEGRATION.md](MQTT_INTEGRATION.md)를
 - GUI 객체는 GUI 스레드에서만 갱신합니다.
 - 새 MQTT 데이터 종류는 `MqttTopicHandler` 구현을 추가해 확장합니다.
 - 새 영상 수신 방식은 `StreamReceiver`와 `StreamReceiverFactory` 구현으로 확장합니다.
-- `.clang-format`, `.clang-tidy`, `C_CppCodingConvention.md` 규칙을 따릅니다.
+- `.clang-format`, `.clang-tidy`, [코딩 컨벤션](../manual/coding_convention.md)을 따릅니다.

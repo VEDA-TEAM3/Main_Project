@@ -14,9 +14,12 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -42,9 +45,10 @@ private:
 };
 
 veda::TopViewFrame makeFrame(veda::ChannelId ch, std::size_t objectCount = 3) {
+    static veda::TimestampMs nextTimestamp = 1000;
     veda::TopViewFrame f;
     f.v = veda::kSchemaVersion;
-    f.ts = 1000;
+    f.ts = nextTimestamp++;
     f.ch = ch;
     f.objects.resize(objectCount);
     for (std::size_t i = 0; i < objectCount; ++i) {
@@ -86,11 +90,19 @@ const LoggerOff g_loggerOff;
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -133,7 +145,7 @@ TEST(AggregatorTest, DropsFrameWithChannelIdOutOfRange) {
     Recorder rec;
     agg.setCallback(rec.callback());
 
-    agg.push(makeFrame(4));   // 상한 밖 (channelCount == 4 이므로 유효 범위는 0..3)
+    agg.push(makeFrame(4));  // 상한 밖 (channelCount == 4 이므로 유효 범위는 0..3)
     agg.push(makeFrame(99));
     clock->advance(200);
     agg.push(makeFrame(0));  // 이 push 가 이전 윈도우를 마감시킨다
@@ -223,9 +235,63 @@ TEST(AggregatorTest, NoCallbackBeforeWindowElapses) {
     EXPECT_EQ(rec.callCount, 0);
 }
 
-TEST(AggregatorTest, KeepsOnlyLatestFramePerChannel) {
+TEST(AggregatorTest, FlushesPendingWindowWithoutAnotherPush) {
+    auto clock = std::make_shared<FakeClock>();
+    TimeWindowAggregatorV2 agg(clock, 20, 4);
+    std::mutex mutex;
+    std::condition_variable delivered;
+    std::vector<veda::TopViewFrame> received;
+    agg.setCallback([&](const IFrameAggregator::AggregatedFrames& frames) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            received = frames;
+        }
+        delivered.notify_one();
+    });
+
+    agg.start();
+    agg.push(makeFrame(2, 1));
+
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(delivered.wait_for(lock, std::chrono::milliseconds(500), [&] { return !received.empty(); }));
+    ASSERT_EQ(received.size(), 1U);
+    EXPECT_EQ(received[0].ch, 2);
+    lock.unlock();
+    agg.stop();
+}
+
+TEST(AggregatorTest, EmitsEmptyWindowsAfterInputStops) {
+    auto clock = std::make_shared<FakeClock>();
+    TimeWindowAggregatorV2 agg(clock, 20, 4);
+    std::mutex mutex;
+    std::condition_variable delivered;
+    std::vector<std::size_t> batchSizes;
+    agg.setCallback([&](const IFrameAggregator::AggregatedFrames& frames) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            batchSizes.push_back(frames.size());
+        }
+        delivered.notify_one();
+    });
+
+    agg.start();
+    agg.push(makeFrame(2, 1));
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(delivered.wait_for(lock, std::chrono::milliseconds(500), [&] { return batchSizes.size() >= 2; }));
+    }
+    agg.stop();
+
+    ASSERT_GE(batchSizes.size(), 2U);
+    EXPECT_EQ(batchSizes[0], 1U);
+    EXPECT_EQ(batchSizes[1], 0U);
+}
+
+TEST(AggregatorTest, KeepsLatestArrivingFramePerChannel) {
     // TopViewFrame 은 델타가 아니라 전체 상태 스냅샷이다.
-    // 같은 채널의 프레임 N+1 은 N 을 완전히 대체한다.
+    // CCTV timestamp가 같거나 역순이어도 같은 채널에서 마지막으로 도착한
+    // 스냅샷을 사용한다.
     auto clock = std::make_shared<FakeClock>();
     TimeWindowAggregatorV2 agg(clock, 100, 4);
     Recorder rec;
@@ -235,16 +301,44 @@ TEST(AggregatorTest, KeepsOnlyLatestFramePerChannel) {
     first.ts = 1111;
     auto second = makeFrame(0, 5);
     second.ts = 2222;
+    auto duplicate = makeFrame(0, 7);
+    duplicate.ts = 2222;
 
     agg.push(first);
     agg.push(second);
+    agg.push(duplicate);
+    first.ts = 1500;
+    first.objects.resize(9);
+    agg.push(first);
     clock->advance(200);
     agg.push(makeFrame(1, 1));
 
     ASSERT_EQ(rec.callCount, 1);
     ASSERT_EQ(rec.lastCopy.size(), 1u) << "같은 채널은 하나로 합쳐져야 한다";
-    EXPECT_EQ(rec.lastCopy[0].ts, 2222) << "최신 프레임이 남아야 한다";
-    EXPECT_EQ(rec.lastCopy[0].objects.size(), 5u);
+    EXPECT_EQ(rec.lastCopy[0].ts, 1500) << "마지막 도착 프레임이 남아야 한다";
+    EXPECT_EQ(rec.lastCopy[0].objects.size(), 9u);
+}
+
+TEST(AggregatorTest, DoesNotCompareTimestampsAcrossCameras) {
+    auto clock = std::make_shared<FakeClock>();
+    TimeWindowAggregatorV2 agg(clock, 100, 4);
+    Recorder rec;
+    agg.setCallback(rec.callback());
+
+    auto firstCamera = makeFrame(0);
+    firstCamera.ts = 1000;
+    auto secondCamera = makeFrame(1);
+    secondCamera.ts = 1200;
+    agg.push(firstCamera);
+    agg.push(secondCamera);
+    clock->advance(200);
+    agg.push(makeFrame(2));
+
+    ASSERT_EQ(rec.lastCopy.size(), 2U);
+    EXPECT_EQ(rec.lastCopy[0].ch, 0);
+    EXPECT_EQ(rec.lastCopy[0].ts, 1000);
+    EXPECT_EQ(rec.lastCopy[1].ch, 1);
+    EXPECT_EQ(rec.lastCopy[1].ts, 1200);
 }
 
 TEST(AggregatorTest, DeliversAllFilledChannelsOnWindowClose) {
@@ -341,13 +435,17 @@ TEST(AggregatorTest, SteadyStatePushAndFlushDoNotAllocate) {
     std::size_t seen = 0;
     agg.setCallback([&seen](const IFrameAggregator::AggregatedFrames& frames) { seen += frames.size(); });
 
-    const auto f0 = makeFrame(0, 8);
-    const auto f1 = makeFrame(1, 8);
-    const auto f2 = makeFrame(2, 8);
-    const auto f3 = makeFrame(3, 8);
+    auto f0 = makeFrame(0, 8);
+    auto f1 = makeFrame(1, 8);
+    auto f2 = makeFrame(2, 8);
+    auto f3 = makeFrame(3, 8);
 
     // warmup: 슬롯/풀 버퍼의 capacity 를 안정화시킨다.
     for (int w = 0; w < 50; ++w) {
+        ++f0.ts;
+        ++f1.ts;
+        ++f2.ts;
+        ++f3.ts;
         agg.push(f0);
         agg.push(f1);
         agg.push(f2);
@@ -358,6 +456,10 @@ TEST(AggregatorTest, SteadyStatePushAndFlushDoNotAllocate) {
     g_allocCount = 0;
     g_allocCounting = true;
     for (int w = 0; w < 200; ++w) {
+        ++f0.ts;
+        ++f1.ts;
+        ++f2.ts;
+        ++f3.ts;
         agg.push(f0);
         agg.push(f1);
         agg.push(f2);
@@ -378,10 +480,12 @@ TEST(AggregatorTest, SlotBufferCapacitySurvivesWindowClose) {
     TimeWindowAggregatorV2 agg(clock, 100, 2);
     agg.setCallback([](const IFrameAggregator::AggregatedFrames&) {});
 
-    const auto big = makeFrame(0, 200);
-    const auto other = makeFrame(1, 1);
+    auto big = makeFrame(0, 200);
+    auto other = makeFrame(1, 1);
 
     for (int w = 0; w < 20; ++w) {  // warmup
+        ++big.ts;
+        ++other.ts;
         agg.push(big);
         clock->advance(200);
         agg.push(other);
@@ -390,6 +494,8 @@ TEST(AggregatorTest, SlotBufferCapacitySurvivesWindowClose) {
     g_allocCount = 0;
     g_allocCounting = true;
     for (int w = 0; w < 100; ++w) {
+        ++big.ts;
+        ++other.ts;
         agg.push(big);
         clock->advance(200);
         agg.push(other);

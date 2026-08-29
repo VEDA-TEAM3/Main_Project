@@ -28,9 +28,9 @@ namespace transform_test {
 
 constexpr double kPi = 3.14159265358979323846;
 
-std::vector<domain::ObservationFrame> referenceTransform(
-    const std::vector<CameraCalibration>& calibrations, bool dropUncalibrated, const WorldBounds& bounds,
-    const std::vector<veda::TopViewFrame>& input) {
+std::vector<domain::ObservationFrame> referenceTransform(const std::vector<CameraCalibration>& calibrations,
+                                                         bool dropUncalibrated, const WorldBounds& bounds,
+                                                         const std::vector<veda::TopViewFrame>& input) {
     std::size_t maxChannel = 0;
     bool any = false;
     for (const auto& calibration : calibrations) {
@@ -73,8 +73,7 @@ std::vector<domain::ObservationFrame> referenceTransform(
             if (!dropUncalibrated) {
                 observed.objects.reserve(frame.objects.size());
                 for (const auto& object : frame.objects) {
-                    observed.objects.push_back(
-                        {object.id, object.cls, domain::WorldPoint{object.pos.x, object.pos.y}});
+                    observed.objects.push_back({object.id, object.cls, domain::WorldPoint{object.pos.x, object.pos.y}});
                 }
             }
             output.push_back(std::move(observed));
@@ -89,16 +88,13 @@ std::vector<domain::ObservationFrame> referenceTransform(
 
         observed.objects.reserve(frame.objects.size());
         for (const auto& object : frame.objects) {
-            const double worldX =
-                calibration->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
-            const double worldY =
-                calibration->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
+            const double worldX = calibration->cameraPosX + object.pos.x * perpendicularX + object.pos.y * forwardX;
+            const double worldY = calibration->cameraPosY + object.pos.x * perpendicularY + object.pos.y * forwardY;
             if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
                 continue;
             }
             if (bounds.enabled &&
-                (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY ||
-                 worldY > bounds.maxY)) {
+                (worldX < bounds.minX || worldX > bounds.maxX || worldY < bounds.minY || worldY > bounds.maxY)) {
                 continue;
             }
             observed.objects.push_back({object.id, object.cls, domain::WorldPoint{worldX, worldY}});
@@ -141,8 +137,7 @@ std::string compareFrames(const std::vector<domain::ObservationFrame>& expected,
             if (lhsObject.cls != rhsObject.cls) {
                 return objectPrefix + "class mismatch";
             }
-            if (!sameDouble(lhsObject.pos.x, rhsObject.pos.x) ||
-                !sameDouble(lhsObject.pos.y, rhsObject.pos.y)) {
+            if (!sameDouble(lhsObject.pos.x, rhsObject.pos.x) || !sameDouble(lhsObject.pos.y, rhsObject.pos.y)) {
                 return objectPrefix + "position mismatch";
             }
         }
@@ -166,13 +161,18 @@ void* operator new(std::size_t size) {
     return memory;
 }
 
-void operator delete(void* memory) noexcept {
-    std::free(memory);
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    if (g_transformAllocCounting) {
+        ++g_transformAllocCount;
+    }
+    return std::malloc(size != 0 ? size : 1);
 }
 
-void operator delete(void* memory, std::size_t) noexcept {
-    std::free(memory);
-}
+void operator delete(void* memory, const std::nothrow_t&) noexcept { std::free(memory); }
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -189,9 +189,8 @@ std::vector<CameraCalibration> makeCalibrations(int channelCount) {
     std::vector<CameraCalibration> calibrations;
     calibrations.reserve(static_cast<std::size_t>(channelCount));
     for (int channel = 0; channel < channelCount; ++channel) {
-        calibrations.push_back(
-            {channel, channel * 11.25 - 20.0, channel * -7.5 + 10.0, channel * 37.0 + 3.5,
-             (channel % 2 == 0) ? -1 : 1});
+        calibrations.push_back({channel, channel * 11.25 - 20.0, channel * -7.5 + 10.0, channel * 37.0 + 3.5,
+                                (channel % 2 == 0) ? -1 : 1});
     }
     return calibrations;
 }
@@ -203,8 +202,10 @@ TEST(TransformEquivalenceTest, PreservesCalibrationAndBoundsSemantics) {
     const WorldBounds bounds{true, -30.0, 30.0, -25.0, 25.0};
 
     std::vector<veda::TopViewFrame> input = {
-        {1, 100, 0, {{1, veda::ObjectClass::Human, {0.0, 0.0}, false},
-                     {2, veda::ObjectClass::Vehicle, {5.0, 12.0}, true}}},
+        {1,
+         100,
+         0,
+         {{1, veda::ObjectClass::Human, {0.0, 0.0}, false}, {2, veda::ObjectClass::Vehicle, {5.0, 12.0}, true}}},
         {1, 101, 1, {{3, veda::ObjectClass::Human, {-3.0, 4.0}, false}}},
         {1, 102, 8, {{4, veda::ObjectClass::Vehicle, {1.0, 1.0}, false}}},
         {1, 103, -1, {{5, veda::ObjectClass::Human, {2.0, 2.0}, false}}},
@@ -239,8 +240,10 @@ TEST(TransformEquivalenceTest, ReusesOutputWithoutLeavingObjectsFromPreviousCall
             input[static_cast<std::size_t>(channel)].ts = 1000 + objectCount;
             for (int object = 0; object < objectCount; ++object) {
                 input[static_cast<std::size_t>(channel)].objects.push_back(
-                    {object + 1, veda::ObjectClass::Human,
-                     {static_cast<double>(object) * 0.1, static_cast<double>(object) * -0.2}, false});
+                    {object + 1,
+                     veda::ObjectClass::Human,
+                     {static_cast<double>(object) * 0.1, static_cast<double>(object) * -0.2},
+                     false});
             }
         }
         transform.transform(input, output);
@@ -272,9 +275,10 @@ TEST(TransformEquivalenceTest, MatchesReferenceAcrossDeterministicRandomFrames) 
             const int objectCount = objectCountDistribution(random);
             frame.objects.reserve(static_cast<std::size_t>(objectCount));
             for (int object = 0; object < objectCount; ++object) {
-                frame.objects.push_back(
-                    {object + 1, (object % 2 == 0) ? veda::ObjectClass::Human : veda::ObjectClass::Vehicle,
-                     {coordinateDistribution(random), coordinateDistribution(random)}, object % 3 == 0});
+                frame.objects.push_back({object + 1,
+                                         (object % 2 == 0) ? veda::ObjectClass::Human : veda::ObjectClass::Vehicle,
+                                         {coordinateDistribution(random), coordinateDistribution(random)},
+                                         object % 3 == 0});
             }
             input.push_back(std::move(frame));
         }
@@ -293,9 +297,12 @@ TEST(TransformEquivalenceTest, RejectsNonFiniteWorldCoordinatesWithAndWithoutBou
     calibrations.push_back({2, 0.0, 0.0, nan, 1});
     const WorldBounds bounds{true, -10.0, 10.0, -10.0, 10.0};
     const std::vector<veda::TopViewFrame> input = {
-        {1, 100, 0, {{1, veda::ObjectClass::Human, {nan, 1.0}, false},
-                     {2, veda::ObjectClass::Vehicle, {infinity, -infinity}, false},
-                     {4, veda::ObjectClass::Human, {1.0, 2.0}, false}}},
+        {1,
+         100,
+         0,
+         {{1, veda::ObjectClass::Human, {nan, 1.0}, false},
+          {2, veda::ObjectClass::Vehicle, {infinity, -infinity}, false},
+          {4, veda::ObjectClass::Human, {1.0, 2.0}, false}}},
         {1, 101, 2, {{3, veda::ObjectClass::Human, {1.0, 2.0}, false}}},
     };
 
@@ -330,8 +337,10 @@ TEST(TransformEquivalenceTest, WarmPathReusesFrameAndObjectBuffersWithoutAllocat
         frame.ts = 1000 + channel;
         frame.objects.reserve(64);
         for (int object = 0; object < 64; ++object) {
-            frame.objects.push_back({object + 1, veda::ObjectClass::Human,
-                                     {static_cast<double>(object), static_cast<double>(object) * 0.5}, false});
+            frame.objects.push_back({object + 1,
+                                     veda::ObjectClass::Human,
+                                     {static_cast<double>(object), static_cast<double>(object) * 0.5},
+                                     false});
         }
     }
 

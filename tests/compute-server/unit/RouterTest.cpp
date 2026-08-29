@@ -29,7 +29,8 @@ domain::DetectedObject makeObject(veda::ObjectId id, veda::ObjectClass cls, bool
     domain::DetectedObject o;
     o.id = id;
     o.cls = cls;
-    if (withParent) o.parentId = static_cast<veda::ObjectId>(id + 1000);
+    if (withParent)
+        o.parentId = static_cast<veda::ObjectId>(id + 1000);
     o.box.l = 0.1;
     o.box.t = 0.1;
     o.box.r = 0.2;
@@ -47,7 +48,8 @@ domain::ChannelFrame makeFrame(std::vector<domain::DetectedObject> objects) {
 
 bool contains(const std::vector<domain::DetectedObject>& v, veda::ObjectId id) {
     for (const auto& o : v) {
-        if (o.id == id) return true;
+        if (o.id == id)
+            return true;
     }
     return false;
 }
@@ -55,11 +57,19 @@ bool contains(const std::vector<domain::DetectedObject>& v, veda::ObjectId id) {
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -75,6 +85,49 @@ TEST(RouterTest, BlurClassGoesToBlurStream) {
 
     EXPECT_EQ(out.blur.size(), 2u);
     EXPECT_TRUE(out.risk.empty());
+}
+
+TEST(RouterTest, SameParentHeadSuppressesFace) {
+    ParentBasedRouter router;
+    RouteResult out;
+    auto face = makeObject(1, veda::ObjectClass::Head);
+    face.parentId = 100;
+    face.isFace = true;
+    auto head = makeObject(2, veda::ObjectClass::Head);
+    head.parentId = 100;
+
+    router.route(makeFrame({face, head}), out);
+
+    ASSERT_EQ(out.blur.size(), 1u);
+    EXPECT_EQ(out.blur.front().id, head.id);
+}
+
+TEST(RouterTest, FaceWithoutHeadIsKept) {
+    ParentBasedRouter router;
+    RouteResult out;
+    auto face = makeObject(1, veda::ObjectClass::Head);
+    face.isFace = true;
+
+    router.route(makeFrame({face}), out);
+
+    ASSERT_EQ(out.blur.size(), 1u);
+    EXPECT_EQ(out.blur.front().id, face.id);
+}
+
+TEST(RouterTest, HeadAndFaceWithDifferentParentsAreBothKept) {
+    ParentBasedRouter router;
+    RouteResult out;
+    auto head = makeObject(1, veda::ObjectClass::Head);
+    head.parentId = 100;
+    auto face = makeObject(2, veda::ObjectClass::Head);
+    face.parentId = 200;
+    face.isFace = true;
+
+    router.route(makeFrame({head, face}), out);
+
+    ASSERT_EQ(out.blur.size(), 2u);
+    EXPECT_TRUE(contains(out.blur, head.id));
+    EXPECT_TRUE(contains(out.blur, face.id));
 }
 
 TEST(RouterTest, RiskClassWithoutParentGoesToRiskStream) {
@@ -144,8 +197,7 @@ TEST(RouterTest, PrivacyBoundary_BlurClassesNeverReachRiskStream) {
                  out);
 
     for (const auto& o : out.risk) {
-        EXPECT_FALSE(veda::isBlurClass(o.cls))
-            << "개인정보 클래스가 risk 스트림(=다른 MQTT 토픽)으로 유출되면 안 됨";
+        EXPECT_FALSE(veda::isBlurClass(o.cls)) << "개인정보 클래스가 risk 스트림(=다른 MQTT 토픽)으로 유출되면 안 됨";
     }
     EXPECT_EQ(out.blur.size(), 4u);
     EXPECT_TRUE(out.risk.empty());
@@ -241,7 +293,8 @@ TEST(RouterTest, W1_SteadyStateHasZeroHeapAllocations) {
 
     g_allocCount = 0;
     g_allocCounting = true;
-    for (int i = 0; i < 100; ++i) router.route(frame, buf);
+    for (int i = 0; i < 100; ++i)
+        router.route(frame, buf);
     g_allocCounting = false;
 
     EXPECT_EQ(g_allocCount, 0) << "[W1] 출력 파라미터 재사용으로 정상 상태 힙 할당이 0이어야 함";
@@ -252,7 +305,8 @@ TEST(RouterTest, W1_CapacityIsPreservedAcrossCalls) {
     RouteResult buf;
 
     std::vector<domain::DetectedObject> objs;
-    for (int i = 0; i < 32; ++i) objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human));
+    for (int i = 0; i < 32; ++i)
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human));
     router.route(makeFrame(objs), buf);
 
     const std::size_t capRisk = buf.risk.capacity();
@@ -267,7 +321,8 @@ TEST(RouterTest, W1_ClearPreventsStaleObjectsFromPreviousFrame) {
     RouteResult buf;
 
     std::vector<domain::DetectedObject> many;
-    for (int i = 0; i < 50; ++i) many.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human));
+    for (int i = 0; i < 50; ++i)
+        many.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), veda::ObjectClass::Human));
     router.route(makeFrame(many), buf);
     ASSERT_EQ(buf.risk.size(), 50u);
 
@@ -294,7 +349,7 @@ TEST(RouterTest, W1_EmptyFrameClearsPreviousResults) {
 }
 
 // ============================================================================
-// 5. 복잡도 특성 (O(N)) — 대량 입력에서도 선형·무크래시
+// 5. 복잡도 특성 (N <= 256) — 최대 입력에서도 무크래시
 // ============================================================================
 
 TEST(RouterTest, HandlesMaxObjectCountWithoutIssue) {
@@ -303,9 +358,9 @@ TEST(RouterTest, HandlesMaxObjectCountWithoutIssue) {
 
     std::vector<domain::DetectedObject> objs;
     for (int i = 0; i < 256; ++i) {
-        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1),
-                                  (i % 3 == 0) ? veda::ObjectClass::Vehicle
-                                               : (i % 3 == 1) ? veda::ObjectClass::Head : veda::ObjectClass::Unknown));
+        objs.push_back(makeObject(static_cast<veda::ObjectId>(i + 1), (i % 3 == 0)   ? veda::ObjectClass::Vehicle
+                                                                      : (i % 3 == 1) ? veda::ObjectClass::Head
+                                                                                     : veda::ObjectClass::Unknown));
     }
 
     EXPECT_NO_THROW(router.route(makeFrame(objs), buf));

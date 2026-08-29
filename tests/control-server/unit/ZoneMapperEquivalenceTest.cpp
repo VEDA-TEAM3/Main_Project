@@ -5,9 +5,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <new>
 #include <random>
@@ -22,8 +27,24 @@
 namespace zone_test {
 
 void referenceAssign(const std::vector<SpatialZone>& zones, domain::WorldFrame& frame) {
+    bool directional = zones.size() == 4;
+    std::array<bool, 4> seen{};
+    for (const auto& zone : zones) {
+        if (zone.zoneId < 0 || zone.zoneId >= 4 || seen[static_cast<std::size_t>(zone.zoneId)]) {
+            directional = false;
+            break;
+        }
+        seen[static_cast<std::size_t>(zone.zoneId)] = true;
+    }
+
     for (auto& object : frame.objects) {
         object.zoneId = -1;
+        if (directional && std::isfinite(object.pos.x) && std::isfinite(object.pos.y)) {
+            const std::array<double, 4> scores = {object.pos.y, object.pos.x, -object.pos.y, -object.pos.x};
+            object.zoneId =
+                static_cast<veda::ChannelId>(std::max_element(scores.begin(), scores.end()) - scores.begin());
+            continue;
+        }
         for (const auto& zone : zones) {
             if (object.pos.x >= zone.minX && object.pos.x <= zone.maxX && object.pos.y >= zone.minY &&
                 object.pos.y <= zone.maxY) {
@@ -41,8 +62,8 @@ std::string compareZoneIds(const domain::WorldFrame& expected, const domain::Wor
     }
     for (std::size_t index = 0; index < expected.objects.size(); ++index) {
         if (expected.objects[index].zoneId != actual.objects[index].zoneId) {
-            return "object[" + std::to_string(index) + "] zone mismatch: expected=" +
-                   std::to_string(expected.objects[index].zoneId) +
+            return "object[" + std::to_string(index) +
+                   "] zone mismatch: expected=" + std::to_string(expected.objects[index].zoneId) +
                    " actual=" + std::to_string(actual.objects[index].zoneId);
         }
     }
@@ -65,13 +86,18 @@ void* operator new(std::size_t size) {
     return memory;
 }
 
-void operator delete(void* memory) noexcept {
-    std::free(memory);
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    if (g_zoneAllocCounting) {
+        ++g_zoneAllocCount;
+    }
+    return std::malloc(size != 0 ? size : 1);
 }
 
-void operator delete(void* memory, std::size_t) noexcept {
-    std::free(memory);
-}
+void operator delete(void* memory, const std::nothrow_t&) noexcept { std::free(memory); }
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -90,8 +116,7 @@ void expectEquivalent(const std::vector<SpatialZone>& zones, const domain::World
     zone_test::referenceAssign(zones, expected);
     SpatialZoneMapper mapper(zones);
     mapper.assign(actual);
-    EXPECT_TRUE(zone_test::compareZoneIds(expected, actual).empty())
-        << zone_test::compareZoneIds(expected, actual);
+    EXPECT_TRUE(zone_test::compareZoneIds(expected, actual).empty()) << zone_test::compareZoneIds(expected, actual);
 }
 
 TEST(ZoneMapperEquivalenceTest, PreservesFirstMatchAndInclusiveBoundaries) {
@@ -187,8 +212,7 @@ TEST(ZoneMapperEquivalenceTest, MatchesReferenceAcrossDeterministicRandomInputs)
         frame.objects.reserve(static_cast<std::size_t>(objectCount));
         for (int object = 0; object < objectCount; ++object) {
             frame.objects.push_back({object + 1,
-                                     (object % 2 == 0) ? veda::ObjectClass::Human
-                                                       : veda::ObjectClass::Vehicle,
+                                     (object % 2 == 0) ? veda::ObjectClass::Human : veda::ObjectClass::Vehicle,
                                      {coordinateDistribution(random), coordinateDistribution(random)}});
         }
 
@@ -202,20 +226,18 @@ TEST(ZoneMapperEquivalenceTest, MatchesReferenceAcrossDeterministicRandomInputs)
     }
 }
 
-TEST(ZoneMapperEquivalenceTest, FourZoneHotPathUsesInclusiveFirstMatchSemantics) {
+TEST(ZoneMapperEquivalenceTest, FourDirectionalZonesUseHighestScoreAndLowerIdForTies) {
     const std::vector<SpatialZone> zones = {
-        {0, 0.0, 10.0, 0.0, 10.0},
-        {1, 10.0, 20.0, 0.0, 10.0},
-        {2, 0.0, 10.0, 10.0, 20.0},
-        {3, 10.0, 20.0, 10.0, 20.0},
+        {2, -100.0, 100.0, 0.0, 100.0},
+        {0, -100.0, 100.0, 0.0, -100.0},
+        {3, -100.0, 0.0, -100.0, 100.0},
+        {1, 0.0, 100.0, -100.0, 100.0},
     };
     domain::WorldFrame frame;
     frame.objects = {
-        {1, veda::ObjectClass::Human, {5.0, 5.0}},
-        {2, veda::ObjectClass::Human, {10.0, 5.0}},
-        {3, veda::ObjectClass::Human, {5.0, 15.0}},
-        {4, veda::ObjectClass::Human, {15.0, 15.0}},
-        {5, veda::ObjectClass::Human, {-1.0, -1.0}},
+        {1, veda::ObjectClass::Human, {0.0, 10.0}},  {2, veda::ObjectClass::Human, {10.0, 0.0}},
+        {3, veda::ObjectClass::Human, {0.0, -10.0}}, {4, veda::ObjectClass::Human, {-10.0, 0.0}},
+        {5, veda::ObjectClass::Human, {10.0, 10.0}},
     };
 
     SpatialZoneMapper mapper(zones);
@@ -223,10 +245,172 @@ TEST(ZoneMapperEquivalenceTest, FourZoneHotPathUsesInclusiveFirstMatchSemantics)
 
     ASSERT_EQ(frame.objects.size(), 5U);
     EXPECT_EQ(frame.objects[0].zoneId, 0);
-    EXPECT_EQ(frame.objects[1].zoneId, 0) << "겹치는 경계에서는 먼저 선언된 zone이 이겨야 함";
+    EXPECT_EQ(frame.objects[1].zoneId, 1);
     EXPECT_EQ(frame.objects[2].zoneId, 2);
     EXPECT_EQ(frame.objects[3].zoneId, 3);
-    EXPECT_EQ(frame.objects[4].zoneId, -1);
+    EXPECT_EQ(frame.objects[4].zoneId, 0) << "45도 동점에서는 낮은 zoneId가 이겨야 함";
+}
+
+TEST(ZoneMapperEquivalenceTest, TwoFourChannelCctvsUseNearestCameraAndLocalDirection) {
+    std::vector<SpatialZone> zones;
+    std::vector<CameraCalibration> calibrations;
+    for (int channel = 0; channel < 8; ++channel) {
+        zones.push_back({channel, -100.0, 100.0, -100.0, 100.0});
+        calibrations.push_back({channel, channel < 4 ? -50.0 : 50.0, 0.0, static_cast<double>(channel % 4) * 90.0, -1});
+    }
+
+    SpatialZoneMapper mapper(zones, 0.5, calibrations, true);
+    domain::WorldFrame frame;
+    frame.objects = {
+        {1, veda::ObjectClass::Human, {-50.0, 10.0}},  {2, veda::ObjectClass::Human, {-40.0, 0.0}},
+        {3, veda::ObjectClass::Human, {-50.0, -10.0}}, {4, veda::ObjectClass::Human, {-60.0, 0.0}},
+        {5, veda::ObjectClass::Human, {50.0, 10.0}},   {6, veda::ObjectClass::Human, {60.0, 0.0}},
+        {7, veda::ObjectClass::Human, {50.0, -10.0}},  {8, veda::ObjectClass::Human, {40.0, 0.0}},
+        {9, veda::ObjectClass::Human, {0.0, 0.0}},
+    };
+
+    mapper.assign(frame);
+    for (std::size_t index = 0; index < 8; ++index) {
+        EXPECT_EQ(frame.objects[index].zoneId, static_cast<veda::ChannelId>(index));
+    }
+    EXPECT_EQ(frame.objects[8].zoneId, 1) << "CCTV 거리 동점에서는 낮은 zoneId 그룹이 이겨야 함";
+
+    frame.objects = {{10, veda::ObjectClass::Human, {-1.0, 0.0}}};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 1);
+
+    frame.objects[0].pos = {0.2, 0.0};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 1) << "0.5m 히스테리시스 안에서는 이전 CCTV를 유지해야 함";
+
+    frame.objects[0].pos = {1.0, 0.0};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 7);
+}
+
+TEST(ZoneMapperEquivalenceTest, DirectionalHysteresisSurvivesShortObservationGap) {
+    std::vector<SpatialZone> zones;
+    std::vector<CameraCalibration> calibrations;
+    for (int channel = 0; channel < 8; ++channel) {
+        zones.push_back({channel, -100.0, 100.0, -100.0, 100.0});
+        calibrations.push_back({channel, channel < 4 ? -50.0 : 50.0, 0.0, static_cast<double>(channel % 4) * 90.0, -1});
+    }
+
+    SpatialZoneMapper mapper(zones, 0.5, calibrations, true);
+    domain::WorldFrame frame;
+    frame.objects = {{10, veda::ObjectClass::Human, {-1.0, 0.0}}};
+    mapper.assign(frame);
+    ASSERT_EQ(frame.objects[0].zoneId, 1);
+
+    frame.objects.clear();
+    mapper.assign(frame);
+
+    frame.objects = {{10, veda::ObjectClass::Human, {0.2, 0.0}}};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 1);
+}
+
+TEST(AppConfigTest, StartupValidationRequiresCompleteZonesAndCalibrations) {
+    AppConfig config;
+    config.channelCount = 8;
+    config.directionalZoneMapping = true;
+    for (int channel = 0; channel < config.channelCount; ++channel) {
+        config.zones.push_back({channel, channel < 4 ? 0.0 : 12.785, channel < 4 ? 10.0 : 22.785, 0.0, 10.0});
+        config.cameraCalibrations.push_back(
+            {channel, channel < 4 ? -50.0 : 50.0, 0.0, static_cast<double>(channel % 4) * 90.0, -1});
+    }
+
+    EXPECT_NO_THROW(config.validateForStartup());
+
+    config.cameraCalibrations.pop_back();
+    EXPECT_THROW(config.validateForStartup(), std::invalid_argument);
+    config.cameraCalibrations.push_back({7, 50.0, 0.0, 270.0, -1});
+    config.zones.pop_back();
+    EXPECT_THROW(config.validateForStartup(), std::invalid_argument);
+}
+
+TEST(AppConfigTest, DirectionalMappingRequiresOneSharedSquarePerCctv) {
+    AppConfig config;
+    config.channelCount = 8;
+    config.directionalZoneMapping = true;
+    for (int channel = 0; channel < config.channelCount; ++channel) {
+        config.zones.push_back({channel, channel < 4 ? 0.0 : 12.785, channel < 4 ? 10.0 : 22.785, 0.0, 10.0});
+        config.cameraCalibrations.push_back(
+            {channel, channel < 4 ? 5.0 : 17.785, 5.0, static_cast<double>(channel % 4) * 90.0, -1});
+    }
+
+    EXPECT_NO_THROW(config.validateForStartup());
+
+    config.zones[1].maxX = 9.0;
+    EXPECT_THROW(config.validateForStartup(), std::invalid_argument);
+}
+
+TEST(ZoneMapperEquivalenceTest, DirectionalMappingDropsObjectsOutsideActiveCoverage) {
+    std::vector<SpatialZone> zones;
+    std::vector<CameraCalibration> calibrations;
+    for (int channel = 0; channel < 8; ++channel) {
+        zones.push_back({channel, channel < 4 ? 0.0 : 12.785, channel < 4 ? 10.0 : 22.785, 0.0, 10.0});
+        calibrations.push_back({channel, channel < 4 ? 5.0 : 17.785, 5.0, static_cast<double>(channel % 4) * 90.0, -1});
+    }
+
+    SpatialZoneMapper mapper(zones, 0.7, calibrations, true);
+    domain::WorldFrame frame;
+    frame.objects = {
+        {1, veda::ObjectClass::Human, {5.0, 7.5}},      {2, veda::ObjectClass::Human, {7.5, 5.0}},
+        {3, veda::ObjectClass::Human, {5.0, 2.5}},      {4, veda::ObjectClass::Human, {2.5, 5.0}},
+        {5, veda::ObjectClass::Human, {17.785, 7.5}},   {6, veda::ObjectClass::Human, {20.285, 5.0}},
+        {7, veda::ObjectClass::Human, {17.785, 2.5}},   {8, veda::ObjectClass::Human, {15.285, 5.0}},
+        {9, veda::ObjectClass::Human, {4.122, 11.498}}, {10, veda::ObjectClass::Human, {16.907, 11.498}},
+        {11, veda::ObjectClass::Human, {11.0, 5.0}},
+    };
+
+    mapper.assign(frame);
+
+    ASSERT_EQ(frame.objects.size(), 8U);
+    for (std::size_t index = 0; index < frame.objects.size(); ++index) {
+        EXPECT_EQ(frame.objects[index].zoneId, static_cast<veda::ChannelId>(index));
+    }
+}
+
+TEST(ZoneMapperEquivalenceTest, DirectionalHysteresisKeepsPreviousZoneNearBoundary) {
+    const std::vector<SpatialZone> zones = {
+        {0, -100.0, 100.0, -100.0, 100.0},
+        {1, -100.0, 100.0, -100.0, 100.0},
+        {2, -100.0, 100.0, -100.0, 100.0},
+        {3, -100.0, 100.0, -100.0, 100.0},
+    };
+    SpatialZoneMapper mapper(zones, 0.5);
+    domain::WorldFrame frame;
+    frame.objects = {{1, veda::ObjectClass::Human, {1.0, 2.0}}};
+
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 0);
+
+    frame.objects[0].pos = {1.1, 1.0};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 0);
+
+    frame.objects[0].pos = {2.0, 1.0};
+    mapper.assign(frame);
+    EXPECT_EQ(frame.objects[0].zoneId, 1);
+}
+
+TEST(ZoneMapperEquivalenceTest, ConfigKeepsDirectionalZonesWhenLegacyBoundsAreInvalid) {
+    const auto path = std::filesystem::temp_directory_path() / "veda_directional_zone_config.json";
+    {
+        std::ofstream file(path);
+        file << R"({"channelCount":4,"zones":[
+            {"zoneId":0,"minX":-100,"maxX":100,"minY":0,"maxY":-100},
+            {"zoneId":1,"minX":0,"maxX":100,"minY":-100,"maxY":100},
+            {"zoneId":2,"minX":-100,"maxX":100,"minY":0,"maxY":100},
+            {"zoneId":3,"minX":-100,"maxX":0,"minY":-100,"maxY":100}]})";
+    }
+
+    const AppConfig config = AppConfig::load(path.string());
+    std::filesystem::remove(path);
+
+    ASSERT_EQ(config.zones.size(), 4U);
+    EXPECT_EQ(config.zones[0].zoneId, 0);
 }
 
 TEST(ZoneMapperEquivalenceTest, WarmAssignPathDoesNotAllocate) {

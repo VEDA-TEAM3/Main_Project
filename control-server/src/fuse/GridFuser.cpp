@@ -27,8 +27,7 @@ std::int32_t cellCoord(double value, double cellSize) {
 
 /// @brief (cx, cy) 셀을 버킷 인덱스로 해시 (Teschner et al. spatial hashing). mask = kBucketCount-1
 std::uint32_t cellHash(std::int32_t cx, std::int32_t cy, std::uint32_t mask) {
-    const std::uint32_t h =
-        (static_cast<std::uint32_t>(cx) * 73856093u) ^ (static_cast<std::uint32_t>(cy) * 19349663u);
+    const std::uint32_t h = (static_cast<std::uint32_t>(cx) * 73856093u) ^ (static_cast<std::uint32_t>(cy) * 19349663u);
     return h & mask;
 }
 
@@ -38,8 +37,7 @@ bool canRepresentCell(double value, double cellSize) {
         return false;
     }
     const double coordinate = std::floor(value / cellSize);
-    return std::isfinite(coordinate) &&
-           coordinate >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
+    return std::isfinite(coordinate) && coordinate >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
            coordinate <= static_cast<double>(std::numeric_limits<std::int32_t>::max());
 }
 
@@ -58,10 +56,9 @@ std::uint64_t channelBit(veda::ChannelId ch) {
  * 원시 좌표 방향으로 따라가되 출력과 원시 좌표 사이 거리가 정확히 radius 가 되게 한다.
  * 따라서 EMA처럼 속도에 따라 시간 지연이 계속 누적되지 않고 공간 오차 상한이 radius 로 제한된다.
  */
-domain::WorldPoint stabilizePosition(const domain::WorldPoint& previous, const domain::WorldPoint& raw,
-                                     double radius) {
-    if (!(radius > 0.0) || !std::isfinite(previous.x) || !std::isfinite(previous.y) ||
-        !std::isfinite(raw.x) || !std::isfinite(raw.y)) {
+domain::WorldPoint stabilizePosition(const domain::WorldPoint& previous, const domain::WorldPoint& raw, double radius) {
+    if (!(radius > 0.0) || !std::isfinite(previous.x) || !std::isfinite(previous.y) || !std::isfinite(raw.x) ||
+        !std::isfinite(raw.y)) {
         return raw;
     }
 
@@ -83,9 +80,8 @@ GridFuser::GridFuser(std::shared_ptr<IDistanceMetric> metric, double dedupMergeD
       dedupMergeDistance_(dedupMergeDistance),
       cellSize_(dedupMergeDistance > 0.0 ? dedupMergeDistance : 1.0),
       trackMaxDistance_(trackMaxDistance),
-      positionJitterRadius_(std::isfinite(positionJitterRadius) && positionJitterRadius > 0.0
-                                ? positionJitterRadius
-                                : 0.0),
+      positionJitterRadius_(std::isfinite(positionJitterRadius) && positionJitterRadius > 0.0 ? positionJitterRadius
+                                                                                              : 0.0),
       nextGlobalId_(1) {}
 
 std::size_t GridFuser::ufFind(std::size_t x) {
@@ -99,14 +95,12 @@ std::size_t GridFuser::ufFind(std::size_t x) {
 domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& frames) {
     domain::WorldFrame worldFrame;
 
-    if (frames.empty()) {
-        return worldFrame;
+    if (!frames.empty()) {
+        const auto maxTimestampIt = std::max_element(
+            frames.begin(), frames.end(),
+            [](const domain::ObservationFrame& a, const domain::ObservationFrame& b) { return a.ts < b.ts; });
+        worldFrame.timestamp = maxTimestampIt->ts;
     }
-
-    auto maxTimestampIt = std::max_element(
-        frames.begin(), frames.end(),
-        [](const domain::ObservationFrame& a, const domain::ObservationFrame& b) { return a.ts < b.ts; });
-    worldFrame.timestamp = maxTimestampIt->ts;
     const std::uint64_t motionFrame = ++motionFrame_;
 
     // --- 후보 수집 (재사용 버퍼) ---
@@ -159,7 +153,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
         if (buckets_.empty()) {
             buckets_.resize(kBucketCount);  // 큰 프레임이 실제로 들어올 때 한 번만 할당
         }
-        
+
         // 2) 후보를 셀 버킷에 삽입
         for (std::uint32_t i = 0; i < n; ++i) {
             const std::int32_t cx = cellCoord(candidates_[i].pos.x, cellSize_);
@@ -323,12 +317,6 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             const double elapsedFrames = static_cast<double>(motionFrame - tracked.lastMotionFrame);
             double dx = tracked.motionDelta.x * elapsedFrames;
             double dy = tracked.motionDelta.y * elapsedFrames;
-            const double displacement = std::hypot(dx, dy);
-            if (displacement > trackMaxDistance_) {
-                const double scale = trackMaxDistance_ / displacement;
-                dx *= scale;
-                dy *= scale;
-            }
             predicted.x += dx;
             predicted.y += dy;
             return predicted;
@@ -374,7 +362,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 const double predictedDistance =
                     metric_->calculate(fusedObjects[c].pos, predictPosition(trackIt->second));
                 if (!std::isfinite(rawDistance) || !std::isfinite(predictedDistance) ||
-                    rawDistance > trackMaxDistance_) {
+                    predictedDistance > trackMaxDistance_) {
                     continue;
                 }
 
@@ -390,8 +378,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                     const double otherPredictedDistance =
                         metric_->calculate(fusedObjects[c].pos, predictPosition(otherTrack));
                     if (std::isfinite(otherRawDistance) && std::isfinite(otherPredictedDistance) &&
-                        otherRawDistance <= trackMaxDistance_ &&
-                        otherPredictedDistance + ambiguityMargin < predictedDistance) {
+                        otherRawDistance <= trackMaxDistance_ && otherPredictedDistance < predictedDistance) {
                         contradictedByMotion = true;
                         break;
                     }
@@ -424,22 +411,21 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
                 const double rawDistance = metric_->calculate(fusedObjects[c].pos, tracked.rawPos);
                 const double predictedDistance = metric_->calculate(fusedObjects[c].pos, predictPosition(tracked));
                 if (!std::isfinite(rawDistance) || !std::isfinite(predictedDistance) ||
-                    rawDistance > trackMaxDistance_) {
+                    predictedDistance > trackMaxDistance_) {
                     continue;
                 }
                 matchCandidates.push_back({predictedDistance, c, gid});
             }
         }
-        std::sort(matchCandidates.begin(), matchCandidates.end(),
-                  [](const MatchCandidate& a, const MatchCandidate& b) {
-                      if (a.dist != b.dist) {
-                          return a.dist < b.dist;
-                      }
-                      if (a.curIdx != b.curIdx) {
-                          return a.curIdx < b.curIdx;
-                      }
-                      return a.gid < b.gid;
-                  });
+        std::sort(matchCandidates.begin(), matchCandidates.end(), [](const MatchCandidate& a, const MatchCandidate& b) {
+            if (a.dist != b.dist) {
+                return a.dist < b.dist;
+            }
+            if (a.curIdx != b.curIdx) {
+                return a.curIdx < b.curIdx;
+            }
+            return a.gid < b.gid;
+        });
 
         for (const auto& match : matchCandidates) {
             if (curMatched[match.curIdx] || claimedGids.count(match.gid)) {
@@ -477,8 +463,7 @@ domain::WorldFrame GridFuser::fuse(const std::vector<domain::ObservationFrame>& 
             TrackedEntity& entity = entityIt->second;
             if (inserted || !ambiguousMatches[i]) {
                 if (!inserted && motionFrame > entity.lastMotionFrame && std::isfinite(entity.rawPos.x) &&
-                    std::isfinite(entity.rawPos.y) && std::isfinite(rawPosition.x) &&
-                    std::isfinite(rawPosition.y)) {
+                    std::isfinite(entity.rawPos.y) && std::isfinite(rawPosition.x) && std::isfinite(rawPosition.y)) {
                     const double elapsedFrames = static_cast<double>(motionFrame - entity.lastMotionFrame);
                     entity.motionDelta.x = (rawPosition.x - entity.rawPos.x) / elapsedFrames;
                     entity.motionDelta.y = (rawPosition.y - entity.rawPos.y) / elapsedFrames;
