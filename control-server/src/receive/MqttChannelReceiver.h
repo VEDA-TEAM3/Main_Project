@@ -61,6 +61,8 @@ public:
     std::uint64_t droppedCount() const noexcept;
 
 private:
+    friend class MqttChannelReceiverTestPeer;
+
     bool tryConnect() noexcept;
     void retryLoop() noexcept;
 
@@ -105,7 +107,7 @@ private:
     std::mutex queueMutex_;
     std::condition_variable queueCv_;
     std::deque<RawMessage> queue_;  ///< queueMutex_ 로 보호
-    std::size_t queuedBytes_ = 0;    ///< queueMutex_ 로 보호 (topic + payload 합계)
+    std::size_t queuedBytes_ = 0;   ///< queueMutex_ 로 보호 (topic + payload 합계)
     bool queueStopping_ = false;    ///< queueMutex_ 로 보호
     std::thread pipelineThread_;
     std::atomic_uint64_t queueDroppedCount_{0};

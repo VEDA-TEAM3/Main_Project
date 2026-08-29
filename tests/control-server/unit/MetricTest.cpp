@@ -39,11 +39,19 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 }  // namespace
 
 void* operator new(std::size_t n) {
-    if (g_allocCounting) ++g_allocCount;
+    if (g_allocCounting)
+        ++g_allocCount;
     void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) throw std::bad_alloc();
+    if (p == nullptr)
+        throw std::bad_alloc();
     return p;
 }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    if (g_allocCounting)
+        ++g_allocCount;
+    return std::malloc(n != 0 ? n : 1);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
@@ -164,11 +172,13 @@ TEST(MetricTest, ConcurrentCallsAreSafeAndConsistent) {
     for (int t = 0; t < kThreads; ++t) {
         workers.emplace_back([&m, &mismatches, t] {
             for (int i = 0; i < kIters; ++i) {
-                if (m.calculate(pt(0.0, 0.0), pt(3.0, 4.0)) != 5.0) ++mismatches[static_cast<std::size_t>(t)];
+                if (m.calculate(pt(0.0, 0.0), pt(3.0, 4.0)) != 5.0)
+                    ++mismatches[static_cast<std::size_t>(t)];
             }
         });
     }
-    for (auto& w : workers) w.join();
+    for (auto& w : workers)
+        w.join();
 
     for (int t = 0; t < kThreads; ++t) {
         EXPECT_EQ(mismatches[static_cast<std::size_t>(t)], 0) << "스레드 " << t << " 에서 값이 흔들림";

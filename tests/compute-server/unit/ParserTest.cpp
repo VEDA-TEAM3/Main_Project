@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -93,6 +94,33 @@ TEST(ParserTest, ParsesParentAttributeForBlurObjects) {
     EXPECT_EQ(frame.objects[0].cls, veda::ObjectClass::Head);
 }
 
+TEST(ParserTest, PreservesFaceOriginWhenNormalizingToHead) {
+    OnvifParser parser;
+    const auto frame = parser.parse(makePacket(makeFrame(makeObject(1, "FACE") + makeObject(2, "Head"))));
+
+    ASSERT_EQ(frame.objects.size(), 2u);
+    EXPECT_EQ(frame.objects[0].cls, veda::ObjectClass::Head);
+    EXPECT_TRUE(frame.objects[0].isFace);
+    EXPECT_EQ(frame.objects[1].cls, veda::ObjectClass::Head);
+    EXPECT_FALSE(frame.objects[1].isFace);
+}
+
+TEST(ParserTest, ParentObjectWithoutTypeIsKeptAsUnknownForSafeBlurFallback) {
+    OnvifParser parser;
+    const std::string object =
+        "<tt:Object ObjectId=\"7\" Parent=\"5\">"
+        "<tt:Appearance><tt:Shape>"
+        "<tt:BoundingBox left=\"10\" top=\"10\" right=\"20\" bottom=\"20\"/>"
+        "</tt:Shape></tt:Appearance></tt:Object>";
+
+    const auto frame = parser.parse(makePacket(makeFrame(object)));
+
+    ASSERT_EQ(frame.objects.size(), 1U);
+    EXPECT_TRUE(frame.objects.front().parentId.has_value());
+    EXPECT_EQ(frame.objects.front().cls, veda::ObjectClass::Unknown);
+    EXPECT_TRUE(veda::isBlurOutputClass(frame.objects.front().cls));
+}
+
 // ============================================================================
 // 2. 구조적 면역 — XXE / Billion Laughs / 재귀
 // ============================================================================
@@ -137,9 +165,11 @@ TEST(ParserTest, DeeplyNestedXmlDoesNotOverflowStack) {
     // 파서는 재귀를 쓰지 않으므로 중첩 깊이는 스택에 영향을 주지 않는다.
     OnvifParser parser;
     std::string deep;
-    for (int i = 0; i < 20000; ++i) deep += "<a>";
+    for (int i = 0; i < 20000; ++i)
+        deep += "<a>";
     deep += makeFrame(makeObject(1, "Human"));
-    for (int i = 0; i < 20000; ++i) deep += "</a>";
+    for (int i = 0; i < 20000; ++i)
+        deep += "</a>";
 
     const auto frame = parser.parse(makePacket(deep));  // 크래시하지 않아야 함
     EXPECT_EQ(frame.objects.size(), 1u);
@@ -171,7 +201,8 @@ TEST(ParserTest, MalformedInputsReturnEmptyFrameWithoutThrowing) {
         EXPECT_NO_THROW({
             const auto frame = parser.parse(makePacket(c.xml));
             EXPECT_TRUE(frame.objects.empty()) << c.name << " 는 빈 프레임을 반환해야 함";
-        }) << c.name << " 에서 예외가 발생하면 안 됨 (파이프라인 스레드 보호)";
+        }) << c.name
+           << " 에서 예외가 발생하면 안 됨 (파이프라인 스레드 보호)";
     }
 }
 
@@ -189,9 +220,8 @@ TEST(ParserTest, EmbeddedNullBytesDoNotTruncateScanning) {
 
 TEST(ParserTest, ObjectMissingIdOrBboxIsSkippedButFrameSurvives) {
     OnvifParser parser;
-    const std::string objects =
-        "<tt:Object><tt:Class><tt:Type>Human</tt:Type></tt:Class></tt:Object>"  // ObjectId 없음
-        + makeObject(2, "Vehicle");                                             // 정상
+    const std::string objects = "<tt:Object><tt:Class><tt:Type>Human</tt:Type></tt:Class></tt:Object>"  // ObjectId 없음
+                                + makeObject(2, "Vehicle");                                             // 정상
 
     const auto frame = parser.parse(makePacket(makeFrame(objects)));
 
@@ -207,19 +237,20 @@ TEST(ParserTest, W3_ObjectCountIsCappedAtMaxObjectsPerFrame) {
     OnvifParser parser;
     std::string objects;
     const int flood = static_cast<int>(kMaxObjectsPerFrame) + 200;  // 상한을 크게 초과
-    for (int i = 0; i < flood; ++i) objects += makeObject(i + 1, "Human");
+    for (int i = 0; i < flood; ++i)
+        objects += makeObject(i + 1, "Human");
 
     const auto frame = parser.parse(makePacket(makeFrame(objects)));
 
-    EXPECT_LE(frame.objects.size(), kMaxObjectsPerFrame)
-        << "[W3] 증폭 페이로드가 상한을 넘어 메모리를 부풀리면 안 됨";
+    EXPECT_LE(frame.objects.size(), kMaxObjectsPerFrame) << "[W3] 증폭 페이로드가 상한을 넘어 메모리를 부풀리면 안 됨";
     EXPECT_EQ(frame.objects.size(), kMaxObjectsPerFrame) << "상한까지는 정상적으로 채워야 함";
 }
 
 TEST(ParserTest, W3_UnderCapAllObjectsAreParsed) {
     OnvifParser parser;
     std::string objects;
-    for (int i = 0; i < 10; ++i) objects += makeObject(i + 1, "Human");
+    for (int i = 0; i < 10; ++i)
+        objects += makeObject(i + 1, "Human");
 
     const auto frame = parser.parse(makePacket(makeFrame(objects)));
     EXPECT_EQ(frame.objects.size(), 10u) << "상한 이하에서는 잘리면 안 됨";
@@ -287,4 +318,90 @@ TEST(ParserTest, InteriorBoxHasNoEdgeFlags) {
     ASSERT_EQ(frame.objects.size(), 1u);
     EXPECT_FALSE(frame.objects[0].bottomTruncated);
     EXPECT_FALSE(frame.objects[0].touchesBorder);
+}
+
+TEST(ContractSecurityTest, OversizedOrDeepJsonIsRejected) {
+    std::string oversized(veda::kMaxJsonPayloadBytes + 1, ' ');
+    EXPECT_EQ(veda::decode<veda::TopViewFrame>(oversized).v, 0);
+
+    std::string deep = "{\"v\":1,\"objects\":[],\"extra\":";
+    deep.append(static_cast<std::size_t>(veda::kMaxJsonDepth + 2), '[');
+    deep += '0';
+    deep.append(static_cast<std::size_t>(veda::kMaxJsonDepth + 2), ']');
+    deep += '}';
+    EXPECT_EQ(veda::decode<veda::TopViewFrame>(deep).v, 0);
+}
+
+TEST(ContractSecurityTest, OversizedObjectArrayIsRejectedFailClosed) {
+    nlohmann::json json{{"v", veda::kSchemaVersion}, {"ts", 1}, {"ch", 0}};
+    json["objects"] = nlohmann::json::array();
+    for (std::size_t i = 0; i <= veda::kMaxObjectsPerMessage; ++i) {
+        json["objects"].push_back({{"id", i}, {"cls", "Human"}, {"pos", {{"x", 0.0}, {"y", 0.0}}}});
+    }
+
+    EXPECT_EQ(veda::decode<veda::TopViewFrame>(json.dump()).v, 0);
+}
+
+TEST(ContractSerializationTest, NonFiniteCoordinatesRemainValidJson) {
+    veda::TopViewFrame frame;
+    frame.objects.push_back({.pos = {.x = std::numeric_limits<double>::quiet_NaN(), .y = 1.0}});
+
+    std::string payload;
+    veda::encodeInto(frame, payload);
+
+    EXPECT_FALSE(nlohmann::json::parse(payload, nullptr, false).is_discarded());
+    EXPECT_EQ(veda::decode<veda::TopViewFrame>(payload).objects.front().pos.x, 0.0);
+}
+
+TEST(ParserBoundaryTest, UtcTimeMustMatchTheExactUtcMillisecondFormat) {
+    OnvifParser parser;
+    const std::vector<std::string> invalidTimes = {
+        "2026/07/27 12:00:00.000Z",
+        "2026-07-27T12:00:00.000",
+        "2026-07-27T12:00:00.000Zjunk",
+        "2026-07-32T12:00:00.000Z",
+    };
+
+    for (const auto& utc : invalidTimes) {
+        const auto frame = parser.parse(makePacket(makeFrame(makeObject(1, "Human"), utc)));
+        EXPECT_EQ(frame.utcTime, 0) << "잘못된 UtcTime이 허용됨: " << utc;
+        EXPECT_TRUE(frame.objects.empty()) << "잘못된 시각의 프레임은 fail-closed 해야 함: " << utc;
+    }
+}
+
+TEST(ParserBoundaryTest, NumericAttributesRequireFullStringConsumption) {
+    OnvifParser parser;
+    const std::string invalidId =
+        "<tt:Object ObjectId=\"1junk\">"
+        "<tt:Appearance><tt:Shape>"
+        "<tt:BoundingBox left=\"100\" top=\"100\" right=\"200\" bottom=\"400\"/>"
+        "</tt:Shape><tt:Class><tt:Type>Human</tt:Type></tt:Class></tt:Appearance>"
+        "</tt:Object>";
+    const std::string invalidCoordinate =
+        "<tt:Object ObjectId=\"2\">"
+        "<tt:Appearance><tt:Shape>"
+        "<tt:BoundingBox left=\"100junk\" top=\"100\" right=\"200\" bottom=\"400\"/>"
+        "</tt:Shape><tt:Class><tt:Type>Human</tt:Type></tt:Class></tt:Appearance>"
+        "</tt:Object>";
+
+    const auto frame =
+        parser.parse(makePacket(makeFrame(invalidId + invalidCoordinate + makeObject(3, "Vehicle"))));
+
+    ASSERT_EQ(frame.objects.size(), 1U);
+    EXPECT_EQ(frame.objects.front().id, 3);
+}
+
+TEST(ParserBoundaryTest, InvertedBoundingBoxIsRejected) {
+    OnvifParser parser;
+    const std::string inverted =
+        "<tt:Object ObjectId=\"1\">"
+        "<tt:Appearance><tt:Shape>"
+        "<tt:BoundingBox left=\"300\" top=\"400\" right=\"200\" bottom=\"100\"/>"
+        "</tt:Shape><tt:Class><tt:Type>Human</tt:Type></tt:Class></tt:Appearance>"
+        "</tt:Object>";
+
+    const auto frame = parser.parse(makePacket(makeFrame(inverted + makeObject(2, "Vehicle"))));
+
+    ASSERT_EQ(frame.objects.size(), 1U);
+    EXPECT_EQ(frame.objects.front().id, 2);
 }

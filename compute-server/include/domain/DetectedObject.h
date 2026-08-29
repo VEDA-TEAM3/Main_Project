@@ -21,6 +21,7 @@ struct DetectedObject {
     ObjectId id = 0;                                     ///< ObjectId (CCTV Channel에서만 유일)
     std::optional<ObjectId> parentId;                    ///< ParentId (Head/LicensePlate만 값을 가짐)
     veda::ObjectClass cls = veda::ObjectClass::Unknown;  ///< ObjectType
+    bool isFace = false;                                 ///< 원본 Type이 Face인지 여부 (wire 미노출)
     NormBox box;                                         ///< 정규화 이미지 좌표
     bool touchesBorder = false;  ///< bbox가 프레임 경계(어느 변이든)에 닿음 여부
 

@@ -71,10 +71,23 @@ veda_add_unit_test(MapperTest
 veda_add_unit_test(NetworkTest
     ${COMPUTE_DIR}/src/network/RtspClientV2.cpp
 )
-target_link_libraries(NetworkTest PRIVATE OpenSSL::Crypto)
+target_link_libraries(NetworkTest PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 
 veda_add_unit_test(SourceTest
     ${COMPUTE_DIR}/src/source/RtspOnvifSourceV2.cpp
     ${COMPUTE_DIR}/src/network/RtspClientV2.cpp
 )
-target_link_libraries(SourceTest PRIVATE OpenSSL::Crypto)
+target_link_libraries(SourceTest PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+
+veda_add_unit_test(AppConfigTest)
+
+veda_add_unit_test(PipelineTest
+    ${COMPUTE_DIR}/src/core/Pipeline.cpp
+    ${COMPUTE_DIR}/src/ground/BottomCenterExtractor.cpp
+    ${COMPUTE_DIR}/src/route/ParentBasedRouter.cpp
+)
+
+veda_add_unit_test(MqttSinkTest
+    ${COMPUTE_DIR}/src/sink/MqttBlurSink.cpp
+    ${COMPUTE_DIR}/src/sink/MqttTopViewSink.cpp
+)

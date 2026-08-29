@@ -1,6 +1,7 @@
-#include "route/ParentBasedRouter.h"
-
+#include <algorithm>
 #include <string>
+
+#include "route/ParentBasedRouter.h"
 
 #include "Contract.h"
 #include "Logger.h"
@@ -21,6 +22,18 @@ void ParentBasedRouter::route(const domain::ChannelFrame& frame, RouteResult& ou
     outResult.risk.reserve(frame.objects.size());
 
     for (const auto& o : frame.objects) {
+        // 같은 parentId의 Head가 있으면 Face 대신 더 넓은 Head만 보낸다.
+        // parentId가 없거나 다르면 동일인을 확정할 수 없으므로 Face를 유지한다.
+        // ponytail: O(N²), 파서 상한 256을 늘릴 때 재사용 가능한 lookup으로 교체한다.
+        const bool hasHeadForSameParent =
+            o.isFace && o.parentId.has_value() &&
+            std::any_of(frame.objects.begin(), frame.objects.end(), [&](const auto& other) {
+                return !other.isFace && other.cls == veda::ObjectClass::Head && other.parentId == o.parentId;
+            });
+        if (hasHeadForSameParent) {
+            continue;
+        }
+
         // parentId 유무와 클래스(Head/LicensePlate) 둘 중 하나만 맞아도 blur로 보냄
         // -- Parent 속성 파싱 실패(parentId 없음)와 Type 문자열 미인식(cls=Unknown) 중
         //    어느 한쪽만 발생해도 나머지 신호로 구제되도록 함 (둘 다 동시에 실패해야 drop)

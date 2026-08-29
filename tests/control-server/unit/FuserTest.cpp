@@ -2,7 +2,7 @@
  * @file    FuserTest.cpp
  * @brief   Fuser 동일성·직접 동작·좌표 안정화를 한 파일에서 검증하는 격리 단위 테스트
  *
- * @details 작은 선형 경로, 96개 이상 그리드 경로, 추적/coasting, 비유한 입력을 고정 시드
+ * @details 작은 선형 경로, 96개 이상 그리드 경로, 추적 유예, 비유한 입력을 고정 시드
  *          500윈도우와 명시 입력으로 검증한다.
  */
 
@@ -162,7 +162,7 @@ std::vector<domain::ObservationFrame> oneObject(veda::TimestampMs timestamp, ved
     return {{timestamp, channel, {{id, objectClass, {x, y}}}}};
 }
 
-TEST(FuserEquivalenceTest, PreservesEdgeCaseSemantics) {
+TEST(FuserEquivalenceTest, PreservesCurrentObservationSemantics) {
     auto metric = makeMetric();
     ConcatFuser baseline(metric, 1.0, 2.0);
     GridFuser optimized(metric, 1.0, 2.0);
@@ -178,23 +178,16 @@ TEST(FuserEquivalenceTest, PreservesEdgeCaseSemantics) {
     };
     expectEquivalent(baseline, optimized, frames);
 
-    // 동일 ObjectId 승계, 거리 fallback, 감지 누락 coasting, 5윈도우 이후 만료를 함께 검증한다.
-    for (int window = 0; window < 8; ++window) {
-        if (window == 1) {
-            frames[0].objects[0].pos.x += 0.1;
-            frames[1].objects[0].id = 99;
-        }
-        if (window >= 2) {
-            frames = {{120 + window, 0, {}}};
-        }
-        expectEquivalent(baseline, optimized, frames);
-    }
+    // 현재 관측이 이어질 때 동일 ObjectId 승계와 거리 fallback 결과도 같아야 한다.
+    frames[0].objects[0].pos.x += 0.1;
+    frames[1].objects[0].id = 99;
+    expectEquivalent(baseline, optimized, frames);
 }
 
-TEST(FuserEquivalenceTest, MatchesBaselineAcrossDeterministicRandomWindows) {
+TEST(FuserEquivalenceTest, MatchesBaselineAcrossRandomWindowsWithoutTracking) {
     auto metric = makeMetric();
-    ConcatFuser baseline(metric, 0.75, 2.0);
-    GridFuser optimized(metric, 0.75, 2.0);
+    ConcatFuser baseline(metric, 0.75, 0.0);
+    GridFuser optimized(metric, 0.75, 0.0);
     std::mt19937_64 random(0x56454441ULL);
 
     for (int window = 0; window < 500; ++window) {
@@ -235,7 +228,7 @@ TEST(GridFuserTest, EmptyInputReturnsDefaultFrame) {
     EXPECT_EQ(result.level, veda::RiskLevel::None);
 }
 
-TEST(GridFuserTest, UsesMinimumTimestampAndAveragesMergedCoordinates) {
+TEST(GridFuserTest, UsesMaximumTimestampAndAveragesMergedCoordinates) {
     GridFuser fuser(makeMetric(), 1.0, 2.0);
     const std::vector<domain::ObservationFrame> frames = {
         {120, 0, {{1, veda::ObjectClass::Human, {0.0, 0.0}}}},
@@ -245,7 +238,7 @@ TEST(GridFuserTest, UsesMinimumTimestampAndAveragesMergedCoordinates) {
     const auto result = fuser.fuse(frames);
 
     ASSERT_EQ(result.objects.size(), 1U);
-    EXPECT_EQ(result.timestamp, 100);
+    EXPECT_EQ(result.timestamp, 120);
     EXPECT_DOUBLE_EQ(result.objects[0].pos.x, 0.3);
     EXPECT_DOUBLE_EQ(result.objects[0].pos.y, 0.4);
     EXPECT_EQ(result.objects[0].sourceChannels.count, 2);
@@ -312,23 +305,105 @@ TEST(GridFuserTest, ExtremeLargeInputFallsBackWithoutCellConversionOverflow) {
     EXPECT_EQ(result.objects.size(), 96U);
 }
 
-TEST(GridFuserTest, ChangedSourceIdUsesDistanceFallbackToPreserveGid) {
+TEST(GridFuserTest, ChangedChannelAndSourceIdUseDistanceFallbackToPreserveGid) {
     GridFuser fuser(makeMetric(), 0.75, 2.0);
     const auto first = fuser.fuse(oneObject(100, 0, 1, veda::ObjectClass::Human, 0.0, 0.0));
-    const auto second = fuser.fuse(oneObject(200, 0, 99, veda::ObjectClass::Human, 0.2, 0.0));
+    const auto second = fuser.fuse(oneObject(200, 1, 99, veda::ObjectClass::Human, 0.2, 0.0));
 
     ASSERT_EQ(first.objects.size(), 1U);
     ASSERT_EQ(second.objects.size(), 1U);
     EXPECT_EQ(first.objects[0].gid, second.objects[0].gid);
 }
 
-TEST(GridFuserTest, CoastsFiveMissedWindowsThenExpiresTrack) {
+TEST(GridFuserTest, PreservesGidsWhenObjectsOverlapAndCross) {
+    GridFuser fuser(makeMetric(), 0.75, 4.0, 0.15);
+    const auto frame = [](veda::TimestampMs timestamp, veda::ObjectId leftId, double leftX,
+                          veda::ObjectId rightId, double rightX) {
+        return std::vector<domain::ObservationFrame>{
+            {timestamp,
+             0,
+             {{leftId, veda::ObjectClass::Human, {leftX, 0.0}},
+              {rightId, veda::ObjectClass::Human, {rightX, 0.0}}}}};
+    };
+
+    const auto first = fuser.fuse(frame(100, 1, -2.0, 2, 2.0));
+    const auto approaching = fuser.fuse(frame(200, 1, -1.0, 2, 1.0));
+    const auto overlapped = fuser.fuse(frame(300, 2, 0.0, 1, 0.0));
+    const auto separated = fuser.fuse(frame(400, 2, 1.0, 1, -1.0));
+
+    ASSERT_EQ(first.objects.size(), 2U);
+    ASSERT_EQ(approaching.objects.size(), 2U);
+    ASSERT_EQ(overlapped.objects.size(), 2U);
+    ASSERT_EQ(separated.objects.size(), 2U);
+    EXPECT_EQ(separated.objects[0].gid, first.objects[0].gid);
+    EXPECT_EQ(separated.objects[1].gid, first.objects[1].gid);
+}
+
+TEST(GridFuserTest, PreservesGidsAcrossDuplicateTimestampsWhenObjectsCross) {
+    GridFuser fuser(makeMetric(), 0.75, 4.0, 0.15);
+    const auto frame = [](veda::ObjectId firstId, double firstX, veda::ObjectId secondId, double secondX) {
+        return std::vector<domain::ObservationFrame>{
+            {100,
+             0,
+             {{firstId, veda::ObjectClass::Human, {firstX, 0.0}},
+              {secondId, veda::ObjectClass::Human, {secondX, 0.0}}}}};
+    };
+
+    const auto first = fuser.fuse(frame(1, -2.0, 2, 2.0));
+    fuser.fuse(frame(1, -1.0, 2, 1.0));
+    fuser.fuse(frame(2, 0.0, 1, 0.0));
+    const auto separated = fuser.fuse(frame(2, 1.0, 1, -1.0));
+
+    ASSERT_EQ(first.objects.size(), 2U);
+    ASSERT_EQ(separated.objects.size(), 2U);
+    EXPECT_EQ(separated.objects[0].gid, first.objects[0].gid);
+    EXPECT_EQ(separated.objects[1].gid, first.objects[1].gid);
+}
+
+TEST(GridFuserTest, PrefersMotionPredictionBeforeSwappedSourceIdsOutsideAmbiguityRadius) {
+    GridFuser fuser(makeMetric(), 0.01, 2.0, 0.15);
+    const auto frame = [](veda::TimestampMs timestamp, veda::ObjectId firstId, double firstX,
+                          veda::ObjectId secondId, double secondX) {
+        return std::vector<domain::ObservationFrame>{
+            {timestamp,
+             0,
+             {{firstId, veda::ObjectClass::Human, {firstX, 0.0}},
+              {secondId, veda::ObjectClass::Human, {secondX, 0.0}}}}};
+    };
+
+    const auto first = fuser.fuse(frame(100, 1, 0.0, 2, 1.0));
+    fuser.fuse(frame(200, 1, 0.275, 2, 0.725));
+    const auto crossed = fuser.fuse(frame(300, 2, 0.58, 1, 0.42));
+
+    ASSERT_EQ(first.objects.size(), 2U);
+    ASSERT_EQ(crossed.objects.size(), 2U);
+    EXPECT_EQ(crossed.objects[0].gid, first.objects[0].gid);
+    EXPECT_EQ(crossed.objects[1].gid, first.objects[1].gid);
+}
+
+TEST(GridFuserTest, ReacquiresMovingTrackAfterMissesUsingElapsedWindowPrediction) {
+    GridFuser fuser(makeMetric(), 0.75, 2.0);
+    fuser.fuse(oneObject(100, 0, 1, veda::ObjectClass::Human, 0.0, 0.0));
+    const auto moving = fuser.fuse(oneObject(200, 0, 1, veda::ObjectClass::Human, 1.0, 0.0));
+    ASSERT_EQ(moving.objects.size(), 1U);
+    const auto gid = moving.objects[0].gid;
+
+    for (int missed = 1; missed <= 5; ++missed) {
+        fuser.fuse({{200 + missed * 100, 0, {}}});
+    }
+
+    const auto reacquired = fuser.fuse(oneObject(800, 1, 99, veda::ObjectClass::Human, 7.0, 0.0));
+    ASSERT_EQ(reacquired.objects.size(), 1U);
+    EXPECT_EQ(reacquired.objects[0].gid, gid);
+}
+
+TEST(GridFuserTest, CoastsTenMissedWindowsThenExpiresTrack) {
     GridFuser fuser(makeMetric(), 0.75, 2.0);
     const auto detected = fuser.fuse(oneObject(100, 0, 1, veda::ObjectClass::Human, 2.0, 3.0));
     ASSERT_EQ(detected.objects.size(), 1U);
     const auto gid = detected.objects[0].gid;
 
-    for (int missed = 1; missed <= 5; ++missed) {
+    for (int missed = 1; missed <= 10; ++missed) {
         const auto coasted = fuser.fuse({{100 + missed * 100, 0, {}}});
         ASSERT_EQ(coasted.objects.size(), 1U) << "missed=" << missed;
         EXPECT_EQ(coasted.objects[0].gid, gid);
@@ -336,8 +411,23 @@ TEST(GridFuserTest, CoastsFiveMissedWindowsThenExpiresTrack) {
         EXPECT_DOUBLE_EQ(coasted.objects[0].pos.y, 3.0);
     }
 
-    const auto expired = fuser.fuse({{700, 0, {}}});
+    const auto expired = fuser.fuse({{1200, 0, {}}});
     EXPECT_TRUE(expired.objects.empty());
+}
+
+TEST(GridFuserTest, EmptyWindowsAdvanceCoastingAndExpireTrack) {
+    GridFuser fuser(makeMetric(), 0.75, 2.0);
+    const auto detected = fuser.fuse(oneObject(100, 0, 1, veda::ObjectClass::Human, 2.0, 3.0));
+    ASSERT_EQ(detected.objects.size(), 1U);
+    const auto gid = detected.objects[0].gid;
+
+    for (int missed = 1; missed <= 10; ++missed) {
+        const auto coasted = fuser.fuse({});
+        ASSERT_EQ(coasted.objects.size(), 1U) << "missed=" << missed;
+        EXPECT_EQ(coasted.objects[0].gid, gid);
+    }
+
+    EXPECT_TRUE(fuser.fuse({}).objects.empty());
 }
 
 TEST(GridFuserTest, NonFiniteCoordinatesDoNotCrash) {

@@ -392,6 +392,7 @@ domain::ChannelFrame OnvifParser::parse(const domain::RawPacket& raw) {
         }
 
         const std::string_view typeText = obj.substr(typeTextStart + 1, typeTextEnd - typeTextStart - 1);
+        det.isFace = veda::detail::equalsIgnoreCaseAscii(typeText, "face");
         det.cls = veda::objectClassFromString(typeText);
 
         if (det.cls == veda::ObjectClass::Unknown) {

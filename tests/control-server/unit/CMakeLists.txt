@@ -29,6 +29,13 @@ endfunction()
 
 find_package(Threads REQUIRED)
 
+veda_add_control_unit_test(DriverProtocolTest)
+
+veda_add_control_unit_test(ControllerTest
+    ${CONTROL_DIR}/src/core/Controller.cpp
+)
+
+
 veda_add_control_unit_test(AggregatorTest
     ${CONTROL_DIR}/src/aggregate/TimeWindowAggregatorV2.cpp
 )
@@ -54,4 +61,26 @@ veda_add_control_unit_test(MetricTest
 veda_add_control_unit_test(RiskTest
     ${CONTROL_DIR}/src/risk/ThresholdRiskPolicy.cpp
     ${CONTROL_DIR}/src/metric/EuclideanMetric.cpp
+)
+
+veda_add_control_unit_test(ParkingPolicyTest
+    ${CONTROL_DIR}/src/parking/StationaryParkingPolicy.cpp
+)
+
+veda_add_control_unit_test(MqttReceiverTest
+    ${CONTROL_DIR}/src/receive/MqttChannelReceiver.cpp
+    ${CONTROL_DIR}/src/sink/MqttTransport.cpp
+)
+target_link_libraries(MqttReceiverTest PRIVATE mosquitto)
+
+veda_add_control_unit_test(PipelineTrajectoryTest
+    ${CONTROL_DIR}/src/aggregate/TimeWindowAggregatorV2.cpp
+    ${CONTROL_DIR}/src/fuse/ConcatFuser.cpp
+    ${CONTROL_DIR}/src/metric/EuclideanMetric.cpp
+    ${CONTROL_DIR}/src/risk/ThresholdRiskPolicy.cpp
+    ${CONTROL_DIR}/src/transform/AffineLocalToWorldTransform.cpp
+)
+
+veda_add_control_unit_test(SerialHwEventDispatcherTest
+    ${CONTROL_DIR}/src/dispatch/SerialHwEventDispatcher.cpp
 )
