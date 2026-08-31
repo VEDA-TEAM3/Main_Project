@@ -195,7 +195,6 @@ globalChannelIndex = areaIndex * 4 + localChannelIndex
 - 환경 변수 `VEDA_RTSP_URL_1`부터 `VEDA_RTSP_URL_N`까지의 URL 재정의
 - 탑뷰 도면의 구역 활성화. 커버리지 격자 6칸 중 앞에서부터 구역 수만큼이 활성 구역(네온 테두리, 채널
   사분면, 장치 상태 칩)이 되고 나머지는 `구역 N · 확장 예정`으로 남습니다
-- 구역별 채널 위험 오버레이와 장치 상태 아이콘
 
 서버는 같은 전역 채널 공식으로 값을 발행해야 하고, 새 구역의 월드 상자는 실제 도면 좌표에 맞춰
 보정해야 합니다.
@@ -445,7 +444,7 @@ Payload 계약과 채널 매핑은 [공통 MQTT 계약](../shared/Contract.h)과
 
 ## 개발 원칙
 
-- UI, 네트워크, 영상, 오버레이, 모델 계층을 분리합니다.
+- UI, 네트워크, 영상, 모델 계층을 분리합니다.
 - GUI 객체는 GUI 스레드에서만 갱신합니다.
 - 새 MQTT 데이터 종류는 `MqttTopicHandler` 구현을 추가해 확장합니다.
 - 새 영상 수신 방식은 `StreamReceiver`와 `StreamReceiverFactory` 구현으로 확장합니다.
